@@ -34,14 +34,6 @@ Download `main.js`, `manifest.json`, and `styles.css` from the same [release](ht
 - URL-title lookup and website-to-note actions can request a URL you supply or a selected website. Built-in rules include sites such as Jinjiang, 52shuku, Fanqie, and Qidian. A site search sends its query to that site. Some desktop extraction fallbacks open the selected site in a hidden webview; Fanqie's fallback may use that site's cookies for a request to its own API. These fallbacks may not work on mobile.
 - The plugin has no analytics or plugin-operated server. Network requests for the above actions go to the relevant websites; vault contents are not sent to a server run by this plugin.
 
-## 中文使用提示
-
-- 在 **设置 → 第三方插件 → Simple Plugin** 中按需启用功能。需要重启的选项会在设置中注明。
-- **快速排版**的“URL 粘贴设置”和“重排版设置”分别控制粘贴链接、手动或粘贴时的重排版。文本中的 URL 自动转链接默认关闭。
-- **日历与日记**可以设置自动提醒写入 Callout 或自定义级别的标题，并分别控制纪念日、假期安排的日历显示和日记提醒。
-- 使用**附件优化**前，先在 Obsidian 的“文件与链接”中指定专用附件文件夹。附件位置为仓库根目录时，插件会禁用扫描和整理功能；清理操作会先显示待处理清单。
-- 网址转笔记的预设输出目录初始可能是仓库根目录，请按自己的分类习惯修改。
-
 ## Build from source
 
 Requires Node.js and npm:
@@ -56,3 +48,56 @@ The build checks TypeScript and writes `main.js`. Keep `main.js`, `manifest.json
 ## License
 
 The plugin source is available under the [MIT License](LICENSE). Bundled dependencies have their own notices in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+---
+
+## 中文说明
+
+Simple Plugin 将日常笔记工具集中到一个 Obsidian 插件中，包括文本排版、URL 处理、日记与日历、网址转笔记、显示增强和附件整理。插件设置界面目前使用中文。
+
+### 功能一览
+
+| 分类 | 功能 |
+| --- | --- |
+| 写作与链接 | 按可配置的规则重排版当前笔记或粘贴的文本；处理粘贴的普通 URL 或 Obsidian 链接；复制当前笔记的链接或路径。URL 粘贴处理与重排版分别设置。 |
+| 快速排版 | 在笔记标题栏添加按钮和快捷菜单，用于执行排版操作。 |
+| 日记与日历 | 创建日记、结转未完成任务、管理周期提醒、纪念日和导入的假期安排。写入日记的提醒可使用自定义级别的标题或 Callout。 |
+| 网址转笔记 | 根据 URL 创建笔记，或在支持的网站中搜索；可编辑网页提取规则和笔记输出目录。 |
+| 阅读与显示 | 预览颜色和 HTML、放大图片、调整图片高度和正文宽度、操作 Mermaid 图表，以及创建双列内容。 |
+| 仓库工具 | 按文件夹筛选 Obsidian 原生搜索结果、根据选定的 Base 视图为新笔记补齐属性，以及检查附件清理和归位方案。 |
+
+各类功能可在 **设置 → 第三方插件 → Simple Plugin** 中配置。部分选项需要重启 Obsidian，设置项会注明。
+
+### 开始使用
+
+1. 按下方说明安装插件，然后在 **设置 → 第三方插件** 中启用 **Simple Plugin**。
+2. 打开 **设置 → 第三方插件 → Simple Plugin**，按需启用功能。
+3. 使用日记前，检查日记文件夹、文件名规则和模板。首次加载时，如果 Obsidian 自带的“日记”插件已有这些设置，Simple Plugin 会沿用它们。
+4. 使用网址转笔记前，选择笔记输出目录并检查网站提取规则。内置分类在未指定输出目录时，最初会将笔记保存到仓库根目录。
+5. 使用附件工具前，在 Obsidian 的 **设置 → 文件与链接** 中为新附件指定专用文件夹。如果当前设置为仓库根目录，插件会提供“快速配置”按钮，把以后新附件的存放目录设为 `Attachment`；它不会移动已有附件。随后在插件设置中打开 **附件优化**，执行操作前先检查待处理清单。附件存放位置为仓库根目录或无法安全识别时，附件扫描与整理功能会被禁用。
+
+#### 手动安装
+
+从同一个[发布版本](https://github.com/ZO00OEY/simple-plugin/releases)下载 `main.js`、`manifest.json` 和 `styles.css`，一起放进仓库的 `.obsidian/plugins/simple-plugin/` 文件夹。然后在 **设置 → 第三方插件** 中启用 **Simple Plugin**。文件夹名必须与插件 ID `simple-plugin` 一致。
+
+### 数据与网络访问
+
+- 插件设置及你在设置中填写的数据由 Obsidian 保存在本地的 `.obsidian/plugins/simple-plugin/data.json`。该文件不包含在本仓库和发布版本中。如需保留配置，请自行私下备份。
+- 启用或使用相应功能时，插件会读取或修改当前仓库中的笔记和附件。清理未引用附件会先显示待处理清单，经确认后才将选中的文件移入 Obsidian 回收站。
+- 提取 URL 标题和网址转笔记功能可能访问你提供的 URL 或所选网站。内置规则涉及晋江、52书库、番茄、起点等网站；站内搜索会把搜索词发送给对应网站。部分桌面端提取流程会在隐藏的网页视图中打开所选网站；番茄的备用流程可能使用该网站的 Cookie 请求其自身接口。这些备用流程在移动端可能不可用。
+- 插件没有统计分析功能，也没有由插件作者运营的服务器。上述联网操作直接访问相关网站；插件不会把仓库内容发送到由本插件运营的服务器。
+
+### 从源码构建
+
+需要先安装 Node.js 和 npm：
+
+```sh
+npm ci
+npm run build
+```
+
+构建命令会检查 TypeScript 并生成 `main.js`。发布时需要同时提供 `main.js`、`manifest.json` 和 `styles.css`。不要将 `data.json`、仓库笔记或 Obsidian 工作区设置提交到公开仓库。
+
+### 许可协议
+
+插件源码采用 [MIT License](LICENSE)。简单说，其他人可以使用、修改和再发布代码，包括商业使用，但分发时需要保留原版权声明和许可文本。插件使用的第三方依赖另有[许可声明](THIRD_PARTY_NOTICES.md)。
