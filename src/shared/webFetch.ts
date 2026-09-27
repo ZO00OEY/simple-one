@@ -106,10 +106,7 @@ function tryWebview(
   return new Promise((resolve) => {
     try {
       const wv = document.createElement("webview") as WebviewElement;
-      wv.setAttribute(
-        "style",
-        "position:fixed;width:1280px;height:800px;top:-10000px;left:-10000px;opacity:0;pointer-events:none;"
-      );
+      wv.classList.add("simple-hidden-webview");
       const cleanup = (value: string | null) => {
         clearTimeout(timer);
         wv.remove();

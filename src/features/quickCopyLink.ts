@@ -165,6 +165,6 @@ function modeIcon(mode: QuickCopyLinkMode): string {
 
 function syncActionButton(plugin: SimplePlugin, action: HTMLElement): void {
   setIcon(action, modeIcon(plugin.settings.enhancements.quickCopyLink.lastMode));
-  action.style.order = "-10";
+  action.addClass("simple-copy-link-action");
   setTooltip(action, actionTitle(plugin));
 }

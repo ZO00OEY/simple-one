@@ -171,6 +171,6 @@ function actionTitle(plugin: SimplePlugin): string {
 
 function syncActionButton(plugin: SimplePlugin, action: HTMLElement): void {
   setIcon(action, REFORMAT_ICON);
-  action.style.order = "-30";
+  action.addClass("simple-reformat-action");
   setTooltip(action, REFORMAT_NAME);
 }

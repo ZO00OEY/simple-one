@@ -27,6 +27,6 @@ export function registerTemplateFillAction(plugin: SimplePlugin): () => void {
 
 function syncActionButton(action: HTMLElement): void {
   setIcon(action, TEMPLATE_FILL_ICON);
-  action.style.order = "-20";
+  action.addClass("simple-template-fill-action");
   setTooltip(action, "快速新建笔记");
 }

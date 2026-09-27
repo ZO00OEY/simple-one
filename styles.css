@@ -2,6 +2,22 @@
    Simple One settings
    ============================================================ */
 
+.simple-quick-format-action { order: -40; }
+.simple-reformat-action { order: -30; }
+.simple-template-fill-action { order: -20; }
+.simple-copy-link-action { order: -10; }
+.simple-quick-format-heading-label { font-weight: 700; }
+.simple-quick-format-colored-icon svg { stroke: currentColor !important; }
+.simple-hidden-webview {
+  position: fixed;
+  width: 1280px;
+  height: 800px;
+  top: -10000px;
+  left: -10000px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .notice-container {
   top: 68px !important;
   right: 12px !important;
@@ -55,7 +71,19 @@
   font-weight: 600;
 }
 
+.simple-section-title .setting-item-name,
+.simple-page-title .setting-item-name {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
 .simple-icon-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.simple-icon-section-title .setting-item-name {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -511,8 +539,11 @@
   margin-bottom: 14px;
 }
 
-.simple-page-header h2 {
+.simple-page-header .simple-page-title {
   margin: 0;
+  flex: 1;
+  font-size: var(--font-ui-large);
+  font-weight: 600;
 }
 
 .simple-back-button,

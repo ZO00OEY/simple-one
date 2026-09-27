@@ -9,6 +9,8 @@ import type { HtmlPreviewRule } from "../types";
 
 export const refreshHtmlPreview = StateEffect.define<void>();
 const toggleHtmlSource = StateEffect.define<number>();
+const inlineHtmlSources = new WeakMap<HTMLElement, Node[]>();
+const previewStyles = new WeakMap<HTMLElement, CSSStyleSheet>();
 
 type HtmlPreviewState = {
   decorations: DecorationSet;
@@ -119,6 +121,10 @@ class HtmlPreviewWidget extends WidgetType {
   ignoreEvent(): boolean {
     return true;
   }
+
+  destroy(dom: HTMLElement): void {
+    clearPreviewStyles(dom);
+  }
 }
 
 function createActionButton(text: string, onPointerDown: (event: Event) => void): HTMLButtonElement {
@@ -220,6 +226,9 @@ export function observeRenderedHtmlPreviews(
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       for (const node of mutation.addedNodes) update(node);
+      for (const node of mutation.removedNodes) {
+        if (node instanceof HTMLElement) clearPreviewStyles(node);
+      }
     }
   });
   observer.observe(root, { childList: true, subtree: true });
@@ -390,6 +399,7 @@ function clearHtmlPreviews(root: HTMLElement): void {
     ? [root]
     : Array.from(root.querySelectorAll<HTMLElement>(".simple-html-preview"));
   previews.forEach((preview) => {
+    clearPreviewStyles(preview);
     const pre = preview.nextElementSibling;
     if (pre instanceof HTMLElement) delete pre.dataset.simpleHtmlPreview;
     preview.remove();
@@ -403,9 +413,8 @@ function decorateInlineHtmlEmbeds(root: HTMLElement, rules: HtmlPreviewRule[] = 
     const html = applyHtmlPreviewRules(raw, rules);
     if (html === raw || !looksLikeHtml(html)) continue;
     embed.dataset.simpleHtmlRulePreview = "true";
-    embed.dataset.simpleHtmlRuleSource = raw;
-    embed.textContent = "";
-    embed.append(renderHtmlPreview(html));
+    inlineHtmlSources.set(embed, Array.from(embed.childNodes));
+    embed.replaceChildren(renderHtmlPreview(html));
   }
 }
 
@@ -414,9 +423,11 @@ function clearInlineHtmlEmbeds(root: HTMLElement): void {
     ? [root]
     : Array.from(root.querySelectorAll<HTMLElement>(".cm-html-embed[data-simple-html-rule-preview='true']"));
   embeds.forEach((embed) => {
-    embed.innerHTML = embed.dataset.simpleHtmlRuleSource ?? embed.innerHTML;
+    clearPreviewStyles(embed);
+    const originalNodes = inlineHtmlSources.get(embed);
+    if (originalNodes) embed.replaceChildren(...originalNodes);
+    inlineHtmlSources.delete(embed);
     delete embed.dataset.simpleHtmlRulePreview;
-    delete embed.dataset.simpleHtmlRuleSource;
   });
 }
 
@@ -455,17 +466,14 @@ function isHtmlCodeBlock(pre: HTMLPreElement): boolean {
 
 function renderHtmlPreview(raw: string): DocumentFragment {
   const doc = new DOMParser().parseFromString(raw, "text/html");
+  const css = Array.from(doc.querySelectorAll("style"))
+    .map((node) => node.textContent ?? "")
+    .join("\n");
   sanitizeDocument(doc);
-  const scope = `simple-html-scope-${Math.random().toString(36).slice(2)}`;
 
   const fragment = document.createDocumentFragment();
-  const style = document.createElement("style");
-  style.textContent = Array.from(doc.querySelectorAll("style"))
-    .map((node) => scopeCss(node.textContent ?? "", scope))
-    .join("\n");
-  fragment.append(style);
-
   const surface = document.createElement("div");
+  const scope = `simple-html-scope-${Math.random().toString(36).slice(2)}`;
   surface.className = `simple-html-preview-surface ${scope}`;
   for (const className of Array.from(doc.body.classList)) {
     surface.classList.add(className);
@@ -474,8 +482,30 @@ function renderHtmlPreview(raw: string): DocumentFragment {
     surface.append(node.cloneNode(true))
   );
   addPreviewInteractions(surface);
+  if (css.trim()) {
+    try {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(scopeCss(css, scope));
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+      previewStyles.set(surface, sheet);
+    } catch {
+      // Invalid CSS must not prevent the HTML preview from rendering.
+    }
+  }
   fragment.append(surface);
   return fragment;
+}
+
+function clearPreviewStyles(root: HTMLElement): void {
+  const surfaces = root.matches(".simple-html-preview-surface")
+    ? [root]
+    : Array.from(root.querySelectorAll<HTMLElement>(".simple-html-preview-surface"));
+  for (const surface of surfaces) {
+    const sheet = previewStyles.get(surface);
+    if (!sheet) continue;
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((current) => current !== sheet);
+    previewStyles.delete(surface);
+  }
 }
 
 function createHtmlPreview(raw: string): HTMLElement {
@@ -513,7 +543,7 @@ function normalizeRulePattern(pattern: string): string {
 }
 
 function sanitizeDocument(doc: Document): void {
-  doc.querySelectorAll("script, iframe, object, embed").forEach((node) => node.remove());
+  doc.querySelectorAll("script, iframe, object, embed, style, link").forEach((node) => node.remove());
   doc.querySelectorAll<HTMLElement>("*").forEach((element) => {
     for (const attr of Array.from(element.attributes)) {
       const name = attr.name.toLowerCase();
@@ -594,8 +624,8 @@ function renderTxPackPanels(wrapper: HTMLElement): void {
   const viewBox = wrapper.querySelector<HTMLElement>(".tx-pack-viewport");
   if (!raw || !tabsBox || !viewBox) return;
 
-  const temp = document.createElement("div");
-  temp.innerHTML = raw;
+  const temp = new DOMParser().parseFromString(raw, "text/html");
+  sanitizeDocument(temp);
   let isFirst = true;
   ["Snapshot", "abstract", "Todo", "seeds", "Events"].forEach((tag) => {
     const content = temp.querySelector(tag)?.innerHTML ??
@@ -609,7 +639,9 @@ function renderTxPackPanels(wrapper: HTMLElement): void {
 
     const panel = document.createElement("div");
     panel.className = `tx-pack-panel${isFirst ? " active" : ""}`;
-    panel.innerHTML = content.trim();
+    const panelDoc = new DOMParser().parseFromString(content.trim(), "text/html");
+    sanitizeDocument(panelDoc);
+    panel.append(...Array.from(panelDoc.body.childNodes).map((node) => node.cloneNode(true)));
 
     tab.addEventListener("click", (event) => {
       event.preventDefault();
@@ -624,6 +656,15 @@ function renderTxPackPanels(wrapper: HTMLElement): void {
     viewBox.append(panel);
     isFirst = false;
   });
+}
+
+function looksLikeHtml(value: string): boolean {
+  return /<\/?[a-z][\s\S]*>/i.test(value);
+}
+
+function unwrapHtmlFence(value: string): string {
+  const match = value.trim().match(/^```(?:html)?\s*\n([\s\S]*?)(?:\n```)?$/i);
+  return match ? match[1] : value;
 }
 
 function scopeCss(css: string, scope: string): string {
@@ -644,13 +685,4 @@ function scopeSelector(selector: string, scope: string): string {
   if (selector.startsWith("html")) return selector.replace(/^html/, `.${scope}`);
   if (selector.startsWith("body")) return selector.replace(/^body/, `.${scope}`);
   return `.${scope} ${selector}`;
-}
-
-function looksLikeHtml(value: string): boolean {
-  return /<\/?[a-z][\s\S]*>/i.test(value);
-}
-
-function unwrapHtmlFence(value: string): string {
-  const match = value.trim().match(/^```(?:html)?\s*\n([\s\S]*?)(?:\n```)?$/i);
-  return match ? match[1] : value;
 }

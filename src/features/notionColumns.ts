@@ -1,7 +1,7 @@
 import { EditorState, Range, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView, ViewPlugin, WidgetType, keymap } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { MarkdownRenderer, MarkdownView, Notice, TFile, addIcon, setIcon, setTooltip } from "obsidian";
+import { Component, MarkdownRenderChild, MarkdownRenderer, MarkdownView, Notice, TFile, addIcon, setIcon, setTooltip } from "obsidian";
 import type SimplePlugin from "../main";
 import type { QuickFormatMode } from "../types";
 import { DEFAULT_COLUMNS_HOTKEY } from "../shared/commandHotkey";
@@ -271,6 +271,7 @@ function relocateInEditor(view: EditorView, from: number, expectedSource: string
 }
 
 class ColumnsSurface {
+  private renderComponent: Component | null = null;
   private draft: Columns;
   private active: ActiveBlock | null = null;
   private columnEditor: { index: number; view: EditorView } | null = null;
@@ -289,6 +290,9 @@ class ColumnsSurface {
   }
 
   private render(): void {
+    this.renderComponent?.unload();
+    this.renderComponent = new Component();
+    this.renderComponent.load();
     this.stageCleanup?.();
     if (this.columnEditor) {
       this.releaseFormatTarget?.();
@@ -611,7 +615,7 @@ class ColumnsSurface {
         column.classList.toggle("simple-columns-delete-target", mode === "delete");
         if (mode !== "reorder") {
           marker.removeClass("is-visible");
-          columns.forEach((item) => { item.style.transform = ""; });
+          columns.forEach((item) => { item.style.removeProperty("transform"); });
           return;
         }
         destination = bounds.findIndex((rect) => x < rect.right);
@@ -635,7 +639,7 @@ class ColumnsSurface {
         caret.remove();
         column.removeClass("simple-columns-dragging");
         column.removeClass("simple-columns-delete-target");
-        columns.forEach((item) => { item.style.transform = ""; });
+        columns.forEach((item) => { item.style.removeProperty("transform"); });
         if (up.type === "pointercancel" || !moved) return;
         if (mode !== "reorder") {
           if (mode === "delete") this.relocate?.(this.getValue(), index, { x: up.clientX, y: up.clientY }, true, "left");
@@ -781,7 +785,7 @@ class ColumnsSurface {
       return;
     }
     const rendered = holder.ownerDocument.createElement("div");
-    void MarkdownRenderer.render(this.plugin.app, source, rendered, this.sourcePath, this.plugin).then(() => {
+    void MarkdownRenderer.render(this.plugin.app, source, rendered, this.sourcePath, this.renderComponent!).then(() => {
       if (this.renderVersion.get(holder) !== version || !holder.isConnected) return;
       holder.replaceChildren(...Array.from(rendered.childNodes));
     });
@@ -798,7 +802,7 @@ class ColumnsSurface {
     this.renderVersion.set(preview, version);
     if (!isImageLine(source)) { preview.empty(); return; }
     const rendered = preview.ownerDocument.createElement("div");
-    void MarkdownRenderer.render(this.plugin.app, source, rendered, this.sourcePath, this.plugin).then(() => {
+    void MarkdownRenderer.render(this.plugin.app, source, rendered, this.sourcePath, this.renderComponent!).then(() => {
       if (this.renderVersion.get(preview) !== version || !preview.isConnected) return;
       preview.replaceChildren(...Array.from(rendered.childNodes));
     });
@@ -826,7 +830,7 @@ class ColumnsSurface {
       if (parts[part] !== next) this.dirty = true;
       parts[part] = next;
       this.draft.content[index] = parts.join("");
-      textarea.style.height = "auto";
+      textarea.style.removeProperty("height");
       textarea.style.height = `${textarea.scrollHeight}px`;
       if (imagePreview) this.renderImagePreview(imagePreview, textarea.value);
     };
@@ -1156,16 +1160,27 @@ class ColumnsSurface {
     }
   }
 
+  destroy(): void {
+    this.renderComponent?.unload();
+    this.renderComponent = null;
+    this.stageCleanup?.();
+    this.releaseFormatTarget?.();
+    this.releaseCommandTarget?.();
+    this.columnEditor?.view.destroy();
+    this.columnEditor = null;
+  }
+
 }
 
 class ColumnsWidget extends WidgetType {
+  private readonly surfaces = new WeakMap<HTMLElement, ColumnsSurface>();
   constructor(private plugin: SimplePlugin, private block: Block) { super(); }
   eq(other: ColumnsWidget): boolean { return other.block.source === this.block.source && other.block.from === this.block.from; }
   toDOM(view: EditorView): HTMLElement {
     const element = document.createElement("div");
     element.dataset.columnsFrom = String(this.block.from);
     const sourcePath = pathForView(this.plugin, view);
-    new ColumnsSurface(this.plugin, sourcePath, this.block.columns, element, (value, drag) => {
+    const surface = new ColumnsSurface(this.plugin, sourcePath, this.block.columns, element, (value, drag) => {
       window.setTimeout(() => {
         if (!view.dom.isConnected) return;
         if (view.state.doc.sliceString(this.block.from, this.block.to) !== this.block.source) { new Notice("列组已变化，请重新编辑"); return; }
@@ -1185,7 +1200,12 @@ class ColumnsWidget extends WidgetType {
         relocateInEditor(view, this.block.from, this.block.source, value, index, point, remove, side, element);
       }, 0);
     });
+    this.surfaces.set(element, surface);
     return element;
+  }
+  destroy(dom: HTMLElement): void {
+    this.surfaces.get(dom)?.destroy();
+    this.surfaces.delete(dom);
   }
   ignoreEvent(): boolean { return true; }
 }
@@ -1257,7 +1277,7 @@ export function registerNotionColumns(plugin: SimplePlugin): void {
     const columns = parse(source);
     if (!columns) { el.setText("列视图格式无效"); return; }
     const file = plugin.app.vault.getAbstractFileByPath(ctx.sourcePath);
-    new ColumnsSurface(plugin, ctx.sourcePath, columns, el, (value, drag) => {
+    const surface = new ColumnsSurface(plugin, ctx.sourcePath, columns, el, (value, drag) => {
       if (!(file instanceof TFile)) return;
       const section = ctx.getSectionInfo(el);
       if (!section) { new Notice("无法定位列组源代码"); return; }
@@ -1327,6 +1347,9 @@ export function registerNotionColumns(plugin: SimplePlugin): void {
         return moveColumnInDocument(text, from, to, value, index, targetPosition, side);
       });
     });
+    const child = new MarkdownRenderChild(el);
+    child.register(() => surface.destroy());
+    ctx.addChild(child);
   });
 
   type SelectionDrag = { view: EditorView; from: number; to: number; selected: string; x: number; y: number };

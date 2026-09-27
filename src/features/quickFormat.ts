@@ -249,7 +249,7 @@ function menuTitle(plugin: SimplePlugin, mode: QuickFormatMode): DocumentFragmen
   label.textContent = modeLabel(plugin, mode);
 
   if (isHeadingMode(mode)) {
-    label.style.fontWeight = "700";
+    label.addClass("simple-quick-format-heading-label");
     label.style.color = getCssVar(`--${mode}-color`, "--text-normal");
   } else if (mode.startsWith("callout-") || mode.startsWith("custom-callout:")) {
     const color = calloutColor(plugin, calloutTypeFromMode(plugin, mode));
@@ -273,7 +273,7 @@ function setMenuItemIconColor(item: unknown, color: string): void {
   const icon = dom?.querySelector<HTMLElement>(".menu-item-icon");
   if (!icon) return;
   icon.style.setProperty("color", color, "important");
-  icon.querySelector<SVGElement>("svg")?.style.setProperty("stroke", "currentColor", "important");
+  icon.addClass("simple-quick-format-colored-icon");
 }
 
 function getCssVar(name: string, fallback: string): string {
@@ -307,7 +307,7 @@ function actionTitle(_plugin: SimplePlugin): string {
 
 function syncActionButton(plugin: SimplePlugin, action: HTMLElement): void {
   setIcon(action, QUICK_FORMAT_ICON);
-  action.style.order = "-40";
+  action.addClass("simple-quick-format-action");
   setTooltip(action, QUICK_FORMAT_NAME);
 }
 

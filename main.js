@@ -13927,6 +13927,8 @@ var import_state2 = require("@codemirror/state");
 var import_view2 = require("@codemirror/view");
 var refreshHtmlPreview = import_state2.StateEffect.define();
 var toggleHtmlSource = import_state2.StateEffect.define();
+var inlineHtmlSources = /* @__PURE__ */ new WeakMap();
+var previewStyles = /* @__PURE__ */ new WeakMap();
 var HtmlPreviewWidget = class extends import_view2.WidgetType {
   constructor(html, from, to, source, expanded) {
     super();
@@ -14011,6 +14013,9 @@ var HtmlPreviewWidget = class extends import_view2.WidgetType {
   ignoreEvent() {
     return true;
   }
+  destroy(dom) {
+    clearPreviewStyles(dom);
+  }
 };
 function createActionButton(text, onPointerDown) {
   const button = document.createElement("button");
@@ -14094,6 +14099,9 @@ function observeRenderedHtmlPreviews(root, isEnabled, getRules = () => []) {
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       for (const node of mutation.addedNodes) update(node);
+      for (const node of mutation.removedNodes) {
+        if (node instanceof HTMLElement) clearPreviewStyles(node);
+      }
     }
   });
   observer.observe(root, { childList: true, subtree: true });
@@ -14237,6 +14245,7 @@ function decorateHtmlPreviews(root, rules = []) {
 function clearHtmlPreviews(root) {
   const previews = root.matches(".simple-html-preview") ? [root] : Array.from(root.querySelectorAll(".simple-html-preview"));
   previews.forEach((preview) => {
+    clearPreviewStyles(preview);
     const pre = preview.nextElementSibling;
     if (pre instanceof HTMLElement) delete pre.dataset.simpleHtmlPreview;
     preview.remove();
@@ -14249,17 +14258,18 @@ function decorateInlineHtmlEmbeds(root, rules = []) {
     const html = applyHtmlPreviewRules(raw, rules);
     if (html === raw || !looksLikeHtml(html)) continue;
     embed.dataset.simpleHtmlRulePreview = "true";
-    embed.dataset.simpleHtmlRuleSource = raw;
-    embed.textContent = "";
-    embed.append(renderHtmlPreview(html));
+    inlineHtmlSources.set(embed, Array.from(embed.childNodes));
+    embed.replaceChildren(renderHtmlPreview(html));
   }
 }
 function clearInlineHtmlEmbeds(root) {
   const embeds = root.matches(".cm-html-embed[data-simple-html-rule-preview='true']") ? [root] : Array.from(root.querySelectorAll(".cm-html-embed[data-simple-html-rule-preview='true']"));
   embeds.forEach((embed) => {
-    embed.innerHTML = embed.dataset.simpleHtmlRuleSource ?? embed.innerHTML;
+    clearPreviewStyles(embed);
+    const originalNodes = inlineHtmlSources.get(embed);
+    if (originalNodes) embed.replaceChildren(...originalNodes);
+    inlineHtmlSources.delete(embed);
     delete embed.dataset.simpleHtmlRulePreview;
-    delete embed.dataset.simpleHtmlRuleSource;
   });
 }
 function findInlineHtmlEmbeds(root) {
@@ -14285,13 +14295,11 @@ function isHtmlCodeBlock(pre) {
 }
 function renderHtmlPreview(raw) {
   const doc = new DOMParser().parseFromString(raw, "text/html");
+  const css = Array.from(doc.querySelectorAll("style")).map((node) => node.textContent ?? "").join("\n");
   sanitizeDocument(doc);
-  const scope = `simple-html-scope-${Math.random().toString(36).slice(2)}`;
   const fragment = document.createDocumentFragment();
-  const style = document.createElement("style");
-  style.textContent = Array.from(doc.querySelectorAll("style")).map((node) => scopeCss(node.textContent ?? "", scope)).join("\n");
-  fragment.append(style);
   const surface = document.createElement("div");
+  const scope = `simple-html-scope-${Math.random().toString(36).slice(2)}`;
   surface.className = `simple-html-preview-surface ${scope}`;
   for (const className of Array.from(doc.body.classList)) {
     surface.classList.add(className);
@@ -14300,8 +14308,26 @@ function renderHtmlPreview(raw) {
     (node) => surface.append(node.cloneNode(true))
   );
   addPreviewInteractions(surface);
+  if (css.trim()) {
+    try {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(scopeCss(css, scope));
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+      previewStyles.set(surface, sheet);
+    } catch {
+    }
+  }
   fragment.append(surface);
   return fragment;
+}
+function clearPreviewStyles(root) {
+  const surfaces = root.matches(".simple-html-preview-surface") ? [root] : Array.from(root.querySelectorAll(".simple-html-preview-surface"));
+  for (const surface of surfaces) {
+    const sheet = previewStyles.get(surface);
+    if (!sheet) continue;
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((current) => current !== sheet);
+    previewStyles.delete(surface);
+  }
 }
 function createHtmlPreview(raw) {
   const preview = document.createElement("span");
@@ -14331,7 +14357,7 @@ function normalizeRulePattern(pattern) {
   return pattern;
 }
 function sanitizeDocument(doc) {
-  doc.querySelectorAll("script, iframe, object, embed").forEach((node) => node.remove());
+  doc.querySelectorAll("script, iframe, object, embed, style, link").forEach((node) => node.remove());
   doc.querySelectorAll("*").forEach((element) => {
     for (const attr of Array.from(element.attributes)) {
       const name2 = attr.name.toLowerCase();
@@ -14395,8 +14421,8 @@ function renderTxPackPanels(wrapper) {
   const tabsBox = wrapper.querySelector(".tx-pack-tabs");
   const viewBox = wrapper.querySelector(".tx-pack-viewport");
   if (!raw || !tabsBox || !viewBox) return;
-  const temp = document.createElement("div");
-  temp.innerHTML = raw;
+  const temp = new DOMParser().parseFromString(raw, "text/html");
+  sanitizeDocument(temp);
   let isFirst = true;
   ["Snapshot", "abstract", "Todo", "seeds", "Events"].forEach((tag) => {
     const content2 = temp.querySelector(tag)?.innerHTML ?? raw.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "i"))?.[1] ?? "";
@@ -14406,7 +14432,9 @@ function renderTxPackPanels(wrapper) {
     tab.textContent = tag.toUpperCase();
     const panel = document.createElement("div");
     panel.className = `tx-pack-panel${isFirst ? " active" : ""}`;
-    panel.innerHTML = content2.trim();
+    const panelDoc = new DOMParser().parseFromString(content2.trim(), "text/html");
+    sanitizeDocument(panelDoc);
+    panel.append(...Array.from(panelDoc.body.childNodes).map((node) => node.cloneNode(true)));
     tab.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -14419,6 +14447,13 @@ function renderTxPackPanels(wrapper) {
     viewBox.append(panel);
     isFirst = false;
   });
+}
+function looksLikeHtml(value) {
+  return /<\/?[a-z][\s\S]*>/i.test(value);
+}
+function unwrapHtmlFence(value) {
+  const match = value.trim().match(/^```(?:html)?\s*\n([\s\S]*?)(?:\n```)?$/i);
+  return match ? match[1] : value;
 }
 function scopeCss(css, scope) {
   return css.replace(/([^{}]+)\{([^{}]*)\}/g, (full, rawSelector, body) => {
@@ -14434,13 +14469,6 @@ function scopeSelector(selector, scope) {
   if (selector.startsWith("html")) return selector.replace(/^html/, `.${scope}`);
   if (selector.startsWith("body")) return selector.replace(/^body/, `.${scope}`);
   return `.${scope} ${selector}`;
-}
-function looksLikeHtml(value) {
-  return /<\/?[a-z][\s\S]*>/i.test(value);
-}
-function unwrapHtmlFence(value) {
-  const match = value.trim().match(/^```(?:html)?\s*\n([\s\S]*?)(?:\n```)?$/i);
-  return match ? match[1] : value;
 }
 
 // src/features/currentNoteLinkConverter.ts
@@ -14562,10 +14590,7 @@ function tryWebview(url, script, timeoutMs) {
   return new Promise((resolve) => {
     try {
       const wv = document.createElement("webview");
-      wv.setAttribute(
-        "style",
-        "position:fixed;width:1280px;height:800px;top:-10000px;left:-10000px;opacity:0;pointer-events:none;"
-      );
+      wv.classList.add("simple-hidden-webview");
       const cleanup = (value) => {
         clearTimeout(timer);
         wv.remove();
@@ -15065,7 +15090,7 @@ function actionTitle(plugin) {
 }
 function syncActionButton(plugin, action) {
   (0, import_obsidian6.setIcon)(action, REFORMAT_ICON);
-  action.style.order = "-30";
+  action.addClass("simple-reformat-action");
   (0, import_obsidian6.setTooltip)(action, REFORMAT_NAME);
 }
 
@@ -15715,7 +15740,7 @@ function modeIcon(mode) {
 }
 function syncActionButton2(plugin, action) {
   (0, import_obsidian9.setIcon)(action, modeIcon(plugin.settings.enhancements.quickCopyLink.lastMode));
-  action.style.order = "-10";
+  action.addClass("simple-copy-link-action");
   (0, import_obsidian9.setTooltip)(action, actionTitle2(plugin));
 }
 
@@ -20463,7 +20488,7 @@ function menuTitle(plugin, mode) {
   const label = document.createElement("span");
   label.textContent = modeLabel(plugin, mode);
   if (isHeadingMode(mode)) {
-    label.style.fontWeight = "700";
+    label.addClass("simple-quick-format-heading-label");
     label.style.color = getCssVar(`--${mode}-color`, "--text-normal");
   } else if (mode.startsWith("callout-") || mode.startsWith("custom-callout:")) {
     const color = calloutColor(plugin, calloutTypeFromMode(plugin, mode));
@@ -20484,7 +20509,7 @@ function setMenuItemIconColor(item, color) {
   const icon = dom?.querySelector(".menu-item-icon");
   if (!icon) return;
   icon.style.setProperty("color", color, "important");
-  icon.querySelector("svg")?.style.setProperty("stroke", "currentColor", "important");
+  icon.addClass("simple-quick-format-colored-icon");
 }
 function getCssVar(name2, fallback) {
   return getComputedStyle(document.body).getPropertyValue(name2).trim() || fallback;
@@ -20512,7 +20537,7 @@ function actionTitle3(_plugin) {
 }
 function syncActionButton3(plugin, action) {
   (0, import_obsidian11.setIcon)(action, QUICK_FORMAT_ICON);
-  action.style.order = "-40";
+  action.addClass("simple-quick-format-action");
   (0, import_obsidian11.setTooltip)(action, QUICK_FORMAT_NAME);
 }
 function visibleModes(plugin) {
@@ -20803,6 +20828,7 @@ var ColumnsSurface = class {
     this.root = root;
     this.save = save;
     this.relocate = relocate;
+    this.renderComponent = null;
     this.active = null;
     this.columnEditor = null;
     this.dirty = false;
@@ -20818,6 +20844,9 @@ var ColumnsSurface = class {
     this.render();
   }
   render() {
+    this.renderComponent?.unload();
+    this.renderComponent = new import_obsidian12.Component();
+    this.renderComponent.load();
     this.stageCleanup?.();
     if (this.columnEditor) {
       this.releaseFormatTarget?.();
@@ -21135,7 +21164,7 @@ var ColumnsSurface = class {
         if (mode !== "reorder") {
           marker.removeClass("is-visible");
           columns.forEach((item) => {
-            item.style.transform = "";
+            item.style.removeProperty("transform");
           });
           return;
         }
@@ -21161,7 +21190,7 @@ var ColumnsSurface = class {
         column.removeClass("simple-columns-dragging");
         column.removeClass("simple-columns-delete-target");
         columns.forEach((item) => {
-          item.style.transform = "";
+          item.style.removeProperty("transform");
         });
         if (up.type === "pointercancel" || !moved) return;
         if (mode !== "reorder") {
@@ -21315,7 +21344,7 @@ var ColumnsSurface = class {
       return;
     }
     const rendered = holder.ownerDocument.createElement("div");
-    void import_obsidian12.MarkdownRenderer.render(this.plugin.app, source, rendered, this.sourcePath, this.plugin).then(() => {
+    void import_obsidian12.MarkdownRenderer.render(this.plugin.app, source, rendered, this.sourcePath, this.renderComponent).then(() => {
       if (this.renderVersion.get(holder) !== version || !holder.isConnected) return;
       holder.replaceChildren(...Array.from(rendered.childNodes));
     });
@@ -21333,7 +21362,7 @@ var ColumnsSurface = class {
       return;
     }
     const rendered = preview.ownerDocument.createElement("div");
-    void import_obsidian12.MarkdownRenderer.render(this.plugin.app, source, rendered, this.sourcePath, this.plugin).then(() => {
+    void import_obsidian12.MarkdownRenderer.render(this.plugin.app, source, rendered, this.sourcePath, this.renderComponent).then(() => {
       if (this.renderVersion.get(preview) !== version || !preview.isConnected) return;
       preview.replaceChildren(...Array.from(rendered.childNodes));
     });
@@ -21360,7 +21389,7 @@ var ColumnsSurface = class {
       if (parts[part] !== next) this.dirty = true;
       parts[part] = next;
       this.draft.content[index] = parts.join("");
-      textarea.style.height = "auto";
+      textarea.style.removeProperty("height");
       textarea.style.height = `${textarea.scrollHeight}px`;
       if (imagePreview) this.renderImagePreview(imagePreview, textarea.value);
     };
@@ -21687,12 +21716,22 @@ var ColumnsSurface = class {
       this.toggleColumnMarkup(view, markers[command2]);
     }
   }
+  destroy() {
+    this.renderComponent?.unload();
+    this.renderComponent = null;
+    this.stageCleanup?.();
+    this.releaseFormatTarget?.();
+    this.releaseCommandTarget?.();
+    this.columnEditor?.view.destroy();
+    this.columnEditor = null;
+  }
 };
 var ColumnsWidget = class extends import_view5.WidgetType {
   constructor(plugin, block) {
     super();
     this.plugin = plugin;
     this.block = block;
+    this.surfaces = /* @__PURE__ */ new WeakMap();
   }
   eq(other) {
     return other.block.source === this.block.source && other.block.from === this.block.from;
@@ -21701,7 +21740,7 @@ var ColumnsWidget = class extends import_view5.WidgetType {
     const element = document.createElement("div");
     element.dataset.columnsFrom = String(this.block.from);
     const sourcePath = pathForView(this.plugin, view);
-    new ColumnsSurface(this.plugin, sourcePath, this.block.columns, element, (value, drag) => {
+    const surface = new ColumnsSurface(this.plugin, sourcePath, this.block.columns, element, (value, drag) => {
       window.setTimeout(() => {
         if (!view.dom.isConnected) return;
         if (view.state.doc.sliceString(this.block.from, this.block.to) !== this.block.source) {
@@ -21724,7 +21763,12 @@ var ColumnsWidget = class extends import_view5.WidgetType {
         relocateInEditor(view, this.block.from, this.block.source, value, index, point, remove, side, element);
       }, 0);
     });
+    this.surfaces.set(element, surface);
     return element;
+  }
+  destroy(dom) {
+    this.surfaces.get(dom)?.destroy();
+    this.surfaces.delete(dom);
   }
   ignoreEvent() {
     return true;
@@ -21800,7 +21844,7 @@ function registerNotionColumns(plugin) {
       return;
     }
     const file = plugin.app.vault.getAbstractFileByPath(ctx.sourcePath);
-    new ColumnsSurface(plugin, ctx.sourcePath, columns, el, (value, drag) => {
+    const surface = new ColumnsSurface(plugin, ctx.sourcePath, columns, el, (value, drag) => {
       if (!(file instanceof import_obsidian12.TFile)) return;
       const section = ctx.getSectionInfo(el);
       if (!section) {
@@ -21887,6 +21931,9 @@ function registerNotionColumns(plugin) {
         return moveColumnInDocument(text, from, to, value, index, targetPosition, side);
       });
     });
+    const child = new import_obsidian12.MarkdownRenderChild(el);
+    child.register(() => surface.destroy());
+    ctx.addChild(child);
   });
   let staged = null;
   const refreshColumns = import_state5.StateEffect.define();
@@ -22484,7 +22531,7 @@ function registerTemplateFillAction(plugin) {
 }
 function syncActionButton4(action) {
   (0, import_obsidian14.setIcon)(action, TEMPLATE_FILL_ICON);
-  action.style.order = "-20";
+  action.addClass("simple-template-fill-action");
   (0, import_obsidian14.setTooltip)(action, "\u5FEB\u901F\u65B0\u5EFA\u7B14\u8BB0");
 }
 
@@ -23814,9 +23861,8 @@ function formatQidianIntro(value) {
   return decodeHtmlText(value).replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").replace(/\r\n?/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 function decodeHtmlText(value) {
-  const textarea = document.createElement("textarea");
-  textarea.innerHTML = value;
-  return textarea.value;
+  const escapedTags = value.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return new DOMParser().parseFromString(escapedTags, "text/html").body.textContent ?? "";
 }
 function cleanSearchAuthor(value) {
   return value.replace(/^作者[:：]\s*/, "").trim();
@@ -25165,7 +25211,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
   renderHtmlPreviewSettings(container) {
     this.renderPageHeader(container, "HTML \u9884\u89C8", () => this.openPage({ type: "display-enhancements" }));
     this.renderSettingCard(container, (card2) => {
-      new import_obsidian17.Setting(card2).setName("\u542F\u7528 HTML \u9884\u89C8").setDesc("\u628A html \u4EE3\u7801\u5757\u6E32\u67D3\u6210\u9884\u89C8\uFF1B\u4FDD\u7559 CSS\uFF0C\u4E0D\u6267\u884C\u811A\u672C\u3002").addToggle(
+      new import_obsidian17.Setting(card2).setName("\u542F\u7528 HTML \u9884\u89C8").setDesc("\u628A HTML \u4EE3\u7801\u5757\u6E32\u67D3\u6210\u9884\u89C8\uFF1B\u652F\u6301\u9884\u89C8\u5185\u7684\u6837\u5F0F\uFF0C\u5FFD\u7565\u811A\u672C\u3002").addToggle(
         (toggle) => toggle.setValue(this.plugin.settings.enableHtmlPreview).onChange(async (value) => {
           this.plugin.settings.enableHtmlPreview = value;
           await this.plugin.saveSettings();
@@ -25401,7 +25447,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
       );
     });
     const heading2 = container.createDiv({ cls: "simple-heading-row" });
-    heading2.createEl("h3", { cls: "simple-section-title", text: "\u53C2\u8003\u6570\u636E\u5E93\u89C4\u5219" });
+    this.renderSectionHeading(heading2, "\u53C2\u8003\u6570\u636E\u5E93\u89C4\u5219");
     const addButton = heading2.createEl("button", { cls: "mod-cta simple-soft-button" });
     addButton.setText("\u65B0\u589E");
     addButton.addEventListener("click", async () => {
@@ -25524,7 +25570,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
       );
     });
     const heading2 = container.createDiv({ cls: "simple-heading-row" });
-    heading2.createEl("h3", { cls: "simple-section-title", text: "\u7F51\u7AD9\u7BA1\u7406" });
+    this.renderSectionHeading(heading2, "\u7F51\u7AD9\u7BA1\u7406");
     const manage = heading2.createEl("button", { cls: "simple-add-button" });
     manage.setText("\u7BA1\u7406\u5206\u7C7B");
     manage.addEventListener("click", () => this.openPage({ type: "category-manager" }));
@@ -25560,7 +25606,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
   renderCategoryManager(container) {
     this.renderPageHeader(container, "\u7BA1\u7406\u5206\u7C7B", () => this.openPage({ type: "template-rules" }));
     const heading2 = container.createDiv({ cls: "simple-heading-row" });
-    heading2.createEl("h3", { cls: "simple-section-title", text: "\u5F53\u524D\u5206\u7C7B" });
+    this.renderSectionHeading(heading2, "\u5F53\u524D\u5206\u7C7B");
     const headingActions = heading2.createDiv({ cls: "simple-heading-actions" });
     const addButton = headingActions.createEl("button", { cls: "mod-cta simple-soft-button" });
     addButton.setText("\u65B0\u589E");
@@ -25676,7 +25722,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
       );
     });
     const heading2 = container.createDiv({ cls: "simple-heading-row" });
-    heading2.createEl("h3", { cls: "simple-section-title", text: "\u7F51\u7AD9\u586B\u5199\u4E0E\u641C\u7D22\u89C4\u5219" });
+    this.renderSectionHeading(heading2, "\u7F51\u7AD9\u586B\u5199\u4E0E\u641C\u7D22\u89C4\u5219");
     const headingActions = heading2.createDiv({ cls: "simple-heading-actions" });
     const addButton = headingActions.createEl("button", { cls: "mod-cta simple-soft-button" });
     addButton.setText("\u65B0\u589E");
@@ -25783,15 +25829,22 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
     }
   }
   renderGroup(container, title, render) {
-    container.createEl("h3", { cls: "simple-section-title", text: title });
+    this.renderSectionHeading(container, title);
     this.renderSettingCard(container, render);
   }
   renderIconGroup(container, icon, title, render) {
-    const heading2 = container.createEl("h3", { cls: "simple-section-title simple-icon-section-title" });
-    const iconEl = heading2.createSpan({ cls: "simple-section-title-icon" });
+    const label = document.createDocumentFragment();
+    const iconEl = document.createElement("span");
+    iconEl.className = "simple-section-title-icon";
     (0, import_obsidian17.setIcon)(iconEl, icon);
-    heading2.createSpan({ text: title });
+    label.append(iconEl, document.createTextNode(title));
+    this.renderSectionHeading(container, label, "simple-icon-section-title");
     this.renderSettingCard(container, render);
+  }
+  renderSectionHeading(container, title, extraClass) {
+    const heading2 = new import_obsidian17.Setting(container).setName(title).setHeading().setClass("simple-section-title");
+    if (extraClass) heading2.setClass(extraClass);
+    return heading2;
   }
   renderSettingCard(container, render) {
     const card = container.createDiv({ cls: "simple-card" });
@@ -25816,7 +25869,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
     });
     (0, import_obsidian17.setIcon)(back, "arrow-left");
     back.addEventListener("click", onBack);
-    header.createEl("h2", { text: title });
+    new import_obsidian17.Setting(header).setName(title).setHeading().setClass("simple-page-title");
   }
   openPage(page) {
     this.page = page;
@@ -26179,7 +26232,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
     const dependent = container.createDiv({ cls: "simple-quick-format-dependent" });
     dependent.toggleClass("is-disabled", !quickFormat.enabled);
     dependent.toggleAttribute("inert", !quickFormat.enabled);
-    dependent.createEl("h3", { cls: "simple-section-title", text: "\u81EA\u5B9A\u4E49\u5FEB\u6377\u83DC\u5355" });
+    this.renderSectionHeading(dependent, "\u81EA\u5B9A\u4E49\u5FEB\u6377\u83DC\u5355");
     this.renderSettingCard(dependent, (card) => {
       card.createDiv({
         cls: "setting-item-description",
@@ -26594,7 +26647,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
   }
   renderAnniversaryList(container, anniversaries) {
     const heading2 = container.createDiv({ cls: "simple-heading-row" });
-    heading2.createEl("h3", { cls: "simple-section-title", text: "\u7EAA\u5FF5\u65E5" });
+    this.renderSectionHeading(heading2, "\u7EAA\u5FF5\u65E5");
     if (!anniversaries.length) {
       const card2 = container.createDiv({ cls: "simple-card simple-date-list-card" });
       card2.createDiv({ cls: "simple-empty-text", text: "\u8FD8\u6CA1\u6709\u7EAA\u5FF5\u65E5\u3002" });
@@ -26743,7 +26796,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
   }
   renderHolidayScheduleList(container, schedules, source, title, emptyText) {
     const heading2 = container.createDiv({ cls: "simple-heading-row" });
-    heading2.createEl("h3", { cls: "simple-section-title", text: title });
+    this.renderSectionHeading(heading2, title);
     const headerActions = heading2.createDiv({ cls: "simple-json-actions" });
     const importButton = headerActions.createEl("button", { cls: "mod-cta simple-soft-button" });
     importButton.setText("\u5BFC\u5165");
@@ -26868,7 +26921,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
   }
   renderRecurringRules(container) {
     const heading2 = container.createDiv({ cls: "simple-heading-row" });
-    heading2.createEl("h3", { cls: "simple-section-title", text: "\u63D0\u9192\u7BA1\u7406" });
+    this.renderSectionHeading(heading2, "\u63D0\u9192\u7BA1\u7406");
     const addButton = heading2.createEl("button", { cls: "mod-cta simple-soft-button" });
     addButton.setText("\u65B0\u589E");
     addButton.addEventListener("click", () => {

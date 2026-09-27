@@ -1649,9 +1649,8 @@ function formatQidianIntro(value: string): string {
 }
 
 function decodeHtmlText(value: string): string {
-  const textarea = document.createElement("textarea");
-  textarea.innerHTML = value;
-  return textarea.value;
+  const escapedTags = value.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return new DOMParser().parseFromString(escapedTags, "text/html").body.textContent ?? "";
 }
 
 function cleanSearchAuthor(value: string): string {

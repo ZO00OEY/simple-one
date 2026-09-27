@@ -675,7 +675,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     this.renderSettingCard(container, (card) => {
       new Setting(card)
         .setName("启用 HTML 预览")
-        .setDesc("把 html 代码块渲染成预览；保留 CSS，不执行脚本。")
+        .setDesc("把 HTML 代码块渲染成预览；支持预览内的样式，忽略脚本。")
         .addToggle((toggle) =>
           toggle.setValue(this.plugin.settings.enableHtmlPreview).onChange(async (value) => {
             this.plugin.settings.enableHtmlPreview = value;
@@ -947,7 +947,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     });
 
     const heading = container.createDiv({ cls: "simple-heading-row" });
-    heading.createEl("h3", { cls: "simple-section-title", text: "参考数据库规则" });
+    this.renderSectionHeading(heading, "参考数据库规则");
     const addButton = heading.createEl("button", { cls: "mod-cta simple-soft-button" });
     addButton.setText("新增");
     addButton.addEventListener("click", async () => {
@@ -1112,7 +1112,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     });
 
     const heading = container.createDiv({ cls: "simple-heading-row" });
-    heading.createEl("h3", { cls: "simple-section-title", text: "网站管理" });
+    this.renderSectionHeading(heading, "网站管理");
     const manage = heading.createEl("button", { cls: "simple-add-button" });
     manage.setText("管理分类");
     manage.addEventListener("click", () => this.openPage({ type: "category-manager" }));
@@ -1156,7 +1156,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     this.renderPageHeader(container, "管理分类", () => this.openPage({ type: "template-rules" }));
 
     const heading = container.createDiv({ cls: "simple-heading-row" });
-    heading.createEl("h3", { cls: "simple-section-title", text: "当前分类" });
+    this.renderSectionHeading(heading, "当前分类");
     const headingActions = heading.createDiv({ cls: "simple-heading-actions" });
     const addButton = headingActions.createEl("button", { cls: "mod-cta simple-soft-button" });
     addButton.setText("新增");
@@ -1284,7 +1284,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     });
 
     const heading = container.createDiv({ cls: "simple-heading-row" });
-    heading.createEl("h3", { cls: "simple-section-title", text: "网站填写与搜索规则" });
+    this.renderSectionHeading(heading, "网站填写与搜索规则");
     const headingActions = heading.createDiv({ cls: "simple-heading-actions" });
     const addButton = headingActions.createEl("button", { cls: "mod-cta simple-soft-button" });
     addButton.setText("新增");
@@ -1397,16 +1397,24 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderGroup(container: HTMLElement, title: string, render: (card: HTMLElement) => void): void {
-    container.createEl("h3", { cls: "simple-section-title", text: title });
+    this.renderSectionHeading(container, title);
     this.renderSettingCard(container, render);
   }
 
   private renderIconGroup(container: HTMLElement, icon: string, title: string, render: (card: HTMLElement) => void): void {
-    const heading = container.createEl("h3", { cls: "simple-section-title simple-icon-section-title" });
-    const iconEl = heading.createSpan({ cls: "simple-section-title-icon" });
+    const label = document.createDocumentFragment();
+    const iconEl = document.createElement("span");
+    iconEl.className = "simple-section-title-icon";
     setIcon(iconEl, icon);
-    heading.createSpan({ text: title });
+    label.append(iconEl, document.createTextNode(title));
+    this.renderSectionHeading(container, label, "simple-icon-section-title");
     this.renderSettingCard(container, render);
+  }
+
+  private renderSectionHeading(container: HTMLElement, title: string | DocumentFragment, extraClass?: string): Setting {
+    const heading = new Setting(container).setName(title).setHeading().setClass("simple-section-title");
+    if (extraClass) heading.setClass(extraClass);
+    return heading;
   }
 
   private renderSettingCard(container: HTMLElement, render: (card: HTMLElement) => void): void {
@@ -1452,7 +1460,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     });
     setIcon(back, "arrow-left");
     back.addEventListener("click", onBack);
-    header.createEl("h2", { text: title });
+    new Setting(header).setName(title).setHeading().setClass("simple-page-title");
   }
 
   private openPage(page: SettingsPage): void {
@@ -1921,7 +1929,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     const dependent = container.createDiv({ cls: "simple-quick-format-dependent" });
     dependent.toggleClass("is-disabled", !quickFormat.enabled);
     dependent.toggleAttribute("inert", !quickFormat.enabled);
-    dependent.createEl("h3", { cls: "simple-section-title", text: "自定义快捷菜单" });
+    this.renderSectionHeading(dependent, "自定义快捷菜单");
     this.renderSettingCard(dependent, (card) => {
       card.createDiv({
         cls: "setting-item-description",
@@ -2464,7 +2472,7 @@ export class SimpleSettingTab extends PluginSettingTab {
 
   private renderAnniversaryList(container: HTMLElement, anniversaries: Anniversary[]): void {
     const heading = container.createDiv({ cls: "simple-heading-row" });
-    heading.createEl("h3", { cls: "simple-section-title", text: "纪念日" });
+    this.renderSectionHeading(heading, "纪念日");
 
     if (!anniversaries.length) {
       const card = container.createDiv({ cls: "simple-card simple-date-list-card" });
@@ -2628,7 +2636,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     emptyText: string
   ): void {
     const heading = container.createDiv({ cls: "simple-heading-row" });
-    heading.createEl("h3", { cls: "simple-section-title", text: title });
+    this.renderSectionHeading(heading, title);
     const headerActions = heading.createDiv({ cls: "simple-json-actions" });
     const importButton = headerActions.createEl("button", { cls: "mod-cta simple-soft-button" });
     importButton.setText("导入");
@@ -2763,7 +2771,7 @@ export class SimpleSettingTab extends PluginSettingTab {
 
   private renderRecurringRules(container: HTMLElement): void {
     const heading = container.createDiv({ cls: "simple-heading-row" });
-    heading.createEl("h3", { cls: "simple-section-title", text: "提醒管理" });
+    this.renderSectionHeading(heading, "提醒管理");
     const addButton = heading.createEl("button", { cls: "mod-cta simple-soft-button" });
     addButton.setText("新增");
     addButton.addEventListener("click", () => {
