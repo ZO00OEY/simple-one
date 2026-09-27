@@ -1,6 +1,6 @@
 import { App, Platform, type Hotkey, type Modifier } from "obsidian";
 
-const COMMAND_ID = "simple-plugin:create-two-column-view";
+const COMMAND_ID = "simple-one:create-two-column-view";
 export const DEFAULT_COLUMNS_HOTKEY: Hotkey = { modifiers: ["Alt"], key: "C" };
 
 type HotkeyManager = {

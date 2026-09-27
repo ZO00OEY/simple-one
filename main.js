@@ -15542,7 +15542,7 @@ function registerPopupWindowSizing(plugin) {
       settingsWindow.resizeTo(bounds.width, bounds.height);
       settingsWindow.moveTo(bounds.left, bounds.top);
     } catch (error) {
-      console.warn("Simple Plugin: failed to resize the settings window", error);
+      console.warn("Simple One: failed to resize the settings window", error);
     }
   };
   const syncOpenSettingsWindow = (resizeNativeWindow) => {
@@ -20195,7 +20195,7 @@ var import_obsidian12 = require("obsidian");
 
 // src/shared/commandHotkey.ts
 var import_obsidian10 = require("obsidian");
-var COMMAND_ID = "simple-plugin:create-two-column-view";
+var COMMAND_ID = "simple-one:create-two-column-view";
 var DEFAULT_COLUMNS_HOTKEY = { modifiers: ["Alt"], key: "C" };
 function manager(app) {
   return app.hotkeyManager;
@@ -27800,7 +27800,7 @@ function formatIsoDate(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 function holidayImportPrompt() {
-  return `\u8BF7\u628A\u4E0B\u9762\u7684\u8282\u5047\u65E5\u5B89\u6392\u6574\u7406\u6210 Simple Plugin \u53EF\u5BFC\u5165 JSON\u3002
+  return `\u8BF7\u628A\u4E0B\u9762\u7684\u8282\u5047\u65E5\u5B89\u6392\u6574\u7406\u6210 Simple One \u53EF\u5BFC\u5165 JSON\u3002
 
 \u8981\u6C42\uFF1A
 1. \u53EA\u8F93\u51FA JSON\uFF0C\u4E0D\u8981\u89E3\u91CA\uFF0C\u4E0D\u8981\u4F7F\u7528 Markdown \u4EE3\u7801\u5757\u3002

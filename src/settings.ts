@@ -3919,7 +3919,7 @@ function formatIsoDate(date: Date): string {
 }
 
 function holidayImportPrompt(): string {
-  return `请把下面的节假日安排整理成 Simple Plugin 可导入 JSON。
+  return `请把下面的节假日安排整理成 Simple One 可导入 JSON。
 
 要求：
 1. 只输出 JSON，不要解释，不要使用 Markdown 代码块。

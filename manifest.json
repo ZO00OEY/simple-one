@@ -1,9 +1,9 @@
 {
-  "id": "simple-plugin",
-  "name": "Simple Plugin",
-  "version": "1.0.0",
+  "id": "simple-one",
+  "name": "Simple One",
+  "version": "1.0.1",
   "minAppVersion": "1.5.7",
   "description": "Format notes, manage diaries and attachments, and streamline links.",
-  "author": "Simple Plugin",
+  "author": "zo00oey",
   "isDesktopOnly": false
 }

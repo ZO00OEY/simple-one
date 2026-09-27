@@ -36,7 +36,7 @@ export function registerPopupWindowSizing(plugin: SimplePlugin): () => void {
       settingsWindow.resizeTo(bounds.width, bounds.height);
       settingsWindow.moveTo(bounds.left, bounds.top);
     } catch (error) {
-      console.warn("Simple Plugin: failed to resize the settings window", error);
+      console.warn("Simple One: failed to resize the settings window", error);
     }
   };
 
