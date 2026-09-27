@@ -27,6 +27,8 @@ Each area can be configured under **Settings → Simple Plugin**. Some settings 
 
 Download `main.js`, `manifest.json`, and `styles.css` from the same [release](https://github.com/ZO00OEY/simple-plugin/releases). Place all three in your vault's `.obsidian/plugins/simple-plugin/` folder, then enable **Simple Plugin** under **Settings → Community plugins**. The folder name must match the plugin ID `simple-plugin`.
 
+Regular users do **not** need to install Node.js or npm. Obsidian loads the prebuilt `main.js` from the release. The build commands below are only for people who want to compile or modify the source code.
+
 ## Data and network access
 
 - Settings and any data you enter into them are stored locally by Obsidian in `.obsidian/plugins/simple-plugin/data.json`. The file is excluded from this repository and its releases. Back it up privately if you need to keep your configuration.
@@ -79,6 +81,8 @@ Simple Plugin 将日常笔记工具集中到一个 Obsidian 插件中，包括�
 #### 手动安装
 
 从同一个[发布版本](https://github.com/ZO00OEY/simple-plugin/releases)下载 `main.js`、`manifest.json` 和 `styles.css`，一起放进仓库的 `.obsidian/plugins/simple-plugin/` 文件夹。然后在 **设置 → 第三方插件** 中启用 **Simple Plugin**。文件夹名必须与插件 ID `simple-plugin` 一致。
+
+**普通用户不需要安装 Node.js 或 npm。**Obsidian 会加载发布包中已经构建好的 `main.js`。下方的构建命令只供需要自行编译或修改源码的人使用。插件通过官方社区审核后，也可以直接在 Obsidian 内安装。
 
 ### 数据与网络访问
 
