@@ -1,0 +1,210 @@
+{
+  "holidaySchedules": [
+    {
+      "id": "cn-national-2026",
+      "source": "national",
+      "name": "2026 年国家法定假期安排",
+      "year": 2026,
+      "enabled": true,
+      "sourceUrl": "https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm",
+      "publishedDate": "2025-11-04",
+      "days": [
+        {
+          "date": "2026-01-01",
+          "status": "day-off",
+          "label": "元旦假期"
+        },
+        {
+          "date": "2026-01-02",
+          "status": "day-off",
+          "label": "元旦假期"
+        },
+        {
+          "date": "2026-01-03",
+          "status": "day-off",
+          "label": "元旦假期"
+        },
+        {
+          "date": "2026-01-04",
+          "status": "adjusted-workday",
+          "label": "元旦调休上班"
+        },
+        {
+          "date": "2026-02-14",
+          "status": "adjusted-workday",
+          "label": "春节前补班"
+        },
+        {
+          "date": "2026-02-15",
+          "status": "day-off",
+          "label": "春节假期"
+        },
+        {
+          "date": "2026-02-16",
+          "status": "day-off",
+          "label": "春节假期"
+        },
+        {
+          "date": "2026-02-17",
+          "status": "day-off",
+          "label": "春节假期"
+        },
+        {
+          "date": "2026-02-18",
+          "status": "day-off",
+          "label": "春节假期"
+        },
+        {
+          "date": "2026-02-19",
+          "status": "day-off",
+          "label": "春节假期"
+        },
+        {
+          "date": "2026-02-20",
+          "status": "day-off",
+          "label": "春节假期"
+        },
+        {
+          "date": "2026-02-21",
+          "status": "day-off",
+          "label": "春节假期"
+        },
+        {
+          "date": "2026-02-22",
+          "status": "day-off",
+          "label": "春节假期"
+        },
+        {
+          "date": "2026-02-23",
+          "status": "day-off",
+          "label": "春节假期"
+        },
+        {
+          "date": "2026-02-28",
+          "status": "adjusted-workday",
+          "label": "春节后补班"
+        },
+        {
+          "date": "2026-04-04",
+          "status": "day-off",
+          "label": "清明节假期"
+        },
+        {
+          "date": "2026-04-05",
+          "status": "day-off",
+          "label": "清明节假期"
+        },
+        {
+          "date": "2026-04-06",
+          "status": "day-off",
+          "label": "清明节假期"
+        },
+        {
+          "date": "2026-05-01",
+          "status": "day-off",
+          "label": "劳动节假期"
+        },
+        {
+          "date": "2026-05-02",
+          "status": "day-off",
+          "label": "劳动节假期"
+        },
+        {
+          "date": "2026-05-03",
+          "status": "day-off",
+          "label": "劳动节假期"
+        },
+        {
+          "date": "2026-05-04",
+          "status": "day-off",
+          "label": "劳动节假期"
+        },
+        {
+          "date": "2026-05-05",
+          "status": "day-off",
+          "label": "劳动节假期"
+        },
+        {
+          "date": "2026-05-09",
+          "status": "adjusted-workday",
+          "label": "劳动节调休上班"
+        },
+        {
+          "date": "2026-06-19",
+          "status": "day-off",
+          "label": "端午节假期"
+        },
+        {
+          "date": "2026-06-20",
+          "status": "day-off",
+          "label": "端午节假期"
+        },
+        {
+          "date": "2026-06-21",
+          "status": "day-off",
+          "label": "端午节假期"
+        },
+        {
+          "date": "2026-09-20",
+          "status": "adjusted-workday",
+          "label": "国庆节调休上班"
+        },
+        {
+          "date": "2026-09-25",
+          "status": "day-off",
+          "label": "中秋节假期"
+        },
+        {
+          "date": "2026-09-26",
+          "status": "day-off",
+          "label": "中秋节假期"
+        },
+        {
+          "date": "2026-09-27",
+          "status": "day-off",
+          "label": "中秋节假期"
+        },
+        {
+          "date": "2026-10-01",
+          "status": "day-off",
+          "label": "国庆节假期"
+        },
+        {
+          "date": "2026-10-02",
+          "status": "day-off",
+          "label": "国庆节假期"
+        },
+        {
+          "date": "2026-10-03",
+          "status": "day-off",
+          "label": "国庆节假期"
+        },
+        {
+          "date": "2026-10-04",
+          "status": "day-off",
+          "label": "国庆节假期"
+        },
+        {
+          "date": "2026-10-05",
+          "status": "day-off",
+          "label": "国庆节假期"
+        },
+        {
+          "date": "2026-10-06",
+          "status": "day-off",
+          "label": "国庆节假期"
+        },
+        {
+          "date": "2026-10-07",
+          "status": "day-off",
+          "label": "国庆节假期"
+        },
+        {
+          "date": "2026-10-10",
+          "status": "adjusted-workday",
+          "label": "国庆节调休上班"
+        }
+      ]
+    }
+  ]
+}

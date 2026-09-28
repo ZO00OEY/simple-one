@@ -24107,6 +24107,218 @@ function defaultTemplateCategories() {
   ];
 }
 
+// src/default.json
+var default_default = {
+  holidaySchedules: [
+    {
+      id: "cn-national-2026",
+      source: "national",
+      name: "2026 \u5E74\u56FD\u5BB6\u6CD5\u5B9A\u5047\u671F\u5B89\u6392",
+      year: 2026,
+      enabled: true,
+      sourceUrl: "https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm",
+      publishedDate: "2025-11-04",
+      days: [
+        {
+          date: "2026-01-01",
+          status: "day-off",
+          label: "\u5143\u65E6\u5047\u671F"
+        },
+        {
+          date: "2026-01-02",
+          status: "day-off",
+          label: "\u5143\u65E6\u5047\u671F"
+        },
+        {
+          date: "2026-01-03",
+          status: "day-off",
+          label: "\u5143\u65E6\u5047\u671F"
+        },
+        {
+          date: "2026-01-04",
+          status: "adjusted-workday",
+          label: "\u5143\u65E6\u8C03\u4F11\u4E0A\u73ED"
+        },
+        {
+          date: "2026-02-14",
+          status: "adjusted-workday",
+          label: "\u6625\u8282\u524D\u8865\u73ED"
+        },
+        {
+          date: "2026-02-15",
+          status: "day-off",
+          label: "\u6625\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-02-16",
+          status: "day-off",
+          label: "\u6625\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-02-17",
+          status: "day-off",
+          label: "\u6625\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-02-18",
+          status: "day-off",
+          label: "\u6625\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-02-19",
+          status: "day-off",
+          label: "\u6625\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-02-20",
+          status: "day-off",
+          label: "\u6625\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-02-21",
+          status: "day-off",
+          label: "\u6625\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-02-22",
+          status: "day-off",
+          label: "\u6625\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-02-23",
+          status: "day-off",
+          label: "\u6625\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-02-28",
+          status: "adjusted-workday",
+          label: "\u6625\u8282\u540E\u8865\u73ED"
+        },
+        {
+          date: "2026-04-04",
+          status: "day-off",
+          label: "\u6E05\u660E\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-04-05",
+          status: "day-off",
+          label: "\u6E05\u660E\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-04-06",
+          status: "day-off",
+          label: "\u6E05\u660E\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-05-01",
+          status: "day-off",
+          label: "\u52B3\u52A8\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-05-02",
+          status: "day-off",
+          label: "\u52B3\u52A8\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-05-03",
+          status: "day-off",
+          label: "\u52B3\u52A8\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-05-04",
+          status: "day-off",
+          label: "\u52B3\u52A8\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-05-05",
+          status: "day-off",
+          label: "\u52B3\u52A8\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-05-09",
+          status: "adjusted-workday",
+          label: "\u52B3\u52A8\u8282\u8C03\u4F11\u4E0A\u73ED"
+        },
+        {
+          date: "2026-06-19",
+          status: "day-off",
+          label: "\u7AEF\u5348\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-06-20",
+          status: "day-off",
+          label: "\u7AEF\u5348\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-06-21",
+          status: "day-off",
+          label: "\u7AEF\u5348\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-09-20",
+          status: "adjusted-workday",
+          label: "\u56FD\u5E86\u8282\u8C03\u4F11\u4E0A\u73ED"
+        },
+        {
+          date: "2026-09-25",
+          status: "day-off",
+          label: "\u4E2D\u79CB\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-09-26",
+          status: "day-off",
+          label: "\u4E2D\u79CB\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-09-27",
+          status: "day-off",
+          label: "\u4E2D\u79CB\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-10-01",
+          status: "day-off",
+          label: "\u56FD\u5E86\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-10-02",
+          status: "day-off",
+          label: "\u56FD\u5E86\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-10-03",
+          status: "day-off",
+          label: "\u56FD\u5E86\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-10-04",
+          status: "day-off",
+          label: "\u56FD\u5E86\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-10-05",
+          status: "day-off",
+          label: "\u56FD\u5E86\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-10-06",
+          status: "day-off",
+          label: "\u56FD\u5E86\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-10-07",
+          status: "day-off",
+          label: "\u56FD\u5E86\u8282\u5047\u671F"
+        },
+        {
+          date: "2026-10-10",
+          status: "adjusted-workday",
+          label: "\u56FD\u5E86\u8282\u8C03\u4F11\u4E0A\u73ED"
+        }
+      ]
+    }
+  ]
+};
+
 // src/settings.ts
 var import_obsidian17 = require("obsidian");
 
@@ -28680,6 +28892,15 @@ function normalizeDiarySettings(settings, data) {
     }
   }
   if (!settings.diary.holidaySchedules) settings.diary.holidaySchedules = [];
+  if (data?.diary?.holidaySchedules === void 0) {
+    settings.diary.holidaySchedules = default_default.holidaySchedules.map((schedule) => ({
+      ...schedule,
+      version: 1,
+      source: "national",
+      importedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      days: schedule.days.map((day) => ({ ...day, status: day.status }))
+    }));
+  }
   if (!settings.diary.reformat.formatRules?.length) settings.diary.reformat.formatRules = makeDefaultTextReformatRules();
   for (const rule of settings.diary.reformat.formatRules) {
     if (!rule.id) rule.id = nextId();

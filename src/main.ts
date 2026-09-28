@@ -33,6 +33,7 @@ import { registerSearchFolderFilter } from "./features/searchFolderFilter";
 import { registerTemplateFillAction, TEMPLATE_FILL_ICON } from "./features/templateFillAction";
 import { TemplateFillView, VIEW_TYPE } from "./features/templateFill";
 import { defaultTemplateCategories } from "./features/templateFillPresets";
+import defaultData from "./default.json";
 import { SimpleSettingTab } from "./settings";
 import { normalizePopupScalePercent } from "./shared/popupSizing";
 import {
@@ -43,6 +44,8 @@ import {
   QUICK_FORMAT_CALLOUTS,
   type SimplePluginSettings,
   type QuickFormatMode,
+  type HolidaySchedule,
+  type DayScheduleStatus,
 } from "./types";
 
 type LoadedSettings = Partial<SimplePluginSettings> & { templateRules?: OldTemplateRule[] };
@@ -493,6 +496,15 @@ function normalizeDiarySettings(settings: SimplePluginSettings, data: LoadedSett
     }
   }
   if (!settings.diary.holidaySchedules) settings.diary.holidaySchedules = [];
+  if (data?.diary?.holidaySchedules === undefined) {
+    settings.diary.holidaySchedules = defaultData.holidaySchedules.map((schedule): HolidaySchedule => ({
+      ...schedule,
+      version: 1,
+      source: "national",
+      importedAt: new Date().toISOString(),
+      days: schedule.days.map((day) => ({ ...day, status: day.status as DayScheduleStatus })),
+    }));
+  }
   if (!settings.diary.reformat.formatRules?.length) settings.diary.reformat.formatRules = makeDefaultTextReformatRules();
   for (const rule of settings.diary.reformat.formatRules) {
     if (!rule.id) rule.id = nextId();

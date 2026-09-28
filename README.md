@@ -32,6 +32,7 @@ Regular users do **not** need to install Node.js or npm. Obsidian loads the preb
 ## Data and network access
 
 - Settings and any data you enter into them are stored locally by Obsidian in `.obsidian/plugins/simple-one/data.json`. The file is excluded from this repository and its releases. Back it up privately if you need to keep your configuration.
+- The public 2026 China national holiday schedule is maintained in `src/default.json` and bundled into `main.js` when built. It is used as initial data only when no holiday schedules have been saved. Existing schedules, including company schedules, remain in your local `data.json`.
 - When the corresponding features are enabled or used, the plugin reads and changes notes or attachments in the current vault. Attachment cleanup presents a review list before moving selected files to Obsidian's trash.
 - URL-title lookup and website-to-note actions can request a URL you supply or a selected website. Built-in rules include sites such as Jinjiang, 52shuku, Fanqie, and Qidian. A site search sends its query to that site. Some desktop extraction fallbacks open the selected site in a hidden webview; Fanqie's fallback may use that site's cookies for a request to its own API. These fallbacks may not work on mobile.
 - The plugin has no analytics or plugin-operated server. Network requests for the above actions go to the relevant websites; vault contents are not sent to a server run by this plugin.
@@ -87,6 +88,7 @@ Simple One 将日常笔记工具集中到一个 Obsidian 插件中，包括文�
 ### 数据与网络访问
 
 - 插件设置及你在设置中填写的数据由 Obsidian 保存在本地的 `.obsidian/plugins/simple-one/data.json`。该文件不包含在本仓库和发布版本中。如需保留配置，请自行私下备份。
+- 中国大陆 2026 年国家放假调休安排单独维护在 `src/default.json`，构建时打包进 `main.js`。只有尚未保存假期安排时才作为初始数据载入；已有安排及公司安排仍保存在本机 `data.json`，不会被覆盖。
 - 启用或使用相应功能时，插件会读取或修改当前仓库中的笔记和附件。清理未引用附件会先显示待处理清单，经确认后才将选中的文件移入 Obsidian 回收站。
 - 提取 URL 标题和网址转笔记功能可能访问你提供的 URL 或所选网站。内置规则涉及晋江、52书库、番茄、起点等网站；站内搜索会把搜索词发送给对应网站。部分桌面端提取流程会在隐藏的网页视图中打开所选网站；番茄的备用流程可能使用该网站的 Cookie 请求其自身接口。这些备用流程在移动端可能不可用。
 - 插件没有统计分析功能，也没有由插件作者运营的服务器。上述联网操作直接访问相关网站；插件不会把仓库内容发送到由本插件运营的服务器。
