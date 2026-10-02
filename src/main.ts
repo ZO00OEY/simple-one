@@ -44,7 +44,6 @@ import {
   makeDefaultAnniversaries,
   makeDefaultTextReformatRules,
   nextId,
-  QUICK_FORMAT_CALLOUTS,
   type SimplePluginSettings,
   type QuickFormatMode,
   type HolidaySchedule,
@@ -451,17 +450,9 @@ function normalizeEnhancements(settings: SimplePluginSettings, data: LoadedSetti
   if (!calloutColors.abstract && storedCalloutColors?.summary) calloutColors.abstract = storedCalloutColors.summary;
   if (!calloutColors.warning && storedCalloutColors?.caution) calloutColors.warning = storedCalloutColors.caution;
   const storedVisibleModes = storedQuickFormat?.visibleModes;
-  const hadCalloutMode = storedVisibleModes?.some((mode) => mode.startsWith("callout-")) ?? false;
   const visibleModes = storedVisibleModes
     ? [...new Set(storedVisibleModes.map((mode) => legacyModes[mode] ?? mode))]
-    : DEFAULT_SETTINGS.enhancements.quickFormat.visibleModes;
-  if (hadCalloutMode) {
-    visibleModes.push(
-      ...QUICK_FORMAT_CALLOUTS
-        .map(({ type }) => `callout-${type}` as QuickFormatMode)
-        .filter((mode) => !visibleModes.includes(mode))
-    );
-  }
+    : [...DEFAULT_SETTINGS.enhancements.quickFormat.visibleModes];
   if (!visibleModes.includes("quote")) visibleModes.push("quote");
   const storedLastMode = storedQuickFormat?.lastMode;
 
@@ -481,7 +472,7 @@ function normalizeEnhancements(settings: SimplePluginSettings, data: LoadedSetti
         ...storedQuickFormat?.headingSizes,
       },
       calloutColors,
-      customCallouts: storedQuickFormat?.customCallouts ?? [],
+      customCallouts: storedQuickFormat?.customCallouts ?? DEFAULT_SETTINGS.enhancements.quickFormat.customCallouts.map((item) => ({ ...item })),
     },
     currentNoteLinkConverter: {
       ...DEFAULT_SETTINGS.enhancements.currentNoteLinkConverter,

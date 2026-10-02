@@ -673,7 +673,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   mobileSwitches: {},
   mobileDisplay: { readableLineWidth: "", imageMaxHeight: "", popupWindowScale: "0", headerButtonSize: "29", disableThemeHeaderButtons: true },
   enableMermaidEnhancer: true,
-  imageMaxHeight: "560",
+  imageMaxHeight: "450",
   enableImageZoom: true,
   enableInlineCodeCopy: true,
   enableHtmlPreview: true,
@@ -683,14 +683,14 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   enhancements: {
     quickCopyLink: {
       enabled: true,
-      lastMode: "obsidian-url",
+      lastMode: "absolute-path",
     },
     quickFormat: {
       enabled: true,
       showDesktopEntry: true,
       showMobileEntry: true,
       lastMode: "h3",
-      visibleModes: ["h3", "h4", "h5", "quote"],
+      visibleModes: ["h3", "h4", "h5", "quote", "callout-note", "callout-important", "callout-tip", "callout-question", "callout-warning", "callout-example", "custom-callout:simple-default-tips"],
       headingColors: {
         h1: "",
         h2: "",
@@ -723,7 +723,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
         example: "",
         quote: "",
       },
-      customCallouts: [],
+      customCallouts: [{ id: "simple-default-tips", type: "小贴士", label: "小贴士", color: "#a20b0b" }],
     },
     currentNoteLinkConverter: {
       enabled: true,
@@ -737,7 +737,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
     templatePath: "",
     locale: "system",
     showWeekends: true,
-    highlightToday: true,
+    highlightToday: false,
     showWeekNumber: true,
     showQuarter: true,
     showYearCalendar: true,
@@ -758,7 +758,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
         remindNextYearImportFromMonth: 12,
       },
       companyHolidays: {
-        enabled: false,
+        enabled: true,
         showInCalendar: true,
       },
       reminderWriting: {

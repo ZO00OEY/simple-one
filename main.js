@@ -12200,7 +12200,7 @@ var DEFAULT_SETTINGS = {
   mobileSwitches: {},
   mobileDisplay: { readableLineWidth: "", imageMaxHeight: "", popupWindowScale: "0", headerButtonSize: "29", disableThemeHeaderButtons: true },
   enableMermaidEnhancer: true,
-  imageMaxHeight: "560",
+  imageMaxHeight: "450",
   enableImageZoom: true,
   enableInlineCodeCopy: true,
   enableHtmlPreview: true,
@@ -12210,14 +12210,14 @@ var DEFAULT_SETTINGS = {
   enhancements: {
     quickCopyLink: {
       enabled: true,
-      lastMode: "obsidian-url"
+      lastMode: "absolute-path"
     },
     quickFormat: {
       enabled: true,
       showDesktopEntry: true,
       showMobileEntry: true,
       lastMode: "h3",
-      visibleModes: ["h3", "h4", "h5", "quote"],
+      visibleModes: ["h3", "h4", "h5", "quote", "callout-note", "callout-important", "callout-tip", "callout-question", "callout-warning", "callout-example", "custom-callout:simple-default-tips"],
       headingColors: {
         h1: "",
         h2: "",
@@ -12250,7 +12250,7 @@ var DEFAULT_SETTINGS = {
         example: "",
         quote: ""
       },
-      customCallouts: []
+      customCallouts: [{ id: "simple-default-tips", type: "\u5C0F\u8D34\u58EB", label: "\u5C0F\u8D34\u58EB", color: "#a20b0b" }]
     },
     currentNoteLinkConverter: {
       enabled: true,
@@ -12264,7 +12264,7 @@ var DEFAULT_SETTINGS = {
     templatePath: "",
     locale: "system",
     showWeekends: true,
-    highlightToday: true,
+    highlightToday: false,
     showWeekNumber: true,
     showQuarter: true,
     showYearCalendar: true,
@@ -12285,7 +12285,7 @@ var DEFAULT_SETTINGS = {
         remindNextYearImportFromMonth: 12
       },
       companyHolidays: {
-        enabled: false,
+        enabled: true,
         showInCalendar: true
       },
       reminderWriting: {
@@ -29042,13 +29042,7 @@ function normalizeEnhancements(settings, data) {
   if (!calloutColors.abstract && storedCalloutColors?.summary) calloutColors.abstract = storedCalloutColors.summary;
   if (!calloutColors.warning && storedCalloutColors?.caution) calloutColors.warning = storedCalloutColors.caution;
   const storedVisibleModes = storedQuickFormat?.visibleModes;
-  const hadCalloutMode = storedVisibleModes?.some((mode) => mode.startsWith("callout-")) ?? false;
-  const visibleModes2 = storedVisibleModes ? [...new Set(storedVisibleModes.map((mode) => legacyModes[mode] ?? mode))] : DEFAULT_SETTINGS.enhancements.quickFormat.visibleModes;
-  if (hadCalloutMode) {
-    visibleModes2.push(
-      ...QUICK_FORMAT_CALLOUTS.map(({ type }) => `callout-${type}`).filter((mode) => !visibleModes2.includes(mode))
-    );
-  }
+  const visibleModes2 = storedVisibleModes ? [...new Set(storedVisibleModes.map((mode) => legacyModes[mode] ?? mode))] : [...DEFAULT_SETTINGS.enhancements.quickFormat.visibleModes];
   if (!visibleModes2.includes("quote")) visibleModes2.push("quote");
   const storedLastMode = storedQuickFormat?.lastMode;
   settings.enhancements = {
@@ -29067,7 +29061,7 @@ function normalizeEnhancements(settings, data) {
         ...storedQuickFormat?.headingSizes
       },
       calloutColors,
-      customCallouts: storedQuickFormat?.customCallouts ?? []
+      customCallouts: storedQuickFormat?.customCallouts ?? DEFAULT_SETTINGS.enhancements.quickFormat.customCallouts.map((item) => ({ ...item }))
     },
     currentNoteLinkConverter: {
       ...DEFAULT_SETTINGS.enhancements.currentNoteLinkConverter,
