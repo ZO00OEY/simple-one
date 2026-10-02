@@ -485,7 +485,7 @@ class UnusedAttachmentModal extends Modal {
 
   onOpen(): void {
     this.modalEl.addClass("simple-attachment-modal");
-    applyModalScale(this.modalEl, this.plugin.settings.popupWindowScale, getMainAppWindow(this.plugin.app));
+    applyModalScale(this.modalEl, this.plugin.displaySettings.popupWindowScale, getMainAppWindow(this.plugin.app));
     this.contentEl.empty();
     this.contentEl.createEl("h2", { text: "未引用附件" });
     this.contentEl.createDiv({ cls: "setting-item-description", text: "图片默认勾选；JSON、txt 等非图片默认不勾选。确认后删除到 Obsidian 回收站。" });
@@ -522,7 +522,7 @@ class RenamePlanModal extends Modal {
 
   onOpen(): void {
     this.modalEl.addClass("simple-attachment-modal");
-    applyModalScale(this.modalEl, this.plugin.settings.popupWindowScale, getMainAppWindow(this.plugin.app));
+    applyModalScale(this.modalEl, this.plugin.displaySettings.popupWindowScale, getMainAppWindow(this.plugin.app));
     this.contentEl.empty();
     this.contentEl.createEl("h2", { text: "图片重命名并按笔记归位清单" });
     this.contentEl.createDiv({ cls: "setting-item-description", text: "只处理勾选项；执行时会让 Obsidian 更新引用。" });
@@ -570,7 +570,7 @@ class AttachmentOrganizationModal extends Modal {
 
   onOpen(): void {
     this.modalEl.addClass("simple-attachment-modal");
-    applyModalScale(this.modalEl, this.plugin.settings.popupWindowScale, getMainAppWindow(this.plugin.app));
+    applyModalScale(this.modalEl, this.plugin.displaySettings.popupWindowScale, getMainAppWindow(this.plugin.app));
     this.contentEl.empty();
     this.contentEl.createEl("h2", { text: "非图片附件按笔记归位清单" });
     this.contentEl.createDiv({
@@ -620,7 +620,7 @@ class InlineImagePlanModal extends Modal {
 
   onOpen(): void {
     this.modalEl.addClass("simple-attachment-modal");
-    applyModalScale(this.modalEl, this.plugin.settings.popupWindowScale, getMainAppWindow(this.plugin.app));
+    applyModalScale(this.modalEl, this.plugin.displaySettings.popupWindowScale, getMainAppWindow(this.plugin.app));
     this.contentEl.empty();
     this.contentEl.createEl("h2", { text: "内嵌图片转为附件清单" });
     this.contentEl.createDiv({ cls: "setting-item-description", text: "把 Markdown 中直接嵌入的 base64 图片保存为独立附件，并替换为 Obsidian 图片链接。" });

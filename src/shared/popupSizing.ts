@@ -20,6 +20,7 @@ export function parsePopupScalePercent(value: unknown): number | null {
 export function normalizePopupScalePercent(value: unknown, fallback: string): string {
   const text = typeof value === "number" ? String(value) : typeof value === "string" ? value.trim() : fallback;
   if (!text) return "";
+  if (Number(text) === 0) return "0";
   const percent = parsePopupScalePercent(text);
   return percent === null ? fallback : String(Math.round(percent));
 }

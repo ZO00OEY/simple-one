@@ -1,109 +1,111 @@
 # Simple One
 
-Simple One brings everyday note tools into one Obsidian plugin: formatting, URL handling, diary and calendar views, website-to-note actions, display controls, and attachment review. Its settings interface is currently in Chinese.
+Simple One 将常用的笔记排版、链接处理、日历日记、网页采集与显示工具集中在一起。所有功能都可以在 **设置 → Simple One** 中按需配置，设置界面使用中文。
 
-## What it does
+## 功能一览
 
-| Area | Available tools |
+| 功能 | 用途 |
 | --- | --- |
-| Writing and links | Reformat the current note or pasted text with configurable rules; process a pasted URL or Obsidian link; copy the current note's link or path. URL paste processing and reformatting are separate settings. |
-| Quick formatting | Add a note-title button and quick menu for formatting actions. |
-| Diary and calendar | Create daily notes, carry forward unfinished tasks, manage recurring reminders, anniversaries, and imported holiday schedules. Choose a heading or callout for written reminders. |
-| Website to note | Create notes from a URL or search supported sites using editable extraction rules and output folders. |
-| Reading and display | Preview colors and HTML, zoom images, adjust image height and readable width, interact with Mermaid diagrams, and create two-column content. |
-| Vault utilities | Filter native search by folder, fill properties for new notes from a selected Base view, and review attachment cleanup or organization actions. |
+| 快速设置文本格式 | 将当前行或选中文本转换为标题、引用或 Callout 提示块。 |
+| 快速排版 | 按自定义规则整理整篇笔记，并配置粘贴时的链接与文本处理。 |
+| 显示增强 | 调整正文宽度、图片高度和窗口比例，提供双列内容、图片放大及预览工具。 |
+| 新建快速笔记 | 根据网址提取内容并生成笔记，或使用已配置的网站搜索。 |
+| 日历与日记 | 查看日历、创建日记、追踪未完成事项，以及管理周期提醒、纪念日和假期。 |
+| 附件优化 | 检查未引用附件，并按引用笔记整理附件名称和位置。 |
+| 快速复制当前笔记链接 | 在电脑端复制当前笔记的链接或文件路径。 |
+| 搜索与属性补齐 | 按文件夹过滤搜索结果，并为新建笔记自动补齐属性。 |
 
-Each area can be configured under **Settings → Simple One**. Some settings require an Obsidian restart; the relevant setting says so.
+## 快速设置文本格式
 
-## Get started
+编辑笔记时，将光标放在需要处理的行，或选中一段文本，即可通过笔记顶部的快捷入口应用格式。
 
-1. Install the plugin using the instructions below and enable it in **Settings → Community plugins**.
-2. Open **Settings → Simple One**. Enable only the features you want.
-3. For diary features, check the daily-note folder, filename pattern, and template before creating a note. On first load, the plugin adopts Obsidian's core Daily notes settings when available.
-4. For website-to-note features, choose an output folder and review the site's extraction rules. Built-in categories otherwise start with the vault root as their output location.
-5. For attachment tools, set Obsidian's attachment location to a dedicated folder in **Settings → Files and links**. If attachments currently go to the vault root, the plugin offers a **Quick configuration** button that sets the destination to `Attachment` for new files; it does not move existing files. Open **Attachment optimization** in the plugin settings and review the proposed actions before applying them. Attachment scanning and cleanup are disabled when the attachment location is the vault root or cannot be identified safely.
+- 支持一级至六级标题、普通引用，以及 Note、Abstract、Tip、Warning 等 Callout。
+- 可选择快捷菜单显示哪些格式，减少不常用的选项。
+- 可调整标题颜色与字号、Callout 颜色，并添加自定义 Callout。
+- Callout 菜单图标和文字使用当前主题实际显示的颜色，方便识别。
+- 可分别控制电脑和手机是否显示快捷入口。
 
-### Install manually
+电脑端点击快捷入口可应用上次使用的格式，右键打开格式选择菜单。具体格式与外观在 **快速设置文本格式** 中配置。
 
-Download `main.js`, `manifest.json`, and `styles.css` from the same [release](https://github.com/ZO00OEY/simple-one/releases). Place all three in your vault's `.obsidian/plugins/simple-one/` folder, then enable **Simple One** under **Settings → Community plugins**. The folder name must match the plugin ID `simple-one`.
+## 快速排版
 
-Regular users do **not** need to install Node.js or npm. Obsidian loads the prebuilt `main.js` from the release. The build commands below are only for people who want to compile or modify the source code.
+用于整理整篇笔记的文本格式，与对当前行应用标题或 Callout 的功能分开配置。
 
-## Data and network access
+- 按启用的规则重排版当前笔记，例如清理行尾空格、合并硬换行、整理数字序号等。
+- 可编辑排版规则及其顺序，让处理方式符合自己的笔记习惯。
+- 粘贴单个 URL 时，可自动提取网页标题并生成 Markdown 链接。
+- 支持清洗网页标题，以及将 Obsidian 链接转换为仓库内的双链。
+- 可分别设置单个链接、整段文本和纯文本粘贴的处理方式。
 
-- Settings and any data you enter into them are stored locally by Obsidian in `.obsidian/plugins/simple-one/data.json`. The file is excluded from this repository and its releases. Back it up privately if you need to keep your configuration.
-- The public 2026 China national holiday schedule is maintained in `src/default.json` and bundled into `main.js` when built. It is used as initial data only when no holiday schedules have been saved. Existing schedules, including company schedules, remain in your local `data.json`.
-- When the corresponding features are enabled or used, the plugin reads and changes notes or attachments in the current vault. Attachment cleanup presents a review list before moving selected files to Obsidian's trash.
-- URL-title lookup and website-to-note actions can request a URL you supply or a selected website. Built-in rules include sites such as Jinjiang, 52shuku, Fanqie, and Qidian. A site search sends its query to that site. Some desktop extraction fallbacks open the selected site in a hidden webview; Fanqie's fallback may use that site's cookies for a request to its own API. These fallbacks may not work on mobile.
-- The plugin has no analytics or plugin-operated server. Network requests for the above actions go to the relevant websites; vault contents are not sent to a server run by this plugin.
+点击笔记顶部的快速排版按钮可整理当前笔记。相关选项在 **快速排版** 中设置；电脑端也可通过按钮的右键菜单调整常用开关。
 
-## Build from source
+## 显示增强
 
-Requires Node.js and npm:
+### 参数优化
 
-```sh
-npm ci
-npm run build
-```
+电脑与手机分别保存显示参数。插件自动使用当前平台的配置，也可以通过右侧的平台选择器查看和编辑另一端。
 
-The build checks TypeScript and writes `main.js`. Keep `main.js`, `manifest.json`, and `styles.css` together for a release. Never commit `data.json`, vault notes, or Obsidian workspace settings.
+- **弹出窗口缩放比例**：调整设置窗口和附件清单的显示比例；填写 0 或留空表示不调整，手机端默认不调整。
+- **笔记正文宽度**：设置最大可读行宽，需要开启 Obsidian 的“可读行长”。手机端建议留空；超过屏幕可用宽度时通常不会产生明显变化。
+- **图片高度**：限制笔记图片的最大显示高度，保持图片原比例；留空表示不限制。
+- **顶部按钮大小（手机）**：调整顶部操作按钮及侧边栏按钮的大小，默认 29px，可设置 20–64px，留空跟随主题。
+- **禁用当前主题自带的手机端按钮样式**：关闭 Things 主题的圆形顶部按钮外观，默认开启，使用原生风格；仍可单独调整按钮大小。
 
-## License
+### 功能增强
 
-The plugin source is available under the [MIT License](LICENSE). Bundled dependencies have their own notices in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+这一组功能开关在电脑和手机之间共用。
 
----
+- **双列显示内容**：在笔记中创建和编辑双列内容。
+- **HTML 预览**：预览 HTML 内容，并可配置预览前的替换规则。
+- **图片点击可放大**：点击笔记图片查看大图；电脑端支持滚轮缩放，点击空白处或按 Esc 关闭。
+- **Mermaid 流程图交互**：增强笔记中 Mermaid 图表的交互。
+- **颜色代码预览**：直接查看颜色代码对应的颜色。
+- **自定义标签阅读排版**：调整自定义标签内容在阅读视图中的显示。
 
-## 中文说明
+## 新建快速笔记
 
-Simple One 将日常笔记工具集中到一个 Obsidian 插件中，包括文本排版、URL 处理、日记与日历、网址转笔记、显示增强和附件整理。插件设置界面目前使用中文。
+根据网址和网站规则生成笔记，适合采集网页资料、小说信息、书评或其他结构化内容。
 
-### 功能一览
+- 使用剪贴板中的链接，或在已配置的网站中搜索。
+- 按规则提取标题、作者、简介等字段和正文。
+- 为不同分类设置输出目录、文件名及内容模板。
+- 支持管理分类与网站规则，内置部分小说网站和 Agent Skills 采集规则。
 
-| 分类 | 功能 |
-| --- | --- |
-| 写作与链接 | 按可配置的规则重排版当前笔记或粘贴的文本；处理粘贴的普通 URL 或 Obsidian 链接；复制当前笔记的链接或路径。URL 粘贴处理与重排版分别设置。 |
-| 快速排版 | 在笔记标题栏添加按钮和快捷菜单，用于执行排版操作。 |
-| 日记与日历 | 创建日记、结转未完成任务、管理周期提醒、纪念日和导入的假期安排。写入日记的提醒可使用自定义级别的标题或 Callout。 |
-| 网址转笔记 | 根据 URL 创建笔记，或在支持的网站中搜索；可编辑网页提取规则和笔记输出目录。 |
-| 阅读与显示 | 预览颜色和 HTML、放大图片、调整图片高度和正文宽度、操作 Mermaid 图表，以及创建双列内容。 |
-| 仓库工具 | 按文件夹筛选 Obsidian 原生搜索结果、根据选定的 Base 视图为新笔记补齐属性，以及检查附件清理和归位方案。 |
+先在 **新建快速笔记** 中选择输出目录并检查规则，再通过快捷入口打开采集视图。网页结构变化、登录要求或网站限制可能影响提取结果；部分桌面端的备用提取方式在手机端不可用。
 
-各类功能可在 **设置 → 第三方插件 → Simple One** 中配置。部分选项需要重启 Obsidian，设置项会注明。
+## 日历与日记
 
-### 开始使用
+- 在日历中查看日期并打开或创建对应日记。
+- 设置日记保存目录、文件名格式和模板；首次使用时可沿用 Obsidian 自带“日记”功能的配置。
+- 将近期未完成事项结转到新日记，便于继续跟踪。
+- 管理周期事项、提前提醒与纪念日。
+- 导入和管理国家或公司的假期安排，显示放假与调休日期。
+- 调整周末、今天、周数、季度和全年日历等外观选项。
 
-1. 按下方说明安装插件，然后在 **设置 → 第三方插件** 中启用 **Simple One**。
-2. 打开 **设置 → 第三方插件 → Simple One**，按需启用功能。
-3. 使用日记前，检查日记文件夹、文件名规则和模板。首次加载时，如果 Obsidian 自带的“日记”插件已有这些设置，Simple One 会沿用它们。
-4. 使用网址转笔记前，选择笔记输出目录并检查网站提取规则。内置分类在未指定输出目录时，最初会将笔记保存到仓库根目录。
-5. 使用附件工具前，在 Obsidian 的 **设置 → 文件与链接** 中为新附件指定专用文件夹。如果当前设置为仓库根目录，插件会提供“快速配置”按钮，把以后新附件的存放目录设为 `Attachment`；它不会移动已有附件。随后在插件设置中打开 **附件优化**，执行操作前先检查待处理清单。附件存放位置为仓库根目录或无法安全识别时，附件扫描与整理功能会被禁用。
+在 **日历与日记 → 日记位置** 中配置路径和模板，通过日记入口打开日历。电脑端可在侧边栏查看，手机端需展开侧边栏查看日历视图。部分启用状态需要重新加载插件或重启 Obsidian 后生效。
 
-#### 手动安装
+## 附件优化
 
-从同一个[发布版本](https://github.com/ZO00OEY/simple-one/releases)下载 `main.js`、`manifest.json` 和 `styles.css`，一起放进仓库的 `.obsidian/plugins/simple-one/` 文件夹。然后在 **设置 → 第三方插件** 中启用 **Simple One**。文件夹名必须与插件 ID `simple-one` 一致。
+- 扫描未被笔记引用的附件，生成待处理清单。
+- 按引用笔记重命名附件，或将附件归位到指定位置。
+- 应用前检查清单，只处理选中的项目；删除操作使用 Obsidian 回收站。
 
-**普通用户不需要安装 Node.js 或 npm。**Obsidian 会加载发布包中已经构建好的 `main.js`。下方的构建命令只供需要自行编译或修改源码的人使用。插件通过官方社区审核后，也可以直接在 Obsidian 内安装。
+请先在 Obsidian 的 **设置 → 文件与链接** 中指定附件专用文件夹。如果附件仍存放在仓库根目录，可使用此功能提供的“快速配置”，为以后新建的附件设置专用目录。附件位置为仓库根目录或无法安全识别时，扫描与整理会被禁用。
 
-### 数据与网络访问
+## 其他快捷工具
 
-- 插件设置及你在设置中填写的数据由 Obsidian 保存在本地的 `.obsidian/plugins/simple-one/data.json`。该文件不包含在本仓库和发布版本中。如需保留配置，请自行私下备份。
-- 中国大陆 2026 年国家放假调休安排单独维护在 `src/default.json`，构建时打包进 `main.js`。只有尚未保存假期安排时才作为初始数据载入；已有安排及公司安排仍保存在本机 `data.json`，不会被覆盖。
-- 启用或使用相应功能时，插件会读取或修改当前仓库中的笔记和附件。清理未引用附件会先显示待处理清单，经确认后才将选中的文件移入 Obsidian 回收站。
-- 提取 URL 标题和网址转笔记功能可能访问你提供的 URL 或所选网站。内置规则涉及晋江、52书库、番茄、起点等网站；站内搜索会把搜索词发送给对应网站。部分桌面端提取流程会在隐藏的网页视图中打开所选网站；番茄的备用流程可能使用该网站的 Cookie 请求其自身接口。这些备用流程在移动端可能不可用。
-- 插件没有统计分析功能，也没有由插件作者运营的服务器。上述联网操作直接访问相关网站；插件不会把仓库内容发送到由本插件运营的服务器。
+- **快速复制当前笔记链接**：电脑端点击笔记顶部复制按钮，复制当前笔记链接；右键切换复制格式，支持 Obsidian URL 与文件绝对路径。手机端自动禁用。
+- **搜索时默认屏蔽**：设置需要排除的文件夹，减少原生搜索中的无关结果。
+- **新建笔记时自动补全属性**：配合 Notebook Navigator，在新建空白笔记时按目录参考选定的 Base 数据库补齐属性。
 
-### 从源码构建
+## 配置与数据
 
-需要先安装 Node.js 和 npm：
+配置保存在本地的插件目录中。电脑、手机的显示参数和部分功能开关分别保存；显示增强中的功能开关及排版、采集等规则内容共用。两端要使用同一份配置，需要自行同步插件配置文件。
 
-```sh
-npm ci
-npm run build
-```
+网页标题提取、网址采集和网站搜索会访问对应网站。插件没有统计分析功能，也没有用于上传仓库内容的插件服务器。
 
-构建命令会检查 TypeScript 并生成 `main.js`。发布时需要同时提供 `main.js`、`manifest.json` 和 `styles.css`。不要将 `data.json`、仓库笔记或 Obsidian 工作区设置提交到公开仓库。
+## 反馈与许可
 
-### 许可协议
+遇到问题或希望增加功能，可以在 [GitHub Issues](https://github.com/ZO00OEY/simple-one/issues) 中反馈，并说明 Obsidian 版本、电脑或手机平台、使用主题及复现步骤。
 
-插件源码采用 [MIT License](LICENSE)。简单说，其他人可以使用、修改和再发布代码，包括商业使用，但分发时需要保留原版权声明和许可文本。插件使用的第三方依赖另有[许可声明](THIRD_PARTY_NOTICES.md)。
+插件采用 [MIT License](LICENSE)，第三方依赖许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

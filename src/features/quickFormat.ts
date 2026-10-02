@@ -6,6 +6,7 @@ import {
   type QuickFormatMode,
 } from "../types";
 import { registerMarkdownAction } from "../shared/markdownAction";
+import { readCalloutColor } from "../shared/calloutColor";
 
 const ACTION_ATTR = "data-simple-quick-format";
 const STYLE_ID = "simple-quick-format-style";
@@ -106,7 +107,10 @@ export function registerQuickFormat(plugin: SimplePlugin): () => void {
   const syncAllActions = registerMarkdownAction(
     plugin,
     ACTION_ATTR,
-    () => plugin.settings.enhancements.quickFormat.enabled,
+    () => {
+      const settings = plugin.settings.enhancements.quickFormat;
+      return settings.enabled && (plugin.isMobile ? settings.showMobileEntry : settings.showDesktopEntry);
+    },
     (view) => {
       const action = view.addAction(QUICK_FORMAT_ICON, actionTitle(plugin), () => applyQuickFormat(plugin));
       action.addEventListener("pointerdown", (event) => { if (activeColumnFormatTarget) event.preventDefault(); });
@@ -158,7 +162,7 @@ function addQuickFormatMenuItem(
     const isCallout = mode.startsWith("callout-") || mode.startsWith("custom-callout:");
     const color = isCallout ? calloutColor(plugin, calloutTypeFromMode(plugin, mode)) : "";
     const menuItem = item
-      .setTitle(menuTitle(plugin, mode))
+      .setTitle(menuTitle(plugin, mode, color))
       .setIcon(modeIcon(mode))
       .setChecked(current === mode);
     if (color) setMenuItemIconColor(menuItem, color);
@@ -243,7 +247,7 @@ export function isHeadingMode(mode: QuickFormatMode): mode is QuickFormatHeading
   return /^h[1-6]$/.test(mode);
 }
 
-function menuTitle(plugin: SimplePlugin, mode: QuickFormatMode): DocumentFragment {
+function menuTitle(plugin: SimplePlugin, mode: QuickFormatMode, color: string): DocumentFragment {
   const fragment = document.createDocumentFragment();
   const label = document.createElement("span");
   label.textContent = modeLabel(plugin, mode);
@@ -252,7 +256,6 @@ function menuTitle(plugin: SimplePlugin, mode: QuickFormatMode): DocumentFragmen
     label.addClass("simple-quick-format-heading-label");
     label.style.color = getCssVar(`--${mode}-color`, "--text-normal");
   } else if (mode.startsWith("callout-") || mode.startsWith("custom-callout:")) {
-    const color = calloutColor(plugin, calloutTypeFromMode(plugin, mode));
     label.style.color = color;
   }
 
@@ -261,11 +264,8 @@ function menuTitle(plugin: SimplePlugin, mode: QuickFormatMode): DocumentFragmen
 }
 
 function calloutColor(plugin: SimplePlugin, type: string): string {
-  const custom = plugin.settings.enhancements.quickFormat.customCallouts.find((item) => item.type.trim().toLowerCase() === type);
-  if (custom?.color && isHexColor(custom.color)) return custom.color;
-  const color = cssColorValue(getCssVar(`--callout-${type}`, ""));
-  if (color) return color;
-  return calloutDefinition(type)?.fallbackColor ?? getCssVar("--text-normal", "currentColor");
+  const context = plugin.app.workspace.getMostRecentLeaf()?.view.containerEl ?? document.body;
+  return readCalloutColor(type, context);
 }
 
 function setMenuItemIconColor(item: unknown, color: string): void {
@@ -282,14 +282,6 @@ function getCssVar(name: string, fallback: string): string {
 
 function isHexColor(value: string): boolean {
   return /^#[0-9a-f]{6}$/i.test(value);
-}
-
-function cssColorValue(value: string): string {
-  if (isHexColor(value) || /^(?:rgb|hsl|hwb|lab|lch|oklab|oklch|color)\(/i.test(value)) return value;
-  if (/^\d+,\s*\d+,\s*\d+$/.test(value)) return `rgb(${value})`;
-  if (/^var\(--[^)]+-rgb\)$/.test(value)) return `rgb(${value})`;
-  if (/^var\(--[^)]+\)$/.test(value)) return value;
-  return "";
 }
 
 function hexToRgbTriplet(hex: string): string {

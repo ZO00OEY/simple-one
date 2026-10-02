@@ -110,6 +110,14 @@ export interface SimplePluginSettings {
   enableColorPreview: boolean;
   readableLineWidth: string;
   popupWindowScale: string;
+  mobileSwitches: Record<string, boolean | string[]>;
+  mobileDisplay: {
+    readableLineWidth: string;
+    imageMaxHeight: string;
+    popupWindowScale: string;
+    headerButtonSize: string;
+    disableThemeHeaderButtons: boolean;
+  };
   enableMermaidEnhancer: boolean;
   imageMaxHeight: string;
   enableImageZoom: boolean;
@@ -190,26 +198,25 @@ export interface QuickFormatCalloutDefinition {
   type: QuickFormatCalloutType;
   label: string;
   icon: string;
-  fallbackColor: string;
   aliases: string[];
 }
 
 // Keep aliases in the definition for compatibility/documentation, but expose one menu item per icon.
 export const QUICK_FORMAT_CALLOUTS: QuickFormatCalloutDefinition[] = [
-  { type: "note", label: "Note", icon: "pencil", fallbackColor: "#2e80f2", aliases: [] },
-  { type: "abstract", label: "Abstract", icon: "clipboard-list", fallbackColor: "#a882e5", aliases: ["summary", "tldr"] },
-  { type: "info", label: "Info", icon: "info", fallbackColor: "#2e80f2", aliases: [] },
-  { type: "todo", label: "Todo", icon: "list-checks", fallbackColor: "#2e80f2", aliases: [] },
-  { type: "important", label: "Important", icon: "badge-alert", fallbackColor: "#bd0000", aliases: [] },
-  { type: "tip", label: "Tip", icon: "flame", fallbackColor: "#00bfbc", aliases: ["hint"] },
-  { type: "success", label: "Success", icon: "circle-check", fallbackColor: "#2ea043", aliases: ["check", "done"] },
-  { type: "question", label: "Question", icon: "circle-help", fallbackColor: "#d4a72c", aliases: ["help", "faq"] },
-  { type: "warning", label: "Warning", icon: "triangle-alert", fallbackColor: "#ec7500", aliases: ["caution", "attention"] },
-  { type: "failure", label: "Failure", icon: "circle-x", fallbackColor: "#e03e3e", aliases: ["fail", "missing"] },
-  { type: "danger", label: "Danger", icon: "zap", fallbackColor: "#e03e3e", aliases: ["error"] },
-  { type: "bug", label: "Bug", icon: "bug", fallbackColor: "#e03e3e", aliases: [] },
-  { type: "example", label: "Example", icon: "list", fallbackColor: "#a882e5", aliases: [] },
-  { type: "quote", label: "Quote", icon: "quote", fallbackColor: "#808080", aliases: ["cite"] },
+  { type: "note", label: "Note", icon: "pencil", aliases: [] },
+  { type: "abstract", label: "Abstract", icon: "clipboard-list", aliases: ["summary", "tldr"] },
+  { type: "info", label: "Info", icon: "info", aliases: [] },
+  { type: "todo", label: "Todo", icon: "list-checks", aliases: [] },
+  { type: "important", label: "Important", icon: "badge-alert", aliases: [] },
+  { type: "tip", label: "Tip", icon: "flame", aliases: ["hint"] },
+  { type: "success", label: "Success", icon: "circle-check", aliases: ["check", "done"] },
+  { type: "question", label: "Question", icon: "circle-help", aliases: ["help", "faq"] },
+  { type: "warning", label: "Warning", icon: "triangle-alert", aliases: ["caution", "attention"] },
+  { type: "failure", label: "Failure", icon: "circle-x", aliases: ["fail", "missing"] },
+  { type: "danger", label: "Danger", icon: "zap", aliases: ["error"] },
+  { type: "bug", label: "Bug", icon: "bug", aliases: [] },
+  { type: "example", label: "Example", icon: "list", aliases: [] },
+  { type: "quote", label: "Quote", icon: "quote", aliases: ["cite"] },
 ];
 
 export interface QuickFormatCustomCallout {
@@ -232,6 +239,8 @@ export interface QuickCopyLinkSettings {
 
 export interface QuickFormatSettings {
   enabled: boolean;
+  showDesktopEntry: boolean;
+  showMobileEntry: boolean;
   lastMode: QuickFormatMode;
   visibleModes: QuickFormatMode[];
   headingColors: Record<QuickFormatHeadingLevel, string>;
@@ -661,6 +670,8 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   enableColorPreview: true,
   readableLineWidth: "900",
   popupWindowScale: "70",
+  mobileSwitches: {},
+  mobileDisplay: { readableLineWidth: "", imageMaxHeight: "", popupWindowScale: "0", headerButtonSize: "29", disableThemeHeaderButtons: true },
   enableMermaidEnhancer: true,
   imageMaxHeight: "560",
   enableImageZoom: true,
@@ -676,6 +687,8 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
     },
     quickFormat: {
       enabled: true,
+      showDesktopEntry: true,
+      showMobileEntry: true,
       lastMode: "h3",
       visibleModes: ["h3", "h4", "h5", "quote"],
       headingColors: {

@@ -11954,20 +11954,20 @@ var import_lunar_javascript = __toESM(require_lunar_javascript());
 
 // src/types.ts
 var QUICK_FORMAT_CALLOUTS = [
-  { type: "note", label: "Note", icon: "pencil", fallbackColor: "#2e80f2", aliases: [] },
-  { type: "abstract", label: "Abstract", icon: "clipboard-list", fallbackColor: "#a882e5", aliases: ["summary", "tldr"] },
-  { type: "info", label: "Info", icon: "info", fallbackColor: "#2e80f2", aliases: [] },
-  { type: "todo", label: "Todo", icon: "list-checks", fallbackColor: "#2e80f2", aliases: [] },
-  { type: "important", label: "Important", icon: "badge-alert", fallbackColor: "#bd0000", aliases: [] },
-  { type: "tip", label: "Tip", icon: "flame", fallbackColor: "#00bfbc", aliases: ["hint"] },
-  { type: "success", label: "Success", icon: "circle-check", fallbackColor: "#2ea043", aliases: ["check", "done"] },
-  { type: "question", label: "Question", icon: "circle-help", fallbackColor: "#d4a72c", aliases: ["help", "faq"] },
-  { type: "warning", label: "Warning", icon: "triangle-alert", fallbackColor: "#ec7500", aliases: ["caution", "attention"] },
-  { type: "failure", label: "Failure", icon: "circle-x", fallbackColor: "#e03e3e", aliases: ["fail", "missing"] },
-  { type: "danger", label: "Danger", icon: "zap", fallbackColor: "#e03e3e", aliases: ["error"] },
-  { type: "bug", label: "Bug", icon: "bug", fallbackColor: "#e03e3e", aliases: [] },
-  { type: "example", label: "Example", icon: "list", fallbackColor: "#a882e5", aliases: [] },
-  { type: "quote", label: "Quote", icon: "quote", fallbackColor: "#808080", aliases: ["cite"] }
+  { type: "note", label: "Note", icon: "pencil", aliases: [] },
+  { type: "abstract", label: "Abstract", icon: "clipboard-list", aliases: ["summary", "tldr"] },
+  { type: "info", label: "Info", icon: "info", aliases: [] },
+  { type: "todo", label: "Todo", icon: "list-checks", aliases: [] },
+  { type: "important", label: "Important", icon: "badge-alert", aliases: [] },
+  { type: "tip", label: "Tip", icon: "flame", aliases: ["hint"] },
+  { type: "success", label: "Success", icon: "circle-check", aliases: ["check", "done"] },
+  { type: "question", label: "Question", icon: "circle-help", aliases: ["help", "faq"] },
+  { type: "warning", label: "Warning", icon: "triangle-alert", aliases: ["caution", "attention"] },
+  { type: "failure", label: "Failure", icon: "circle-x", aliases: ["fail", "missing"] },
+  { type: "danger", label: "Danger", icon: "zap", aliases: ["error"] },
+  { type: "bug", label: "Bug", icon: "bug", aliases: [] },
+  { type: "example", label: "Example", icon: "list", aliases: [] },
+  { type: "quote", label: "Quote", icon: "quote", aliases: ["cite"] }
 ];
 var rid = Date.now();
 function nextId() {
@@ -12197,6 +12197,8 @@ var DEFAULT_SETTINGS = {
   enableColorPreview: true,
   readableLineWidth: "900",
   popupWindowScale: "70",
+  mobileSwitches: {},
+  mobileDisplay: { readableLineWidth: "", imageMaxHeight: "", popupWindowScale: "0", headerButtonSize: "29", disableThemeHeaderButtons: true },
   enableMermaidEnhancer: true,
   imageMaxHeight: "560",
   enableImageZoom: true,
@@ -12212,6 +12214,8 @@ var DEFAULT_SETTINGS = {
     },
     quickFormat: {
       enabled: true,
+      showDesktopEntry: true,
+      showMobileEntry: true,
       lastMode: "h3",
       visibleModes: ["h3", "h4", "h5", "quote"],
       headingColors: {
@@ -12595,7 +12599,7 @@ var DiaryView = class extends import_obsidian.ItemView {
     panel.createEl("h2", { cls: "simple-diary-inline-settings-title", text: "\u65E5\u8BB0" });
     const appearanceSection = panel.createDiv({ cls: "simple-diary-inline-settings-section" });
     appearanceSection.createEl("h3", { cls: "simple-diary-inline-settings-heading", text: "\u65E5\u5386\u5916\u89C2" });
-    const navigator2 = getNotebookNavigatorPlugin(this.app);
+    const navigator2 = this.plugin.isMobile ? null : getNotebookNavigatorPlugin(this.app);
     const toggleSetting = (name2, description, value, onChange) => {
       new import_obsidian.Setting(appearanceSection).setName(name2).setDesc(description).addToggle(
         (toggle) => toggle.setValue(value).onChange(async (nextValue) => {
@@ -12669,16 +12673,16 @@ var DiaryView = class extends import_obsidian.ItemView {
     const localeData = import_obsidian.moment.localeData(locale);
     const firstDay = localeData.firstDayOfWeek();
     const names = localeData.weekdaysMin();
-    const configuredWeekends = navigator2?.calendarWeekendDays ?? (diary.showWeekends ? "sat-sun" : "none");
+    const configuredWeekends = (this.plugin.isMobile ? void 0 : navigator2?.calendarWeekendDays) ?? (diary.showWeekends ? "sat-sun" : "none");
     const highlightedWeekends = configuredWeekends === "none" ? "none" : "sat-sun";
     return {
       calendarLocale,
       calendarWeekendDays: highlightedWeekends,
       calendarMonthHeadingFormat: navigator2?.calendarMonthHeadingFormat ?? "full",
-      calendarHighlightToday: navigator2?.calendarHighlightToday ?? diary.highlightToday,
-      calendarShowWeekNumber: navigator2?.calendarShowWeekNumber ?? diary.showWeekNumber,
-      calendarShowQuarter: navigator2?.calendarShowQuarter ?? diary.showQuarter,
-      calendarShowYearCalendar: navigator2?.calendarShowYearCalendar ?? diary.showYearCalendar,
+      calendarHighlightToday: this.plugin.isMobile ? diary.highlightToday : navigator2?.calendarHighlightToday ?? diary.highlightToday,
+      calendarShowWeekNumber: this.plugin.isMobile ? diary.showWeekNumber : navigator2?.calendarShowWeekNumber ?? diary.showWeekNumber,
+      calendarShowQuarter: this.plugin.isMobile ? diary.showQuarter : navigator2?.calendarShowQuarter ?? diary.showQuarter,
+      calendarShowYearCalendar: this.plugin.isMobile ? diary.showYearCalendar : navigator2?.calendarShowYearCalendar ?? diary.showYearCalendar,
       locale,
       firstDay,
       weekdayNames: Array.from({ length: 7 }, (_, index) => compactWeekdayName(names[(firstDay + index) % 7])),
@@ -15512,6 +15516,7 @@ function parsePopupScalePercent(value) {
 function normalizePopupScalePercent(value, fallback) {
   const text = typeof value === "number" ? String(value) : typeof value === "string" ? value.trim() : fallback;
   if (!text) return "";
+  if (Number(text) === 0) return "0";
   const percent = parsePopupScalePercent(text);
   return percent === null ? fallback : String(Math.round(percent));
 }
@@ -15553,7 +15558,7 @@ function applyModalScale(modalEl, value, referenceWindow = modalEl.ownerDocument
 function registerPopupWindowSizing(plugin) {
   const app = plugin.app;
   const settingsModal = app.setting;
-  if (!settingsModal) return () => {
+  if (!settingsModal?.modalEl || typeof settingsModal.onOpen !== "function") return () => {
   };
   const clearModalScale = (modalEl) => {
     modalEl.removeClass("simple-scaled-modal");
@@ -15561,7 +15566,7 @@ function registerPopupWindowSizing(plugin) {
     modalEl.style.removeProperty("--simple-popup-height");
   };
   const applyNativeWindowScale = (settingsWindow, mainWindow) => {
-    const bounds = calculatePopupBounds(mainWindow, plugin.settings.popupWindowScale);
+    const bounds = calculatePopupBounds(mainWindow, plugin.displaySettings.popupWindowScale);
     if (!bounds || settingsWindow.closed) return;
     try {
       settingsWindow.resizeTo(bounds.width, bounds.height);
@@ -15577,20 +15582,20 @@ function registerPopupWindowSizing(plugin) {
     const mainWindow = getMainAppWindow(plugin.app);
     if (!settingsWindow || !mainWindow) return;
     if (settingsWindow === mainWindow) {
-      applyModalScale(modalEl, plugin.settings.popupWindowScale, mainWindow);
+      applyModalScale(modalEl, plugin.displaySettings.popupWindowScale, mainWindow);
       return;
     }
     clearModalScale(modalEl);
-    if (resizeNativeWindow) applyNativeWindowScale(settingsWindow, mainWindow);
+    if (!plugin.isMobile && resizeNativeWindow) applyNativeWindowScale(settingsWindow, mainWindow);
   };
   const originalGetPopoutOptions = settingsModal.getPopoutOptions;
   const wrappedGetPopoutOptions = function() {
-    const options = originalGetPopoutOptions.call(this);
+    const options = originalGetPopoutOptions?.call(this) ?? {};
     const mainWindow = getMainAppWindow(plugin.app);
-    const bounds = mainWindow ? calculatePopupBounds(mainWindow, plugin.settings.popupWindowScale) : null;
+    const bounds = mainWindow ? calculatePopupBounds(mainWindow, plugin.displaySettings.popupWindowScale) : null;
     return bounds ? { ...options, width: bounds.width, height: bounds.height } : options;
   };
-  settingsModal.getPopoutOptions = wrappedGetPopoutOptions;
+  if (!plugin.isMobile && originalGetPopoutOptions) settingsModal.getPopoutOptions = wrappedGetPopoutOptions;
   const originalOnOpen = settingsModal.onOpen;
   const wrappedOnOpen = function() {
     originalOnOpen.call(this);
@@ -15630,7 +15635,7 @@ function registerQuickCopyLink(plugin) {
   const syncAllActions = registerMarkdownAction(
     plugin,
     ACTION_ATTR2,
-    () => plugin.settings.enhancements.quickCopyLink.enabled,
+    () => !plugin.isMobile && plugin.settings.enhancements.quickCopyLink.enabled,
     (view) => {
       const action = view.addAction(modeIcon(plugin.settings.enhancements.quickCopyLink.lastMode), actionTitle2(plugin), async () => {
         await copyLink(plugin, view, plugin.settings.enhancements.quickCopyLink.lastMode);
@@ -20287,6 +20292,59 @@ async function saveColumnsHotkey(app, hotkey) {
 
 // src/features/quickFormat.ts
 var import_obsidian11 = require("obsidian");
+
+// src/shared/calloutColor.ts
+function readCalloutColor(type, context = document.body) {
+  const doc = context.ownerDocument;
+  const win = doc.defaultView;
+  if (!win) return "";
+  const probe = doc.createElement("div");
+  probe.className = "markdown-preview-view markdown-rendered";
+  probe.setAttribute("aria-hidden", "true");
+  probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;width:0;height:0;overflow:hidden;";
+  const callout = doc.createElement("div");
+  callout.className = "callout";
+  callout.dataset.callout = type.trim().toLowerCase() || "note";
+  callout.dataset.calloutFold = "";
+  callout.dataset.calloutMetadata = "";
+  const title = doc.createElement("div");
+  title.className = "callout-title";
+  const icon = doc.createElement("div");
+  icon.className = "callout-icon";
+  const svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.classList.add("svg-icon");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("fill", "none");
+  icon.append(svg);
+  const titleText = doc.createElement("div");
+  titleText.className = "callout-title-inner";
+  titleText.textContent = type;
+  title.append(icon, titleText);
+  const content2 = doc.createElement("div");
+  content2.className = "callout-content";
+  content2.append(doc.createElement("p"));
+  callout.append(title, content2);
+  probe.append(callout);
+  (context.querySelector(".markdown-preview-sizer, .cm-sizer") ?? context).append(probe);
+  try {
+    const stroke = win.getComputedStyle(svg).stroke;
+    return stroke && stroke !== "none" && stroke !== "currentcolor" ? stroke : win.getComputedStyle(icon).color;
+  } finally {
+    probe.remove();
+  }
+}
+function readCalloutColorHex(type, context = document.body) {
+  const color = readCalloutColor(type, context);
+  const canvas = context.ownerDocument.createElement("canvas");
+  canvas.width = canvas.height = 1;
+  const paint = canvas.getContext("2d");
+  if (!paint || !color) return "";
+  paint.fillStyle = color;
+  paint.fillRect(0, 0, 1, 1);
+  return "#" + Array.from(paint.getImageData(0, 0, 1, 1).data.slice(0, 3)).map((channel) => channel.toString(16).padStart(2, "0")).join("");
+}
+
+// src/features/quickFormat.ts
 var ACTION_ATTR3 = "data-simple-quick-format";
 var STYLE_ID = "simple-quick-format-style";
 var QUICK_FORMAT_ICON = "heading";
@@ -20375,7 +20433,10 @@ function registerQuickFormat(plugin) {
   const syncAllActions = registerMarkdownAction(
     plugin,
     ACTION_ATTR3,
-    () => plugin.settings.enhancements.quickFormat.enabled,
+    () => {
+      const settings = plugin.settings.enhancements.quickFormat;
+      return settings.enabled && (plugin.isMobile ? settings.showMobileEntry : settings.showDesktopEntry);
+    },
     (view) => {
       const action = view.addAction(QUICK_FORMAT_ICON, actionTitle3(plugin), () => applyQuickFormat(plugin));
       action.addEventListener("pointerdown", (event) => {
@@ -20419,7 +20480,7 @@ function addQuickFormatMenuItem(menu, plugin, syncAllActions, current, mode) {
   menu.addItem((item) => {
     const isCallout = mode.startsWith("callout-") || mode.startsWith("custom-callout:");
     const color = isCallout ? calloutColor(plugin, calloutTypeFromMode(plugin, mode)) : "";
-    const menuItem = item.setTitle(menuTitle(plugin, mode)).setIcon(modeIcon2(mode)).setChecked(current === mode);
+    const menuItem = item.setTitle(menuTitle(plugin, mode, color)).setIcon(modeIcon2(mode)).setChecked(current === mode);
     if (color) setMenuItemIconColor(menuItem, color);
     menuItem.onClick(async () => {
       plugin.settings.enhancements.quickFormat.lastMode = mode;
@@ -20483,7 +20544,7 @@ function modeIcon2(mode) {
 function isHeadingMode(mode) {
   return /^h[1-6]$/.test(mode);
 }
-function menuTitle(plugin, mode) {
+function menuTitle(plugin, mode, color) {
   const fragment = document.createDocumentFragment();
   const label = document.createElement("span");
   label.textContent = modeLabel(plugin, mode);
@@ -20491,18 +20552,14 @@ function menuTitle(plugin, mode) {
     label.addClass("simple-quick-format-heading-label");
     label.style.color = getCssVar(`--${mode}-color`, "--text-normal");
   } else if (mode.startsWith("callout-") || mode.startsWith("custom-callout:")) {
-    const color = calloutColor(plugin, calloutTypeFromMode(plugin, mode));
     label.style.color = color;
   }
   fragment.append(label);
   return fragment;
 }
 function calloutColor(plugin, type) {
-  const custom = plugin.settings.enhancements.quickFormat.customCallouts.find((item) => item.type.trim().toLowerCase() === type);
-  if (custom?.color && isHexColor(custom.color)) return custom.color;
-  const color = cssColorValue(getCssVar(`--callout-${type}`, ""));
-  if (color) return color;
-  return calloutDefinition(type)?.fallbackColor ?? getCssVar("--text-normal", "currentColor");
+  const context = plugin.app.workspace.getMostRecentLeaf()?.view.containerEl ?? document.body;
+  return readCalloutColor(type, context);
 }
 function setMenuItemIconColor(item, color) {
   const dom = item.dom;
@@ -20516,13 +20573,6 @@ function getCssVar(name2, fallback) {
 }
 function isHexColor(value) {
   return /^#[0-9a-f]{6}$/i.test(value);
-}
-function cssColorValue(value) {
-  if (isHexColor(value) || /^(?:rgb|hsl|hwb|lab|lch|oklab|oklch|color)\(/i.test(value)) return value;
-  if (/^\d+,\s*\d+,\s*\d+$/.test(value)) return `rgb(${value})`;
-  if (/^var\(--[^)]+-rgb\)$/.test(value)) return `rgb(${value})`;
-  if (/^var\(--[^)]+\)$/.test(value)) return value;
-  return "";
 }
 function hexToRgbTriplet(hex) {
   const value = hex.slice(1);
@@ -24671,7 +24721,7 @@ var UnusedAttachmentModal = class extends import_obsidian16.Modal {
   }
   onOpen() {
     this.modalEl.addClass("simple-attachment-modal");
-    applyModalScale(this.modalEl, this.plugin.settings.popupWindowScale, getMainAppWindow(this.plugin.app));
+    applyModalScale(this.modalEl, this.plugin.displaySettings.popupWindowScale, getMainAppWindow(this.plugin.app));
     this.contentEl.empty();
     this.contentEl.createEl("h2", { text: "\u672A\u5F15\u7528\u9644\u4EF6" });
     this.contentEl.createDiv({ cls: "setting-item-description", text: "\u56FE\u7247\u9ED8\u8BA4\u52FE\u9009\uFF1BJSON\u3001txt \u7B49\u975E\u56FE\u7247\u9ED8\u8BA4\u4E0D\u52FE\u9009\u3002\u786E\u8BA4\u540E\u5220\u9664\u5230 Obsidian \u56DE\u6536\u7AD9\u3002" });
@@ -24706,7 +24756,7 @@ var RenamePlanModal = class extends import_obsidian16.Modal {
   }
   onOpen() {
     this.modalEl.addClass("simple-attachment-modal");
-    applyModalScale(this.modalEl, this.plugin.settings.popupWindowScale, getMainAppWindow(this.plugin.app));
+    applyModalScale(this.modalEl, this.plugin.displaySettings.popupWindowScale, getMainAppWindow(this.plugin.app));
     this.contentEl.empty();
     this.contentEl.createEl("h2", { text: "\u56FE\u7247\u91CD\u547D\u540D\u5E76\u6309\u7B14\u8BB0\u5F52\u4F4D\u6E05\u5355" });
     this.contentEl.createDiv({ cls: "setting-item-description", text: "\u53EA\u5904\u7406\u52FE\u9009\u9879\uFF1B\u6267\u884C\u65F6\u4F1A\u8BA9 Obsidian \u66F4\u65B0\u5F15\u7528\u3002" });
@@ -24752,7 +24802,7 @@ var AttachmentOrganizationModal = class extends import_obsidian16.Modal {
   }
   onOpen() {
     this.modalEl.addClass("simple-attachment-modal");
-    applyModalScale(this.modalEl, this.plugin.settings.popupWindowScale, getMainAppWindow(this.plugin.app));
+    applyModalScale(this.modalEl, this.plugin.displaySettings.popupWindowScale, getMainAppWindow(this.plugin.app));
     this.contentEl.empty();
     this.contentEl.createEl("h2", { text: "\u975E\u56FE\u7247\u9644\u4EF6\u6309\u7B14\u8BB0\u5F52\u4F4D\u6E05\u5355" });
     this.contentEl.createDiv({
@@ -24802,7 +24852,7 @@ var InlineImagePlanModal = class extends import_obsidian16.Modal {
   }
   onOpen() {
     this.modalEl.addClass("simple-attachment-modal");
-    applyModalScale(this.modalEl, this.plugin.settings.popupWindowScale, getMainAppWindow(this.plugin.app));
+    applyModalScale(this.modalEl, this.plugin.displaySettings.popupWindowScale, getMainAppWindow(this.plugin.app));
     this.contentEl.empty();
     this.contentEl.createEl("h2", { text: "\u5185\u5D4C\u56FE\u7247\u8F6C\u4E3A\u9644\u4EF6\u6E05\u5355" });
     this.contentEl.createDiv({ cls: "setting-item-description", text: "\u628A Markdown \u4E2D\u76F4\u63A5\u5D4C\u5165\u7684 base64 \u56FE\u7247\u4FDD\u5B58\u4E3A\u72EC\u7ACB\u9644\u4EF6\uFF0C\u5E76\u66FF\u6362\u4E3A Obsidian \u56FE\u7247\u94FE\u63A5\u3002" });
@@ -24998,11 +25048,19 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
     this.expandedHolidaySchedules = /* @__PURE__ */ new Set();
     this.deleteMode = null;
     this.plugin = plugin;
+    this.parameterPlatform = plugin.isMobile ? "mobile" : "desktop";
+  }
+  hide() {
+    this.parameterPlatform = this.plugin.isMobile ? "mobile" : "desktop";
   }
   display() {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass("simple-settings");
+    containerEl.createDiv({
+      cls: "simple-platform-hint",
+      text: this.plugin.isMobile ? "\u5DF2\u4F7F\u7528\u624B\u673A\u5E73\u53F0\uFF0C\u5DF2\u5207\u6362\u4E3A\u624B\u673A\u7AEF\u4E13\u5C5E\u914D\u7F6E" : `\u68C0\u6D4B\u5230\u5F53\u524D\u5E73\u53F0\u4E3A ${this.plugin.platformName}\uFF0C\u5F53\u524D\u4F7F\u7528\u684C\u9762\u663E\u793A\u8BBE\u7F6E\u3002`
+    });
     if (this.page.type === "overview") {
       this.renderOverview(containerEl);
     } else if (this.page.type === "html-preview") {
@@ -25055,7 +25113,6 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
         "\u8C03\u6574\u6B63\u6587\u5BBD\u5EA6\u3001\u56FE\u7247\u663E\u793A\u4E0E\u5185\u5BB9\u9884\u89C8\u3002",
         () => this.openPage({ type: "display-enhancements" })
       );
-      this.renderNavigationItem(card, "\u53CC\u5217\u663E\u793A\u5185\u5BB9", "\u5728\u6B63\u6587\u4E2D\u521B\u5EFA\u548C\u7F16\u8F91\u53CC\u5217\u89C6\u56FE\u3002", () => this.openPage({ type: "notion-columns" }));
       this.renderNavigationItem(
         card,
         QUICK_FORMAT_NAME,
@@ -25072,8 +25129,9 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
       );
     });
     this.renderGroup(container, "\u5FEB\u6377\u64CD\u4F5C", (card) => {
-      new import_obsidian17.Setting(card).setName("\u5FEB\u901F\u590D\u5236\u5F53\u524D\u7B14\u8BB0\u94FE\u63A5").setDesc("\u5728\u5F53\u524D\u7B14\u8BB0\u6807\u9898\u680F\u589E\u52A0\u590D\u5236\u6309\u94AE\u3002\u5DE6\u952E\u590D\u5236\u94FE\u63A5\uFF0C\u53F3\u952E\u5207\u6362\u590D\u5236\u683C\u5F0F\u3002").addToggle(
-        (toggle) => toggle.setValue(this.plugin.settings.enhancements.quickCopyLink.enabled).onChange(async (value) => {
+      new import_obsidian17.Setting(card).setName("\u5FEB\u901F\u590D\u5236\u5F53\u524D\u7B14\u8BB0\u94FE\u63A5").setDesc(this.plugin.isMobile ? "\u68C0\u6D4B\u5230\u5F53\u524D\u4E3A\u79FB\u52A8\u7AEF\uFF0C\u5DF2\u81EA\u52A8\u7981\u7528\u3002" : "\u5728\u5F53\u524D\u7B14\u8BB0\u6807\u9898\u680F\u589E\u52A0\u590D\u5236\u6309\u94AE\u3002\u5DE6\u952E\u590D\u5236\u94FE\u63A5\uFF0C\u53F3\u952E\u5207\u6362\u590D\u5236\u683C\u5F0F\u3002").addToggle(
+        (toggle) => toggle.setValue(!this.plugin.isMobile && this.plugin.settings.enhancements.quickCopyLink.enabled).setDisabled(this.plugin.isMobile).onChange(async (value) => {
+          if (this.plugin.isMobile) return;
           this.plugin.settings.enhancements.quickCopyLink.enabled = value;
           await this.plugin.saveSettings();
         })
@@ -25116,65 +25174,116 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
   }
   renderDisplayEnhancementSettings(container) {
     this.renderPageHeader(container, "\u663E\u793A\u589E\u5F3A");
-    this.renderSettingCard(container, (card) => {
-      new import_obsidian17.Setting(card).setName("\u7B14\u8BB0\u6B63\u6587\u5BBD\u5EA6").setDesc("\u8986\u76D6\u4E3B\u9898\u7684\u53EF\u8BFB\u884C\u5BBD\uFF0C\u5355\u4F4D\u4E3A px\uFF1B\u9700\u8981\u5F00\u542F Obsidian \u7684\u201C\u53EF\u8BFB\u884C\u957F\u201D\u3002\u7559\u7A7A\u5219\u8DDF\u968F\u4E3B\u9898\u9ED8\u8BA4\u503C\u3002").addText((text) => {
-        text.inputEl.type = "number";
-        text.inputEl.min = "400";
-        text.inputEl.max = "2000";
-        text.inputEl.step = "20";
-        text.setPlaceholder("\u4F8B\u5982 900\uFF1B\u7559\u7A7A\u8DDF\u968F\u4E3B\u9898").setValue(this.plugin.settings.readableLineWidth).onChange(async (value) => {
-          this.plugin.settings.readableLineWidth = value.trim();
-          this.plugin.applyReadableLineWidth();
-          await this.plugin.saveSettings();
-        });
+    this.renderSectionHeading(container, "\u53C2\u6570\u4F18\u5316").setClass("simple-parameter-heading").addDropdown((dropdown) => {
+      dropdown.selectEl.setAttribute("aria-label", "\u67E5\u770B\u548C\u7F16\u8F91\u7684\u5E73\u53F0\u53C2\u6570");
+      dropdown.addOptions({ desktop: "\u7535\u8111", mobile: "\u624B\u673A" }).setValue(this.parameterPlatform).onChange((value) => {
+        this.parameterPlatform = value === "mobile" ? "mobile" : "desktop";
+        renderParameters();
       });
-      new import_obsidian17.Setting(card).setName("\u5F39\u51FA\u7A97\u53E3\u7F29\u653E\u6BD4\u4F8B").setDesc("\u8BBE\u7F6E\u7A97\u53E3\u548C\u9644\u4EF6\u5904\u7406\u6E05\u5355\u7EDF\u4E00\u6309\u4E3B Obsidian \u7A97\u53E3\u7684\u6BD4\u4F8B\u663E\u793A\uFF1B\u586B\u5199 40\u201395\uFF0C\u7559\u7A7A\u5219\u4E0D\u8C03\u6574\u3002").addText((text) => {
+    });
+    const card = container.createDiv({ cls: "simple-card" });
+    const renderParameters = () => {
+      card.empty();
+      const mobile = this.parameterPlatform === "mobile";
+      const profile = {
+        suffix: mobile ? "\uFF08\u624B\u673A\uFF09" : "",
+        mobile,
+        settings: mobile ? this.plugin.settings.mobileDisplay : this.plugin.settings
+      };
+      new import_obsidian17.Setting(card).setName(`\u5F39\u51FA\u7A97\u53E3\u7F29\u653E\u6BD4\u4F8B${profile.suffix}`).setDesc(`${profile.mobile ? "\u624B\u673A\u7AEF\u81EA\u52A8" : "\u7535\u8111\u7AEF"}\u4F7F\u7528\u6B64\u6BD4\u4F8B\u663E\u793A\u8BBE\u7F6E\u7A97\u53E3\u548C\u9644\u4EF6\u6E05\u5355\uFF1B\u586B\u5199 40\u201395\uFF0C0 \u6216\u7559\u7A7A\u5219\u4E0D\u8C03\u6574\u3002`).addText((text) => {
         text.inputEl.type = "number";
-        text.inputEl.min = String(POPUP_SCALE_MIN);
+        text.inputEl.min = "0";
         text.inputEl.max = String(POPUP_SCALE_MAX);
         text.inputEl.step = "5";
-        text.setPlaceholder("\u9ED8\u8BA4 70\uFF1B\u7559\u7A7A\u4E0D\u8C03\u6574").setValue(this.plugin.settings.popupWindowScale).onChange(async (value) => {
-          this.plugin.settings.popupWindowScale = value.trim();
+        text.setPlaceholder(profile.mobile ? "\u9ED8\u8BA4 0\uFF1B\u4E0D\u8C03\u6574" : "\u9ED8\u8BA4 70\uFF1B\u7559\u7A7A\u4E0D\u8C03\u6574").setValue(profile.settings.popupWindowScale).onChange(async (value) => {
+          profile.settings.popupWindowScale = value.trim();
           await this.plugin.saveSettings();
           this.plugin.refreshPopupWindowSizing();
         });
       });
-      new import_obsidian17.Setting(card).setName("\u56FE\u7247\u9AD8\u5EA6").setDesc("\u9650\u5236\u7B14\u8BB0\u56FE\u7247\u7684\u6700\u5927\u663E\u793A\u9AD8\u5EA6\uFF0C\u6309\u539F\u6BD4\u4F8B\u81EA\u52A8\u7F29\u653E\uFF1B\u7559\u7A7A\u8868\u793A\u4E0D\u5F00\u542F\u3002").addText((text) => {
+      new import_obsidian17.Setting(card).setName(`\u7B14\u8BB0\u6B63\u6587\u5BBD\u5EA6${profile.suffix}`).setDesc(profile.mobile ? "\u624B\u673A\u7AEF\u7684\u6700\u5927\u53EF\u8BFB\u884C\u5BBD\uFF0C\u5355\u4F4D\u4E3A px\uFF1B\u5EFA\u8BAE\u7559\u7A7A\u3002\u5927\u4E8E\u5C4F\u5E55\u53EF\u7528\u5BBD\u5EA6\u65F6\u901A\u5E38\u65E0\u660E\u663E\u6548\u679C\uFF0C\u5C0F\u4E8E\u53EF\u7528\u5BBD\u5EA6\u65F6\u624D\u4F1A\u6536\u7A84\u6B63\u6587\u3002\u9700\u5F00\u542F Obsidian \u7684\u201C\u53EF\u8BFB\u884C\u957F\u201D\u3002" : "\u7535\u8111\u7AEF\u7684\u6700\u5927\u53EF\u8BFB\u884C\u5BBD\uFF0C\u5355\u4F4D\u4E3A px\uFF1B\u9700\u8981\u5F00\u542F Obsidian \u7684\u201C\u53EF\u8BFB\u884C\u957F\u201D\u3002\u7559\u7A7A\u5219\u8DDF\u968F\u4E3B\u9898\u9ED8\u8BA4\u503C\u3002").addText((text) => {
+        text.inputEl.type = "number";
+        text.inputEl.min = profile.mobile ? "1" : "400";
+        text.inputEl.max = "2000";
+        text.inputEl.step = "20";
+        text.setPlaceholder(profile.mobile ? "\u5EFA\u8BAE\u7559\u7A7A\uFF0C\u8DDF\u968F\u4E3B\u9898" : "\u4F8B\u5982 900\uFF1B\u7559\u7A7A\u8DDF\u968F\u4E3B\u9898").setValue(profile.settings.readableLineWidth).onChange(async (value) => {
+          profile.settings.readableLineWidth = value.trim();
+          this.plugin.applyReadableLineWidth();
+          await this.plugin.saveSettings();
+        });
+      });
+      new import_obsidian17.Setting(card).setName(`\u56FE\u7247\u9AD8\u5EA6${profile.suffix}`).setDesc(`${profile.mobile ? "\u624B\u673A\u7AEF" : "\u7535\u8111\u7AEF"}\u7B14\u8BB0\u56FE\u7247\u7684\u6700\u5927\u663E\u793A\u9AD8\u5EA6\uFF0C\u6309\u539F\u6BD4\u4F8B\u81EA\u52A8\u7F29\u653E\uFF1B\u7559\u7A7A\u8868\u793A\u4E0D\u9650\u5236\u3002`).addText((text) => {
         text.inputEl.type = "number";
         text.inputEl.min = "1";
-        text.setPlaceholder("\u7559\u7A7A\u5173\u95ED").setValue(this.plugin.settings.imageMaxHeight).onChange(async (value) => {
-          this.plugin.settings.imageMaxHeight = value.trim();
+        text.setPlaceholder("\u7559\u7A7A\u5173\u95ED").setValue(profile.settings.imageMaxHeight).onChange(async (value) => {
+          profile.settings.imageMaxHeight = value.trim();
           this.plugin.applyImageHeightLimit();
           await this.plugin.saveSettings();
         });
       });
-      new import_obsidian17.Setting(card).setName("\u56FE\u7247\u70B9\u51FB\u53EF\u653E\u5927").setDesc("\u70B9\u51FB\u7B14\u8BB0\u4E2D\u7684\u56FE\u7247\u6253\u5F00\u5927\u56FE\uFF1B\u5728\u5927\u56FE\u4E0A\u6EDA\u8F6E\u7F29\u653E\uFF0C\u70B9\u7A7A\u767D\u5904\u6216\u6309 Esc \u5173\u95ED\u3002").addToggle(
+      if (mobile) {
+        const settings = this.plugin.settings.mobileDisplay;
+        const sizeSetting = new import_obsidian17.Setting(card).setName("\u9876\u90E8\u6309\u94AE\u5927\u5C0F\uFF08\u624B\u673A\uFF09");
+        const updateSizeDescription = () => {
+          const button = this.plugin.isMobile ? document.querySelector(".workspace-leaf.mod-active .view-header .view-action, .view-header .view-action") : null;
+          const measured = button ? Math.round(button.getBoundingClientRect().width) : 0;
+          sizeSetting.setDesc(`${measured ? `\u5F53\u524D\u5B9E\u9645\u5927\u5C0F\uFF1A${measured}px\u3002` : `\u624B\u673A\u914D\u7F6E\uFF1A${settings.headerButtonSize || "\u8DDF\u968F\u4E3B\u9898"}${settings.headerButtonSize ? "px" : ""}\u3002`}\u8C03\u6574\u9876\u90E8\u64CD\u4F5C\u6309\u94AE\u548C\u4FA7\u8FB9\u680F\u6309\u94AE\u7684\u5927\u5C0F\uFF0C\u8303\u56F4 20\u201364px\uFF1B\u9ED8\u8BA4 29px\uFF0C\u7559\u7A7A\u8DDF\u968F\u4E3B\u9898\u3002`);
+        };
+        sizeSetting.addText((text) => {
+          text.inputEl.type = "number";
+          text.inputEl.min = "20";
+          text.inputEl.max = "64";
+          text.inputEl.step = "1";
+          text.setPlaceholder("\u9ED8\u8BA4 29\uFF1B\u7559\u7A7A\u8DDF\u968F\u4E3B\u9898").setValue(settings.headerButtonSize).onChange(async (value) => {
+            settings.headerButtonSize = value.trim();
+            this.plugin.applyMobileHeaderButtons();
+            await this.plugin.saveSettings();
+            updateSizeDescription();
+          });
+        });
+        updateSizeDescription();
+        new import_obsidian17.Setting(card).setName("\u7981\u7528\u5F53\u524D\u4E3B\u9898\u81EA\u5E26\u7684\u624B\u673A\u7AEF\u6309\u94AE\u6837\u5F0F").setDesc("\u9ED8\u8BA4\u5F00\u542F\uFF0C\u5173\u95ED\u5F53\u524D Things \u4E3B\u9898\u7684\u5706\u5F62\u60AC\u6D6E\u6309\u94AE\u5916\u89C2\uFF0C\u4F7F\u7528\u539F\u751F\u98CE\u683C\uFF1B\u6309\u94AE\u5927\u5C0F\u4ECD\u7531\u4E0A\u65B9\u8BBE\u7F6E\u63A7\u5236\u3002").addToggle((toggle) => toggle.setValue(settings.disableThemeHeaderButtons).onChange(async (value) => {
+          settings.disableThemeHeaderButtons = value;
+          this.plugin.applyMobileHeaderButtons();
+          await this.plugin.saveSettings();
+          updateSizeDescription();
+        }));
+      }
+    };
+    renderParameters();
+    this.renderGroup(container, "\u529F\u80FD\u589E\u5F3A", (card2) => {
+      card2.createDiv({
+        cls: "simple-muted-subtitle",
+        text: "\u672C\u7EC4\u529F\u80FD\u5F00\u5173\u4E3A\u7535\u8111\u3001\u624B\u673A\u4E24\u7AEF\u5171\u7528\u3002"
+      });
+      this.renderNavigationItem(card2, "\u53CC\u5217\u663E\u793A\u5185\u5BB9", "\u5728\u6B63\u6587\u4E2D\u521B\u5EFA\u548C\u7F16\u8F91\u53CC\u5217\u89C6\u56FE\u3002", () => this.openPage({ type: "notion-columns" }));
+      this.renderNavigationItem(
+        card2,
+        "HTML \u9884\u89C8",
+        "\u7BA1\u7406 HTML \u9884\u89C8\u5F00\u5173\u548C\u9884\u89C8\u524D\u6B63\u5219\u66FF\u6362\u89C4\u5219\u3002",
+        () => this.openPage({ type: "html-preview" })
+      );
+      new import_obsidian17.Setting(card2).setName("\u56FE\u7247\u70B9\u51FB\u53EF\u653E\u5927").setDesc("\u70B9\u51FB\u7B14\u8BB0\u4E2D\u7684\u56FE\u7247\u6253\u5F00\u5927\u56FE\uFF1B\u5728\u5927\u56FE\u4E0A\u6EDA\u8F6E\u7F29\u653E\uFF0C\u70B9\u7A7A\u767D\u5904\u6216\u6309 Esc \u5173\u95ED\u3002").addToggle(
         (toggle) => toggle.setValue(this.plugin.settings.enableImageZoom).onChange(async (value) => {
           this.plugin.settings.enableImageZoom = value;
           await this.plugin.saveSettings();
         })
       );
-      new import_obsidian17.Setting(card).setName("Mermaid \u6D41\u7A0B\u56FE\u4EA4\u4E92").setDesc("\u4E3A\u6D41\u7A0B\u56FE\u63D0\u4F9B\u9002\u5E94\u9762\u677F\u5BBD\u5EA6\u3001\u6EDA\u8F6E\u7F29\u653E\u4E0E\u62D6\u52A8\u753B\u5E03\uFF0C\u4EE5\u53CA\u5168\u5C4F\u67E5\u770B\u3002").addToggle(
+      new import_obsidian17.Setting(card2).setName("Mermaid \u6D41\u7A0B\u56FE\u4EA4\u4E92").setDesc("\u4E3A\u6D41\u7A0B\u56FE\u63D0\u4F9B\u9002\u5E94\u9762\u677F\u5BBD\u5EA6\u3001\u6EDA\u8F6E\u7F29\u653E\u4E0E\u62D6\u52A8\u753B\u5E03\uFF0C\u4EE5\u53CA\u5168\u5C4F\u67E5\u770B\u3002").addToggle(
         (toggle) => toggle.setValue(this.plugin.settings.enableMermaidEnhancer).onChange(async (value) => {
           this.plugin.settings.enableMermaidEnhancer = value;
           await this.plugin.saveSettings();
           this.plugin.refreshMermaidEnhancements();
         })
       );
-      new import_obsidian17.Setting(card).setName("\u989C\u8272\u4EE3\u7801\u9884\u89C8").setDesc("\u5728\u7F16\u8F91\u5668\u4E2D\u7684 HEX\u3001RGB\u3001RGBA\u3001HSL \u548C HSLA \u989C\u8272\u4EE3\u7801\u524D\u663E\u793A\u5BF9\u5E94\u7684\u989C\u8272\u65B9\u5757\u3002").addToggle(
+      new import_obsidian17.Setting(card2).setName("\u989C\u8272\u4EE3\u7801\u9884\u89C8").setDesc("\u5728\u7F16\u8F91\u5668\u4E2D\u7684 HEX\u3001RGB\u3001RGBA\u3001HSL \u548C HSLA \u989C\u8272\u4EE3\u7801\u524D\u663E\u793A\u5BF9\u5E94\u7684\u989C\u8272\u65B9\u5757\u3002").addToggle(
         (toggle) => toggle.setValue(this.plugin.settings.enableColorPreview).onChange(async (value) => {
           this.plugin.settings.enableColorPreview = value;
           await this.plugin.saveSettings();
           this.plugin.refreshColorPreviews();
         })
       );
-      this.renderNavigationItem(
-        card,
-        "HTML \u9884\u89C8",
-        "\u7BA1\u7406 HTML \u9884\u89C8\u5F00\u5173\u548C\u9884\u89C8\u524D\u6B63\u5219\u66FF\u6362\u89C4\u5219\u3002",
-        () => this.openPage({ type: "html-preview" })
-      );
-      new import_obsidian17.Setting(card).setName("\u81EA\u5B9A\u4E49\u6807\u7B7E\u9605\u8BFB\u6392\u7248").setDesc("\u9605\u8BFB\u6A21\u5F0F\u4E0B\u8BA9 thinking/content/todo \u7B49\u81EA\u5B9A\u4E49\u6807\u7B7E\u6309\u5757\u663E\u793A\uFF0C\u5E76\u4FDD\u7559\u6362\u884C\u3002").addToggle(
+      new import_obsidian17.Setting(card2).setName("\u81EA\u5B9A\u4E49\u6807\u7B7E\u9605\u8BFB\u6392\u7248").setDesc("\u9605\u8BFB\u6A21\u5F0F\u4E0B\u8BA9 thinking/content/todo \u7B49\u81EA\u5B9A\u4E49\u6807\u7B7E\u6309\u5757\u663E\u793A\uFF0C\u5E76\u4FDD\u7559\u6362\u884C\u3002").addToggle(
         (toggle) => toggle.setValue(this.plugin.settings.enableReadableCustomTags).onChange(async (value) => {
           this.plugin.settings.enableReadableCustomTags = value;
           await this.plugin.saveSettings();
@@ -25184,7 +25293,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
     });
   }
   renderNotionColumnsSettings(container) {
-    this.renderPageHeader(container, "\u53CC\u5217\u663E\u793A\u5185\u5BB9", () => this.openPage({ type: "overview" }));
+    this.renderPageHeader(container, "\u53CC\u5217\u663E\u793A\u5185\u5BB9", () => this.openPage({ type: "display-enhancements" }));
     this.renderSettingCard(container, (card) => {
       new import_obsidian17.Setting(card).setName("\u542F\u7528\u53CC\u5217\u89C6\u56FE").setDesc("\u5728\u7B14\u8BB0\u4E2D\u521B\u5EFA\u3001\u7F16\u8F91\u548C\u8C03\u6574\u53CC\u5217\u5185\u5BB9\u3002").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableNotionColumns).onChange(async (value) => {
         this.plugin.settings.enableNotionColumns = value;
@@ -26063,15 +26172,24 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
     render(card);
   }
   renderNavigationItem(container, name2, desc, onClick, icon, status) {
-    const setting = new import_obsidian17.Setting(container).setClass("simple-nav-setting").setName(name2).setDesc(desc).addExtraButton(
-      (button) => button.setIcon("chevron-right").setTooltip("\u67E5\u770B\u8BE6\u60C5").onClick(onClick)
-    );
+    const button = container.createEl("button", {
+      cls: "setting-item simple-nav-setting",
+      attr: { type: "button" }
+    });
+    const info = button.createSpan({ cls: "setting-item-info" });
+    const nameEl = info.createSpan({ cls: "setting-item-name", text: name2 });
+    info.createSpan({ cls: "setting-item-description", text: desc });
+    const control = button.createSpan({ cls: "setting-item-control" });
+    const arrow = control.createSpan({ cls: "simple-nav-setting-arrow" });
+    arrow.setAttr("aria-hidden", "true");
+    (0, import_obsidian17.setIcon)(arrow, "chevron-right");
+    button.addEventListener("click", onClick);
     if (icon) {
-      const iconEl = setting.nameEl.createSpan({ cls: "simple-nav-setting-icon" });
+      const iconEl = nameEl.createSpan({ cls: "simple-nav-setting-icon" });
       (0, import_obsidian17.setIcon)(iconEl, icon);
-      setting.nameEl.prepend(iconEl);
+      nameEl.prepend(iconEl);
     }
-    if (status) setting.nameEl.createSpan({ cls: "simple-nav-status", text: status });
+    if (status) nameEl.createSpan({ cls: "simple-nav-status", text: status });
   }
   renderPageHeader(container, title, onBack = () => this.openPage({ type: "overview" })) {
     const header = container.createDiv({ cls: "simple-page-header" });
@@ -26169,7 +26287,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
   renderDiarySettings(container) {
     this.renderPageHeader(container, "\u65E5\u8BB0\u4F4D\u7F6E", () => this.openPage({ type: "calendar-diary" }));
     const diary = this.plugin.settings.diary;
-    const navigator2 = getNotebookNavigatorPlugin(this.app);
+    const navigator2 = this.plugin.isMobile ? null : getNotebookNavigatorPlugin(this.app);
     this.renderGroup(container, "\u65E5\u5386\u5916\u89C2", (card) => {
       const save = async () => {
         if (navigator2) await navigator2.saveSettingsAndUpdate();
@@ -26432,7 +26550,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
     this.renderPageHeader(container, QUICK_FORMAT_NAME);
     const quickFormat = this.plugin.settings.enhancements.quickFormat;
     this.renderSettingCard(container, (card) => {
-      new import_obsidian17.Setting(card).setName("\u542F\u7528\u672C\u63D2\u4EF6").setDesc("\u542F\u7528\u540E\u663E\u793A\u6807\u9898\u680F\u5FEB\u6377\u6309\u94AE\uFF0C\u5E76\u5F00\u653E\u4E0B\u65B9\u83DC\u5355\u4E0E\u6837\u5F0F\u8BBE\u7F6E\u3002").addToggle(
+      new import_obsidian17.Setting(card).setName("\u542F\u7528\u672C\u63D2\u4EF6").setDesc("\u542F\u7528\u5FEB\u901F\u6392\u7248\u529F\u80FD\uFF0C\u5E76\u5F00\u653E\u4E0B\u65B9\u83DC\u5355\u4E0E\u6837\u5F0F\u8BBE\u7F6E\uFF1B\u5FEB\u6377\u5165\u53E3\u6309\u5BF9\u5E94\u5E73\u53F0\u7684\u663E\u793A\u5F00\u5173\u63A7\u5236\u3002").addToggle(
         (toggle) => toggle.setValue(quickFormat.enabled).onChange(async (value) => {
           quickFormat.enabled = value;
           await this.plugin.saveSettings();
@@ -26440,6 +26558,16 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
           this.display();
         })
       );
+      new import_obsidian17.Setting(card).setName("\u5728\u7535\u8111\u7AEF\u754C\u9762\u663E\u793A\u672C\u63D2\u4EF6\u7684\u5FEB\u6377\u5165\u53E3").setDesc("\u5728\u7535\u8111\u7AEF\u7B14\u8BB0\u6807\u9898\u680F\u663E\u793A\u5FEB\u901F\u6392\u7248\u5165\u53E3\u3002").addToggle((toggle) => toggle.setValue(quickFormat.showDesktopEntry).onChange(async (value) => {
+        quickFormat.showDesktopEntry = value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshQuickFormatActions();
+      }));
+      new import_obsidian17.Setting(card).setName("\u5728\u624B\u673A\u7AEF\u754C\u9762\u663E\u793A\u672C\u63D2\u4EF6\u7684\u5FEB\u6377\u5165\u53E3").setDesc("\u5728\u624B\u673A\u7AEF\u7B14\u8BB0\u6807\u9898\u680F\u663E\u793A\u5FEB\u901F\u6392\u7248\u5165\u53E3\u3002").addToggle((toggle) => toggle.setValue(quickFormat.showMobileEntry).onChange(async (value) => {
+        quickFormat.showMobileEntry = value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshQuickFormatActions();
+      }));
     });
     const dependent = container.createDiv({ cls: "simple-quick-format-dependent" });
     dependent.toggleClass("is-disabled", !quickFormat.enabled);
@@ -26541,7 +26669,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
             card,
             definition.label,
             mode,
-            readCalloutThemeColor(definition.type, definition.fallbackColor),
+            readCalloutColorHex(definition.type, container),
             quickFormat.calloutColors[definition.type],
             (value) => quickFormat.calloutColors[definition.type] = value,
             definition.icon,
@@ -26590,7 +26718,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
     render(content2);
   }
   renderQuickFormatColorSetting(card, name2, mode, fallback, value, setValue, icon, aliases = []) {
-    const setting = new import_obsidian17.Setting(card).setName(name2).setDesc(`${aliases.length ? `\u522B\u540D\uFF1A${aliases.join("\u3001")}\uFF1B` : ""}\u515C\u5E95\u989C\u8272\uFF1A${fallback}\uFF1B\u81EA\u5B9A\u4E49\u989C\u8272\uFF1A${value || "\u672A\u8BBE\u7F6E"}`).addToggle(
+    const setting = new import_obsidian17.Setting(card).setName(name2).setDesc(`${aliases.length ? `\u522B\u540D\uFF1A${aliases.join("\u3001")}\uFF1B` : ""}\u5F53\u524D\u663E\u793A\u989C\u8272\uFF1A${fallback}\uFF1B\u81EA\u5B9A\u4E49\u989C\u8272\uFF1A${value || "\u672A\u8BBE\u7F6E"}`).addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enhancements.quickFormat.visibleModes.includes(mode)).onChange(async (visible) => {
         this.setQuickFormatModeVisible(mode, visible);
         await this.plugin.saveSettings();
@@ -26614,7 +26742,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
   }
   renderCustomCalloutSetting(card, callout) {
     const mode = `custom-callout:${callout.id}`;
-    const fallback = readCalloutThemeColor(callout.type || "note");
+    const fallback = readCalloutColorHex(callout.type || "note", card);
     const isEditing = this.editingCustomCalloutIds.has(callout.id);
     const setting = new import_obsidian17.Setting(card).setClass("simple-custom-callout-setting").setDesc(`\u8BED\u6CD5\uFF1A[!${callout.type || "custom"}]\uFF1B\u515C\u5E95\u989C\u8272\uFF1A${fallback}\uFF1B\u81EA\u5B9A\u4E49\u989C\u8272\uFF1A${callout.color || "\u672A\u8BBE\u7F6E"}`).addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enhancements.quickFormat.visibleModes.includes(mode)).onChange(async (visible) => {
@@ -28489,21 +28617,94 @@ function compareFontSizes(heading2, body) {
 function formatSizeDifference(value) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
 }
-function readCalloutThemeColor(type, fallback = "#2e80f2") {
-  const normalized = type.trim().toLowerCase();
-  const value = getComputedStyle(document.body).getPropertyValue(`--callout-${normalized}`).trim();
-  if (/^#[0-9a-f]{6}$/i.test(value)) return value;
-  if (/^\d+,\s*\d+,\s*\d+$/.test(value)) return rgbTripletToHex(value);
-  return fallback;
-}
 function rgbTripletToHex(value) {
   return "#" + value.split(",").map((part) => Math.max(0, Math.min(255, Number(part.trim()))).toString(16).padStart(2, "0")).join("");
+}
+
+// src/shared/displayProfile.ts
+function loadMobileDisplayProfile(value) {
+  const positivePixels = (input) => {
+    const text = typeof input === "string" ? input.trim() : typeof input === "number" ? String(input) : "";
+    const pixels = Math.round(Number(text));
+    return text && Number.isFinite(pixels) && pixels > 0 ? String(pixels) : "";
+  };
+  const width = positivePixels(value?.readableLineWidth);
+  return {
+    readableLineWidth: Number(width) <= 2e3 ? width : "",
+    imageMaxHeight: positivePixels(value?.imageMaxHeight),
+    popupWindowScale: normalizePopupScalePercent(value?.popupWindowScale, "0"),
+    headerButtonSize: value?.headerButtonSize === "" ? "" : String(Math.min(64, Math.max(20, Number(positivePixels(value?.headerButtonSize)) || 29))),
+    disableThemeHeaderButtons: value?.disableThemeHeaderButtons !== false
+  };
+}
+function activeDisplayProfile(settings, mobile) {
+  return mobile ? settings.mobileDisplay : settings;
+}
+
+// src/shared/platformSwitches.ts
+var SHARED_DISPLAY_FEATURES = /* @__PURE__ */ new Set([
+  "enableNotionColumns",
+  "enableImageZoom",
+  "enableMermaidEnhancer",
+  "enableColorPreview",
+  "enableHtmlPreview",
+  "enableReadableCustomTags",
+  "htmlPreviewRules"
+]);
+function isSharedSwitchPath(path) {
+  return SHARED_DISPLAY_FEATURES.has(path.split("/")[1]) || path === "/enhancements/quickFormat/showDesktopEntry" || path === "/enhancements/quickFormat/showMobileEntry";
+}
+function visitSwitches(value, visit, path = "") {
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      const id = item && typeof item === "object" ? item.id : void 0;
+      const segment = typeof id === "string" ? `id:${id}` : `index:${index}`;
+      visitSwitches(item, visit, `${path}/${encodeURIComponent(segment)}`);
+    });
+    return;
+  }
+  const record = value;
+  for (const [key, child] of Object.entries(record)) {
+    if (key === "mobileSwitches" || key === "mobileDisplay" || key === "leapMonth") continue;
+    const childPath = `${path}/${encodeURIComponent(key)}`;
+    if (isSharedSwitchPath(childPath)) continue;
+    if (typeof child === "boolean" || childPath === "/enhancements/quickFormat/visibleModes") {
+      visit(record, key, childPath);
+    } else {
+      visitSwitches(child, visit, childPath);
+    }
+  }
+}
+function collectSwitchStates(settings) {
+  const states = {};
+  visitSwitches(settings, (parent, key, path) => {
+    const value = parent[key];
+    states[path] = Array.isArray(value) ? [...value] : value;
+  });
+  return states;
+}
+function applySwitchStates(settings, states) {
+  visitSwitches(settings, (parent, key, path) => {
+    const value = states[path];
+    if (typeof parent[key] === "boolean" && typeof value === "boolean") parent[key] = value;
+    else if (Array.isArray(parent[key]) && Array.isArray(value) && value.every((item) => typeof item === "string")) {
+      parent[key] = [...value];
+    }
+  });
+}
+function mobileSettingsForSave(settings, desktopStates) {
+  const saved = JSON.parse(JSON.stringify(settings));
+  saved.mobileSwitches = collectSwitchStates(settings);
+  applySwitchStates(saved, desktopStates);
+  return saved;
 }
 
 // src/main.ts
 var SimplePlugin = class extends import_obsidian18.Plugin {
   constructor() {
     super(...arguments);
+    this.isMobile = import_obsidian18.Platform.isMobile;
     this.refreshTemplateFillActions = () => {
     };
     this.refreshSearchFolderControls = () => {
@@ -28518,12 +28719,33 @@ var SimplePlugin = class extends import_obsidian18.Plugin {
     };
     this.readableLineWidthDocuments = /* @__PURE__ */ new Set();
     this.templateFolder = "";
+    this.desktopSwitchStates = {};
+    this.needsPlatformSwitchSave = false;
+    this.ownsFloatingButtonOptOut = false;
+  }
+  get platformName() {
+    if (import_obsidian18.Platform.isAndroidApp) return "Android";
+    if (import_obsidian18.Platform.isIosApp) return "iOS / iPadOS";
+    if (import_obsidian18.Platform.isWin) return "Windows";
+    if (import_obsidian18.Platform.isMacOS) return "macOS";
+    return this.isMobile ? "\u79FB\u52A8\u5E73\u53F0" : "\u684C\u9762\u5E73\u53F0";
+  }
+  get displaySettings() {
+    return activeDisplayProfile(this.settings, this.isMobile);
   }
   async onload() {
     await this.loadSettings();
+    if (this.needsPlatformSwitchSave) await this.saveSettings();
     applyQuickFormatStyles(this);
     this.applyReadableLineWidth();
     this.applyImageHeightLimit();
+    this.applyMobileHeaderButtons();
+    this.registerEvent(this.app.workspace.on("css-change", () => this.applyMobileHeaderButtons()));
+    this.register(() => {
+      document.body.classList.remove("simple-mobile-header-size", "simple-mobile-native-header");
+      document.body.style.removeProperty("--simple-mobile-header-button-size");
+      if (this.ownsFloatingButtonOptOut) document.body.classList.remove("floating-button-off");
+    });
     this.applyReadableCustomTagStyles();
     this.register(() => {
       document.body.classList.remove("simple-limit-image-height");
@@ -28586,6 +28808,24 @@ var SimplePlugin = class extends import_obsidian18.Plugin {
     this.refreshPopupWindowSizing = registerPopupWindowSizing(this);
     this.addSettingTab(new SimpleSettingTab(this.app, this));
   }
+  applyMobileHeaderButtons() {
+    if (!this.isMobile) return;
+    const body = document.body;
+    const profile = loadMobileDisplayProfile(this.settings.mobileDisplay);
+    body.classList.toggle("simple-mobile-header-size", !!profile.headerButtonSize);
+    if (profile.headerButtonSize) body.style.setProperty("--simple-mobile-header-button-size", `${profile.headerButtonSize}px`);
+    else body.style.removeProperty("--simple-mobile-header-button-size");
+    body.classList.toggle("simple-mobile-native-header", profile.disableThemeHeaderButtons);
+    if (profile.disableThemeHeaderButtons) {
+      if (!body.classList.contains("floating-button-off")) {
+        body.classList.add("floating-button-off");
+        this.ownsFloatingButtonOptOut = true;
+      }
+    } else if (this.ownsFloatingButtonOptOut) {
+      body.classList.remove("floating-button-off");
+      this.ownsFloatingButtonOptOut = false;
+    }
+  }
   async loadSettings() {
     const data = await this.loadData();
     const dailyNotes = await this.readVaultConfig("daily-notes.json");
@@ -28630,6 +28870,7 @@ var SimplePlugin = class extends import_obsidian18.Plugin {
       data?.popupWindowScale,
       DEFAULT_SETTINGS.popupWindowScale
     );
+    this.settings.mobileDisplay = loadMobileDisplayProfile(data?.mobileDisplay);
     this.settings.enableMermaidEnhancer = data?.enableMermaidEnhancer ?? DEFAULT_SETTINGS.enableMermaidEnhancer;
     this.settings.enableImageZoom = data?.enableImageZoom ?? DEFAULT_SETTINGS.enableImageZoom;
     this.settings.enableHtmlPreview = data?.enableHtmlPreview ?? DEFAULT_SETTINGS.enableHtmlPreview;
@@ -28646,9 +28887,28 @@ var SimplePlugin = class extends import_obsidian18.Plugin {
     for (const r of this.settings.filterRules) {
       if (!r.id) r.id = nextId();
     }
+    const storedMobileSwitches = data?.mobileSwitches;
+    this.settings.mobileSwitches = storedMobileSwitches && typeof storedMobileSwitches === "object" && !Array.isArray(storedMobileSwitches) ? storedMobileSwitches : {};
+    this.settings.mobileSwitches = Object.fromEntries(
+      Object.entries(this.settings.mobileSwitches).filter(([path]) => !isSharedSwitchPath(path))
+    );
+    this.needsPlatformSwitchSave = storedMobileSwitches !== void 0 && JSON.stringify(this.settings.mobileSwitches) !== JSON.stringify(storedMobileSwitches);
+    this.desktopSwitchStates = collectSwitchStates(this.settings);
+    if (this.isMobile) {
+      this.settings = JSON.parse(JSON.stringify(this.settings));
+      applySwitchStates(this.settings, this.settings.mobileSwitches);
+      this.settings.mobileSwitches = collectSwitchStates(this.settings);
+      this.needsPlatformSwitchSave = JSON.stringify(this.settings.mobileSwitches) !== JSON.stringify(storedMobileSwitches);
+    }
   }
   async saveSettings() {
-    await this.saveData(this.settings);
+    const saved = this.isMobile ? mobileSettingsForSave(this.settings, this.desktopSwitchStates) : this.settings;
+    await this.saveData(saved);
+    if (this.isMobile) {
+      this.settings.mobileSwitches = saved.mobileSwitches;
+      this.desktopSwitchStates = collectSwitchStates(saved);
+    }
+    this.needsPlatformSwitchSave = false;
   }
   getTemplateFolder() {
     return this.templateFolder;
@@ -28688,13 +28948,13 @@ var SimplePlugin = class extends import_obsidian18.Plugin {
   }
   applyReadableLineWidth(doc = document) {
     this.readableLineWidthDocuments.add(doc);
-    const width = normalizeReadableLineWidth(this.settings.readableLineWidth);
+    const width = this.isMobile ? loadMobileDisplayProfile(this.settings.mobileDisplay).readableLineWidth : normalizeReadableLineWidth(this.displaySettings.readableLineWidth);
     if (width) doc.body.style.setProperty("--file-line-width", `${width}px`);
     else doc.body.style.removeProperty("--file-line-width");
   }
   applyImageHeightLimit() {
-    const height = normalizeImageMaxHeight(this.settings.imageMaxHeight);
-    this.settings.imageMaxHeight = height;
+    const height = this.isMobile ? loadMobileDisplayProfile(this.settings.mobileDisplay).imageMaxHeight : normalizeImageMaxHeight(this.displaySettings.imageMaxHeight);
+    this.displaySettings.imageMaxHeight = height;
     document.body.classList.toggle("simple-limit-image-height", height !== "");
     if (height) {
       document.body.style.setProperty("--simple-image-max-height", `${height}px`);

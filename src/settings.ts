@@ -15,7 +15,8 @@ import { REFORMAT_ICON, REFORMAT_NAME } from "./features/currentNoteLinkConverte
 import { getNotebookNavigatorPlugin } from "./features/diary";
 import { applyQuickFormatStyles, QUICK_FORMAT_ICON, QUICK_FORMAT_NAME } from "./features/quickFormat";
 import { openSearchFolderPicker, searchFolderSummary } from "./features/searchFolderFilter";
-import { POPUP_SCALE_MAX, POPUP_SCALE_MIN } from "./shared/popupSizing";
+import { POPUP_SCALE_MAX } from "./shared/popupSizing";
+import { readCalloutColorHex } from "./shared/calloutColor";
 import { columnsHotkeyConflicts, commandHotkeyLabel, currentColumnsHotkey, parseCommandHotkey, saveColumnsHotkey } from "./shared/commandHotkey";
 import {
   BUILT_IN_TEXT_REFORMAT_RULE_IDS,
@@ -133,6 +134,7 @@ const QUICK_FORMAT_HEADING_LABELS: Record<QuickFormatHeadingLevel, string> = {
 export class SimpleSettingTab extends PluginSettingTab {
   plugin: SimplePlugin;
   private page: SettingsPage = { type: "overview" };
+  private parameterPlatform: "desktop" | "mobile";
   private expandedQuickFormatCalloutSections = new Set(["native", "custom"]);
   private expandedReformatRuleSections = new Set(["builtin", "custom"]);
   private editingCustomCalloutIds = new Set<string>();
@@ -146,12 +148,23 @@ export class SimpleSettingTab extends PluginSettingTab {
   constructor(app: App, plugin: SimplePlugin) {
     super(app, plugin);
     this.plugin = plugin;
+    this.parameterPlatform = plugin.isMobile ? "mobile" : "desktop";
+  }
+
+  hide(): void {
+    this.parameterPlatform = this.plugin.isMobile ? "mobile" : "desktop";
   }
 
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass("simple-settings");
+    containerEl.createDiv({
+      cls: "simple-platform-hint",
+      text: this.plugin.isMobile
+        ? "已使用手机平台，已切换为手机端专属配置"
+        : `检测到当前平台为 ${this.plugin.platformName}，当前使用桌面显示设置。`,
+    });
 
     if (this.page.type === "overview") {
       this.renderOverview(containerEl);
@@ -206,7 +219,6 @@ export class SimpleSettingTab extends PluginSettingTab {
         "调整正文宽度、图片显示与内容预览。",
         () => this.openPage({ type: "display-enhancements" })
       );
-      this.renderNavigationItem(card, "双列显示内容", "在正文中创建和编辑双列视图。", () => this.openPage({ type: "notion-columns" }));
       this.renderNavigationItem(
         card,
         QUICK_FORMAT_NAME,
@@ -226,9 +238,14 @@ export class SimpleSettingTab extends PluginSettingTab {
     this.renderGroup(container, "快捷操作", (card) => {
       new Setting(card)
         .setName("快速复制当前笔记链接")
-        .setDesc("在当前笔记标题栏增加复制按钮。左键复制链接，右键切换复制格式。")
+        .setDesc(this.plugin.isMobile
+          ? "检测到当前为移动端，已自动禁用。"
+          : "在当前笔记标题栏增加复制按钮。左键复制链接，右键切换复制格式。")
         .addToggle((toggle) =>
-          toggle.setValue(this.plugin.settings.enhancements.quickCopyLink.enabled).onChange(async (value) => {
+          toggle.setValue(!this.plugin.isMobile && this.plugin.settings.enhancements.quickCopyLink.enabled)
+          .setDisabled(this.plugin.isMobile)
+          .onChange(async (value) => {
+            if (this.plugin.isMobile) return;
             this.plugin.settings.enhancements.quickCopyLink.enabled = value;
             await this.plugin.saveSettings();
           })
@@ -275,59 +292,124 @@ export class SimpleSettingTab extends PluginSettingTab {
   private renderDisplayEnhancementSettings(container: HTMLElement): void {
     this.renderPageHeader(container, "显示增强");
 
-    this.renderSettingCard(container, (card) => {
+    this.renderSectionHeading(container, "参数优化")
+      .setClass("simple-parameter-heading")
+      .addDropdown((dropdown) => {
+        dropdown.selectEl.setAttribute("aria-label", "查看和编辑的平台参数");
+        dropdown
+          .addOptions({ desktop: "电脑", mobile: "手机" })
+          .setValue(this.parameterPlatform)
+          .onChange((value) => {
+            this.parameterPlatform = value === "mobile" ? "mobile" : "desktop";
+            renderParameters();
+          });
+      });
+    const card = container.createDiv({ cls: "simple-card" });
+    const renderParameters = (): void => {
+      card.empty();
+      const mobile = this.parameterPlatform === "mobile";
+      const profile = {
+        suffix: mobile ? "（手机）" : "",
+        mobile,
+        settings: mobile ? this.plugin.settings.mobileDisplay : this.plugin.settings,
+      };
       new Setting(card)
-        .setName("笔记正文宽度")
-        .setDesc("覆盖主题的可读行宽，单位为 px；需要开启 Obsidian 的“可读行长”。留空则跟随主题默认值。")
+        .setName(`弹出窗口缩放比例${profile.suffix}`)
+        .setDesc(`${profile.mobile ? "手机端自动" : "电脑端"}使用此比例显示设置窗口和附件清单；填写 40–95，0 或留空则不调整。`)
         .addText((text) => {
           text.inputEl.type = "number";
-          text.inputEl.min = "400";
-          text.inputEl.max = "2000";
-          text.inputEl.step = "20";
-          text
-            .setPlaceholder("例如 900；留空跟随主题")
-            .setValue(this.plugin.settings.readableLineWidth)
-            .onChange(async (value) => {
-              this.plugin.settings.readableLineWidth = value.trim();
-              this.plugin.applyReadableLineWidth();
-              await this.plugin.saveSettings();
-            });
-        });
-
-      new Setting(card)
-        .setName("弹出窗口缩放比例")
-        .setDesc("设置窗口和附件处理清单统一按主 Obsidian 窗口的比例显示；填写 40–95，留空则不调整。")
-        .addText((text) => {
-          text.inputEl.type = "number";
-          text.inputEl.min = String(POPUP_SCALE_MIN);
+          text.inputEl.min = "0";
           text.inputEl.max = String(POPUP_SCALE_MAX);
           text.inputEl.step = "5";
           text
-            .setPlaceholder("默认 70；留空不调整")
-            .setValue(this.plugin.settings.popupWindowScale)
+            .setPlaceholder(profile.mobile ? "默认 0；不调整" : "默认 70；留空不调整")
+            .setValue(profile.settings.popupWindowScale)
             .onChange(async (value) => {
-              this.plugin.settings.popupWindowScale = value.trim();
+              profile.settings.popupWindowScale = value.trim();
               await this.plugin.saveSettings();
               this.plugin.refreshPopupWindowSizing();
             });
         });
-
       new Setting(card)
-        .setName("图片高度")
-        .setDesc("限制笔记图片的最大显示高度，按原比例自动缩放；留空表示不开启。")
+        .setName(`笔记正文宽度${profile.suffix}`)
+        .setDesc(profile.mobile
+          ? "手机端的最大可读行宽，单位为 px；建议留空。大于屏幕可用宽度时通常无明显效果，小于可用宽度时才会收窄正文。需开启 Obsidian 的“可读行长”。"
+          : "电脑端的最大可读行宽，单位为 px；需要开启 Obsidian 的“可读行长”。留空则跟随主题默认值。")
+        .addText((text) => {
+          text.inputEl.type = "number";
+          text.inputEl.min = profile.mobile ? "1" : "400";
+          text.inputEl.max = "2000";
+          text.inputEl.step = "20";
+          text
+            .setPlaceholder(profile.mobile ? "建议留空，跟随主题" : "例如 900；留空跟随主题")
+            .setValue(profile.settings.readableLineWidth)
+            .onChange(async (value) => {
+              profile.settings.readableLineWidth = value.trim();
+              this.plugin.applyReadableLineWidth();
+              await this.plugin.saveSettings();
+            });
+        });
+      new Setting(card)
+        .setName(`图片高度${profile.suffix}`)
+        .setDesc(`${profile.mobile ? "手机端" : "电脑端"}笔记图片的最大显示高度，按原比例自动缩放；留空表示不限制。`)
         .addText((text) => {
           text.inputEl.type = "number";
           text.inputEl.min = "1";
           text
             .setPlaceholder("留空关闭")
-            .setValue(this.plugin.settings.imageMaxHeight)
+            .setValue(profile.settings.imageMaxHeight)
             .onChange(async (value) => {
-              this.plugin.settings.imageMaxHeight = value.trim();
+              profile.settings.imageMaxHeight = value.trim();
               this.plugin.applyImageHeightLimit();
               await this.plugin.saveSettings();
             });
         });
+      if (mobile) {
+        const settings = this.plugin.settings.mobileDisplay;
+        const sizeSetting = new Setting(card).setName("顶部按钮大小（手机）");
+        const updateSizeDescription = (): void => {
+          const button = this.plugin.isMobile ? document.querySelector<HTMLElement>(".workspace-leaf.mod-active .view-header .view-action, .view-header .view-action") : null;
+          const measured = button ? Math.round(button.getBoundingClientRect().width) : 0;
+          sizeSetting.setDesc(`${measured ? `当前实际大小：${measured}px。` : `手机配置：${settings.headerButtonSize || "跟随主题"}${settings.headerButtonSize ? "px" : ""}。`}调整顶部操作按钮和侧边栏按钮的大小，范围 20–64px；默认 29px，留空跟随主题。`);
+        };
+        sizeSetting.addText((text) => {
+          text.inputEl.type = "number";
+          text.inputEl.min = "20";
+          text.inputEl.max = "64";
+          text.inputEl.step = "1";
+          text.setPlaceholder("默认 29；留空跟随主题").setValue(settings.headerButtonSize).onChange(async (value) => {
+            settings.headerButtonSize = value.trim();
+            this.plugin.applyMobileHeaderButtons();
+            await this.plugin.saveSettings();
+            updateSizeDescription();
+          });
+        });
+        updateSizeDescription();
+        new Setting(card)
+          .setName("禁用当前主题自带的手机端按钮样式")
+          .setDesc("默认开启，关闭当前 Things 主题的圆形悬浮按钮外观，使用原生风格；按钮大小仍由上方设置控制。")
+          .addToggle((toggle) => toggle.setValue(settings.disableThemeHeaderButtons).onChange(async (value) => {
+            settings.disableThemeHeaderButtons = value;
+            this.plugin.applyMobileHeaderButtons();
+            await this.plugin.saveSettings();
+            updateSizeDescription();
+          }));
+      }
+    };
+    renderParameters();
 
+    this.renderGroup(container, "功能增强", (card) => {
+      card.createDiv({
+        cls: "simple-muted-subtitle",
+        text: "本组功能开关为电脑、手机两端共用。",
+      });
+      this.renderNavigationItem(card, "双列显示内容", "在正文中创建和编辑双列视图。", () => this.openPage({ type: "notion-columns" }));
+      this.renderNavigationItem(
+        card,
+        "HTML 预览",
+        "管理 HTML 预览开关和预览前正则替换规则。",
+        () => this.openPage({ type: "html-preview" })
+      );
       new Setting(card)
         .setName("图片点击可放大")
         .setDesc("点击笔记中的图片打开大图；在大图上滚轮缩放，点空白处或按 Esc 关闭。")
@@ -360,13 +442,6 @@ export class SimpleSettingTab extends PluginSettingTab {
           })
         );
 
-      this.renderNavigationItem(
-        card,
-        "HTML 预览",
-        "管理 HTML 预览开关和预览前正则替换规则。",
-        () => this.openPage({ type: "html-preview" })
-      );
-
       new Setting(card)
         .setName("自定义标签阅读排版")
         .setDesc("阅读模式下让 thinking/content/todo 等自定义标签按块显示，并保留换行。")
@@ -381,7 +456,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderNotionColumnsSettings(container: HTMLElement): void {
-    this.renderPageHeader(container, "双列显示内容", () => this.openPage({ type: "overview" }));
+    this.renderPageHeader(container, "双列显示内容", () => this.openPage({ type: "display-enhancements" }));
     this.renderSettingCard(container, (card) => {
       new Setting(card)
         .setName("启用双列视图")
@@ -1430,22 +1505,24 @@ export class SimpleSettingTab extends PluginSettingTab {
     icon?: string,
     status?: string
   ): void {
-    const setting = new Setting(container)
-      .setClass("simple-nav-setting")
-      .setName(name)
-      .setDesc(desc)
-      .addExtraButton((button) =>
-        button
-          .setIcon("chevron-right")
-          .setTooltip("查看详情")
-          .onClick(onClick)
-      );
+    const button = container.createEl("button", {
+      cls: "setting-item simple-nav-setting",
+      attr: { type: "button" },
+    });
+    const info = button.createSpan({ cls: "setting-item-info" });
+    const nameEl = info.createSpan({ cls: "setting-item-name", text: name });
+    info.createSpan({ cls: "setting-item-description", text: desc });
+    const control = button.createSpan({ cls: "setting-item-control" });
+    const arrow = control.createSpan({ cls: "simple-nav-setting-arrow" });
+    arrow.setAttr("aria-hidden", "true");
+    setIcon(arrow, "chevron-right");
+    button.addEventListener("click", onClick);
     if (icon) {
-      const iconEl = setting.nameEl.createSpan({ cls: "simple-nav-setting-icon" });
+      const iconEl = nameEl.createSpan({ cls: "simple-nav-setting-icon" });
       setIcon(iconEl, icon);
-      setting.nameEl.prepend(iconEl);
+      nameEl.prepend(iconEl);
     }
-    if (status) setting.nameEl.createSpan({ cls: "simple-nav-status", text: status });
+    if (status) nameEl.createSpan({ cls: "simple-nav-status", text: status });
   }
 
   private renderPageHeader(
@@ -1585,7 +1662,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   private renderDiarySettings(container: HTMLElement): void {
     this.renderPageHeader(container, "日记位置", () => this.openPage({ type: "calendar-diary" }));
     const diary = this.plugin.settings.diary;
-    const navigator = getNotebookNavigatorPlugin(this.app);
+    const navigator = this.plugin.isMobile ? null : getNotebookNavigatorPlugin(this.app);
 
     this.renderGroup(container, "日历外观", (card) => {
       const save = async (): Promise<void> => {
@@ -1912,7 +1989,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     this.renderSettingCard(container, (card) => {
       new Setting(card)
         .setName("启用本插件")
-        .setDesc("启用后显示标题栏快捷按钮，并开放下方菜单与样式设置。")
+        .setDesc("启用快速排版功能，并开放下方菜单与样式设置；快捷入口按对应平台的显示开关控制。")
         .addToggle((toggle) =>
           toggle
             .setValue(quickFormat.enabled)
@@ -1924,6 +2001,26 @@ export class SimpleSettingTab extends PluginSettingTab {
             })
         );
 
+      new Setting(card)
+        .setName("在电脑端界面显示本插件的快捷入口")
+        .setDesc("在电脑端笔记标题栏显示快速排版入口。")
+        .addToggle((toggle) => toggle
+          .setValue(quickFormat.showDesktopEntry)
+          .onChange(async (value) => {
+            quickFormat.showDesktopEntry = value;
+            await this.plugin.saveSettings();
+            this.plugin.refreshQuickFormatActions();
+          }));
+      new Setting(card)
+        .setName("在手机端界面显示本插件的快捷入口")
+        .setDesc("在手机端笔记标题栏显示快速排版入口。")
+        .addToggle((toggle) => toggle
+          .setValue(quickFormat.showMobileEntry)
+          .onChange(async (value) => {
+            quickFormat.showMobileEntry = value;
+            await this.plugin.saveSettings();
+            this.plugin.refreshQuickFormatActions();
+          }));
     });
 
     const dependent = container.createDiv({ cls: "simple-quick-format-dependent" });
@@ -2045,7 +2142,7 @@ export class SimpleSettingTab extends PluginSettingTab {
           card,
           definition.label,
           mode,
-          readCalloutThemeColor(definition.type, definition.fallbackColor),
+          readCalloutColorHex(definition.type, container),
           quickFormat.calloutColors[definition.type],
           (value) => quickFormat.calloutColors[definition.type] = value,
           definition.icon,
@@ -2119,7 +2216,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   ): void {
     const setting = new Setting(card)
       .setName(name)
-      .setDesc(`${aliases.length ? `别名：${aliases.join("、")}；` : ""}兜底颜色：${fallback}；自定义颜色：${value || "未设置"}`)
+      .setDesc(`${aliases.length ? `别名：${aliases.join("、")}；` : ""}当前显示颜色：${fallback}；自定义颜色：${value || "未设置"}`)
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.enhancements.quickFormat.visibleModes.includes(mode))
@@ -2153,7 +2250,7 @@ export class SimpleSettingTab extends PluginSettingTab {
 
   private renderCustomCalloutSetting(card: HTMLElement, callout: QuickFormatCustomCallout): void {
     const mode: QuickFormatMode = `custom-callout:${callout.id}`;
-    const fallback = readCalloutThemeColor(callout.type || "note");
+    const fallback = readCalloutColorHex(callout.type || "note", card);
     const isEditing = this.editingCustomCalloutIds.has(callout.id);
     const setting = new Setting(card)
       .setClass("simple-custom-callout-setting")
@@ -4415,14 +4512,6 @@ function compareFontSizes(heading: string, body: string): string {
 
 function formatSizeDifference(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
-}
-
-function readCalloutThemeColor(type: string, fallback = "#2e80f2"): string {
-  const normalized = type.trim().toLowerCase();
-  const value = getComputedStyle(document.body).getPropertyValue(`--callout-${normalized}`).trim();
-  if (/^#[0-9a-f]{6}$/i.test(value)) return value;
-  if (/^\d+,\s*\d+,\s*\d+$/.test(value)) return rgbTripletToHex(value);
-  return fallback;
 }
 
 function rgbTripletToHex(value: string): string {

@@ -5,6 +5,7 @@ import {
   Editor,
   MarkdownView,
   Plugin,
+  Platform,
   WorkspaceLeaf,
 } from "obsidian";
 import {
@@ -36,6 +37,8 @@ import { defaultTemplateCategories } from "./features/templateFillPresets";
 import defaultData from "./default.json";
 import { SimpleSettingTab } from "./settings";
 import { normalizePopupScalePercent } from "./shared/popupSizing";
+import { activeDisplayProfile, loadMobileDisplayProfile } from "./shared/displayProfile";
+import { applySwitchStates, collectSwitchStates, isSharedSwitchPath, mobileSettingsForSave, type SwitchStates } from "./shared/platformSwitches";
 import {
   DEFAULT_SETTINGS,
   makeDefaultAnniversaries,
@@ -66,6 +69,19 @@ type RenderedPreviewObservers = {
 
 export default class SimplePlugin extends Plugin {
   settings!: SimplePluginSettings;
+  readonly isMobile = Platform.isMobile;
+
+  get platformName(): string {
+    if (Platform.isAndroidApp) return "Android";
+    if (Platform.isIosApp) return "iOS / iPadOS";
+    if (Platform.isWin) return "Windows";
+    if (Platform.isMacOS) return "macOS";
+    return this.isMobile ? "移动平台" : "桌面平台";
+  }
+
+  get displaySettings() {
+    return activeDisplayProfile(this.settings, this.isMobile);
+  }
   refreshTemplateFillActions: () => void = () => {};
   refreshSearchFolderControls: () => void = () => {};
   refreshMermaidEnhancements: () => void = () => {};
@@ -74,12 +90,23 @@ export default class SimplePlugin extends Plugin {
   refreshPopupWindowSizing: () => void = () => {};
   private readableLineWidthDocuments = new Set<Document>();
   private templateFolder = "";
+  private desktopSwitchStates: SwitchStates = {};
+  private needsPlatformSwitchSave = false;
+  private ownsFloatingButtonOptOut = false;
 
   async onload() {
     await this.loadSettings();
+    if (this.needsPlatformSwitchSave) await this.saveSettings();
     applyQuickFormatStyles(this);
     this.applyReadableLineWidth();
     this.applyImageHeightLimit();
+    this.applyMobileHeaderButtons();
+    this.registerEvent(this.app.workspace.on("css-change", () => this.applyMobileHeaderButtons()));
+    this.register(() => {
+      document.body.classList.remove("simple-mobile-header-size", "simple-mobile-native-header");
+      document.body.style.removeProperty("--simple-mobile-header-button-size");
+      if (this.ownsFloatingButtonOptOut) document.body.classList.remove("floating-button-off");
+    });
     this.applyReadableCustomTagStyles();
     this.register(() => {
       document.body.classList.remove("simple-limit-image-height");
@@ -153,6 +180,25 @@ export default class SimplePlugin extends Plugin {
     this.addSettingTab(new SimpleSettingTab(this.app, this));
   }
 
+  applyMobileHeaderButtons(): void {
+    if (!this.isMobile) return;
+    const body = document.body;
+    const profile = loadMobileDisplayProfile(this.settings.mobileDisplay);
+    body.classList.toggle("simple-mobile-header-size", !!profile.headerButtonSize);
+    if (profile.headerButtonSize) body.style.setProperty("--simple-mobile-header-button-size", `${profile.headerButtonSize}px`);
+    else body.style.removeProperty("--simple-mobile-header-button-size");
+    body.classList.toggle("simple-mobile-native-header", profile.disableThemeHeaderButtons);
+    if (profile.disableThemeHeaderButtons) {
+      if (!body.classList.contains("floating-button-off")) {
+        body.classList.add("floating-button-off");
+        this.ownsFloatingButtonOptOut = true;
+      }
+    } else if (this.ownsFloatingButtonOptOut) {
+      body.classList.remove("floating-button-off");
+      this.ownsFloatingButtonOptOut = false;
+    }
+  }
+
   async loadSettings() {
     const data = await this.loadData() as LoadedSettings | null;
     const dailyNotes = await this.readVaultConfig("daily-notes.json");
@@ -206,6 +252,7 @@ export default class SimplePlugin extends Plugin {
       data?.popupWindowScale,
       DEFAULT_SETTINGS.popupWindowScale
     );
+    this.settings.mobileDisplay = loadMobileDisplayProfile(data?.mobileDisplay);
     this.settings.enableMermaidEnhancer = data?.enableMermaidEnhancer ?? DEFAULT_SETTINGS.enableMermaidEnhancer;
     this.settings.enableImageZoom = data?.enableImageZoom ?? DEFAULT_SETTINGS.enableImageZoom;
     this.settings.enableHtmlPreview = data?.enableHtmlPreview ?? DEFAULT_SETTINGS.enableHtmlPreview;
@@ -222,9 +269,33 @@ export default class SimplePlugin extends Plugin {
     for (const r of this.settings.filterRules) {
       if (!r.id) r.id = nextId();
     }
+    const storedMobileSwitches = data?.mobileSwitches;
+    this.settings.mobileSwitches = storedMobileSwitches && typeof storedMobileSwitches === "object"
+      && !Array.isArray(storedMobileSwitches) ? storedMobileSwitches : {};
+    this.settings.mobileSwitches = Object.fromEntries(
+      Object.entries(this.settings.mobileSwitches).filter(([path]) => !isSharedSwitchPath(path))
+    );
+    this.needsPlatformSwitchSave = storedMobileSwitches !== undefined
+      && JSON.stringify(this.settings.mobileSwitches) !== JSON.stringify(storedMobileSwitches);
+    this.desktopSwitchStates = collectSwitchStates(this.settings);
+    if (this.isMobile) {
+      // Apply before any feature is registered, so startup follows mobile switches.
+      this.settings = JSON.parse(JSON.stringify(this.settings)) as SimplePluginSettings;
+      applySwitchStates(this.settings, this.settings.mobileSwitches);
+      this.settings.mobileSwitches = collectSwitchStates(this.settings);
+      this.needsPlatformSwitchSave = JSON.stringify(this.settings.mobileSwitches) !== JSON.stringify(storedMobileSwitches);
+    }
   }
 
-  async saveSettings() { await this.saveData(this.settings); }
+  async saveSettings() {
+    const saved = this.isMobile ? mobileSettingsForSave(this.settings, this.desktopSwitchStates) : this.settings;
+    await this.saveData(saved);
+    if (this.isMobile) {
+      this.settings.mobileSwitches = saved.mobileSwitches;
+      this.desktopSwitchStates = collectSwitchStates(saved);
+    }
+    this.needsPlatformSwitchSave = false;
+  }
 
   getTemplateFolder(): string { return this.templateFolder; }
 
@@ -272,14 +343,18 @@ export default class SimplePlugin extends Plugin {
 
   applyReadableLineWidth(doc: Document = document): void {
     this.readableLineWidthDocuments.add(doc);
-    const width = normalizeReadableLineWidth(this.settings.readableLineWidth);
+    const width = this.isMobile
+      ? loadMobileDisplayProfile(this.settings.mobileDisplay).readableLineWidth
+      : normalizeReadableLineWidth(this.displaySettings.readableLineWidth);
     if (width) doc.body.style.setProperty("--file-line-width", `${width}px`);
     else doc.body.style.removeProperty("--file-line-width");
   }
 
   applyImageHeightLimit(): void {
-    const height = normalizeImageMaxHeight(this.settings.imageMaxHeight);
-    this.settings.imageMaxHeight = height;
+    const height = this.isMobile
+      ? loadMobileDisplayProfile(this.settings.mobileDisplay).imageMaxHeight
+      : normalizeImageMaxHeight(this.displaySettings.imageMaxHeight);
+    this.displaySettings.imageMaxHeight = height;
     document.body.classList.toggle("simple-limit-image-height", height !== "");
     if (height) {
       document.body.style.setProperty("--simple-image-max-height", `${height}px`);

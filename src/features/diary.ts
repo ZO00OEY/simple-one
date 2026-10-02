@@ -375,7 +375,7 @@ export class DiaryView extends ItemView {
 
     const appearanceSection = panel.createDiv({ cls: "simple-diary-inline-settings-section" });
     appearanceSection.createEl("h3", { cls: "simple-diary-inline-settings-heading", text: "日历外观" });
-    const navigator = getNotebookNavigatorPlugin(this.app);
+    const navigator = this.plugin.isMobile ? null : getNotebookNavigatorPlugin(this.app);
     const toggleSetting = (
       name: string,
       description: string,
@@ -458,16 +458,17 @@ export class DiaryView extends ItemView {
     const localeData = moment.localeData(locale);
     const firstDay = localeData.firstDayOfWeek();
     const names = localeData.weekdaysMin();
-    const configuredWeekends = navigator?.calendarWeekendDays ?? (diary.showWeekends ? "sat-sun" : "none");
+    const configuredWeekends = (this.plugin.isMobile ? undefined : navigator?.calendarWeekendDays)
+      ?? (diary.showWeekends ? "sat-sun" : "none");
     const highlightedWeekends = configuredWeekends === "none" ? "none" : "sat-sun";
     return {
       calendarLocale,
       calendarWeekendDays: highlightedWeekends,
       calendarMonthHeadingFormat: navigator?.calendarMonthHeadingFormat ?? "full",
-      calendarHighlightToday: navigator?.calendarHighlightToday ?? diary.highlightToday,
-      calendarShowWeekNumber: navigator?.calendarShowWeekNumber ?? diary.showWeekNumber,
-      calendarShowQuarter: navigator?.calendarShowQuarter ?? diary.showQuarter,
-      calendarShowYearCalendar: navigator?.calendarShowYearCalendar ?? diary.showYearCalendar,
+      calendarHighlightToday: this.plugin.isMobile ? diary.highlightToday : navigator?.calendarHighlightToday ?? diary.highlightToday,
+      calendarShowWeekNumber: this.plugin.isMobile ? diary.showWeekNumber : navigator?.calendarShowWeekNumber ?? diary.showWeekNumber,
+      calendarShowQuarter: this.plugin.isMobile ? diary.showQuarter : navigator?.calendarShowQuarter ?? diary.showQuarter,
+      calendarShowYearCalendar: this.plugin.isMobile ? diary.showYearCalendar : navigator?.calendarShowYearCalendar ?? diary.showYearCalendar,
       locale,
       firstDay,
       weekdayNames: Array.from({ length: 7 }, (_, index) => compactWeekdayName(names[(firstDay + index) % 7])),

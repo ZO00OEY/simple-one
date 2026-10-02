@@ -13,14 +13,14 @@ type SettingsPopoutOptions = {
 
 type SettingsModal = {
   modalEl: HTMLElement;
-  getPopoutOptions: () => SettingsPopoutOptions;
+  getPopoutOptions?: () => SettingsPopoutOptions;
   onOpen: () => void;
 };
 
 export function registerPopupWindowSizing(plugin: SimplePlugin): () => void {
   const app = plugin.app as unknown as { setting?: SettingsModal };
   const settingsModal = app.setting;
-  if (!settingsModal) return () => {};
+  if (!settingsModal?.modalEl || typeof settingsModal.onOpen !== "function") return () => {};
 
   const clearModalScale = (modalEl: HTMLElement): void => {
     modalEl.removeClass("simple-scaled-modal");
@@ -29,7 +29,7 @@ export function registerPopupWindowSizing(plugin: SimplePlugin): () => void {
   };
 
   const applyNativeWindowScale = (settingsWindow: Window, mainWindow: Window): void => {
-    const bounds = calculatePopupBounds(mainWindow, plugin.settings.popupWindowScale);
+    const bounds = calculatePopupBounds(mainWindow, plugin.displaySettings.popupWindowScale);
     if (!bounds || settingsWindow.closed) return;
 
     try {
@@ -49,26 +49,26 @@ export function registerPopupWindowSizing(plugin: SimplePlugin): () => void {
     if (!settingsWindow || !mainWindow) return;
 
     if (settingsWindow === mainWindow) {
-      applyModalScale(modalEl, plugin.settings.popupWindowScale, mainWindow);
+      applyModalScale(modalEl, plugin.displaySettings.popupWindowScale, mainWindow);
       return;
     }
 
     clearModalScale(modalEl);
-    if (resizeNativeWindow) applyNativeWindowScale(settingsWindow, mainWindow);
+    if (!plugin.isMobile && resizeNativeWindow) applyNativeWindowScale(settingsWindow, mainWindow);
   };
 
   // Every settings entry point uses this singleton. Supplying the dimensions
   // before the popout is created avoids focus races and resize flicker.
   const originalGetPopoutOptions = settingsModal.getPopoutOptions;
   const wrappedGetPopoutOptions = function (this: SettingsModal): SettingsPopoutOptions {
-    const options = originalGetPopoutOptions.call(this);
+    const options = originalGetPopoutOptions?.call(this) ?? {};
     const mainWindow = getMainAppWindow(plugin.app);
     const bounds = mainWindow
-      ? calculatePopupBounds(mainWindow, plugin.settings.popupWindowScale)
+      ? calculatePopupBounds(mainWindow, plugin.displaySettings.popupWindowScale)
       : null;
     return bounds ? { ...options, width: bounds.width, height: bounds.height } : options;
   };
-  settingsModal.getPopoutOptions = wrappedGetPopoutOptions;
+  if (!plugin.isMobile && originalGetPopoutOptions) settingsModal.getPopoutOptions = wrappedGetPopoutOptions;
 
   // Desktop popouts are already born at the requested size. This hook only
   // applies the same policy when Obsidian renders settings as an in-app modal.

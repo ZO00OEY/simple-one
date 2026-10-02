@@ -25,7 +25,7 @@ export function registerQuickCopyLink(plugin: SimplePlugin): void {
   const syncAllActions = registerMarkdownAction(
     plugin,
     ACTION_ATTR,
-    () => plugin.settings.enhancements.quickCopyLink.enabled,
+    () => !plugin.isMobile && plugin.settings.enhancements.quickCopyLink.enabled,
     (view) => {
       const action = view.addAction(modeIcon(plugin.settings.enhancements.quickCopyLink.lastMode), actionTitle(plugin), async () => {
         await copyLink(plugin, view, plugin.settings.enhancements.quickCopyLink.lastMode);
