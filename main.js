@@ -12614,7 +12614,7 @@ var DiaryView = class extends import_obsidian.ItemView {
         this.plugin.refreshDiaryViews();
       }
     };
-    toggleSetting("\u663E\u793A\u5E74\u5386", "\u5728\u6708\u5386\u4E0B\u65B9\u663E\u793A 12 \u4E2A\u6708\u6982\u89C8\u3002", navigator2?.settings.calendarShowYearCalendar ?? diary.showYearCalendar, async (value) => {
+    toggleSetting("\u663E\u793A\u6708\u4EFD\u5BFC\u822A", "\u5728\u6708\u5386\u4E0B\u65B9\u4EE5\u4E24\u884C\u663E\u793A\u5168\u5E74\u6708\u4EFD\uFF0C\u70B9\u51FB\u6708\u4EFD\u53EF\u5207\u6362\u6708\u5386\u3002", navigator2?.settings.calendarShowYearCalendar ?? diary.showYearCalendar, async (value) => {
       if (navigator2) navigator2.settings.calendarShowYearCalendar = value;
       else diary.showYearCalendar = value;
       await saveAppearance();
@@ -26296,7 +26296,7 @@ var SimpleSettingTab = class extends import_obsidian17.PluginSettingTab {
           this.plugin.refreshDiaryViews();
         }
       };
-      new import_obsidian17.Setting(card).setName("\u663E\u793A\u5E74\u5386").setDesc("\u5728\u6708\u5386\u4E0B\u65B9\u663E\u793A 12 \u4E2A\u6708\u6982\u89C8\u3002").addToggle(
+      new import_obsidian17.Setting(card).setName("\u663E\u793A\u6708\u4EFD\u5BFC\u822A").setDesc("\u5728\u6708\u5386\u4E0B\u65B9\u4EE5\u4E24\u884C\u663E\u793A\u5168\u5E74\u6708\u4EFD\uFF0C\u70B9\u51FB\u6708\u4EFD\u53EF\u5207\u6362\u6708\u5386\u3002").addToggle(
         (toggle) => toggle.setValue(navigator2?.settings.calendarShowYearCalendar ?? diary.showYearCalendar).onChange(async (value) => {
           if (navigator2) navigator2.settings.calendarShowYearCalendar = value;
           else diary.showYearCalendar = value;

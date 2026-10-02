@@ -398,7 +398,7 @@ export class DiaryView extends ItemView {
         this.plugin.refreshDiaryViews();
       }
     };
-    toggleSetting("显示年历", "在月历下方显示 12 个月概览。", navigator?.settings.calendarShowYearCalendar ?? diary.showYearCalendar, async (value) => {
+    toggleSetting("显示月份导航", "在月历下方以两行显示全年月份，点击月份可切换月历。", navigator?.settings.calendarShowYearCalendar ?? diary.showYearCalendar, async (value) => {
       if (navigator) navigator.settings.calendarShowYearCalendar = value;
       else diary.showYearCalendar = value;
       await saveAppearance();

@@ -1830,10 +1830,9 @@ body.simple-readable-custom-tags .markdown-source-view.mod-cm6.is-live-preview .
 
 .simple-diary-year-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-template-rows: repeat(3, minmax(0, 1fr));
-  gap: 1px;
-  aspect-ratio: 16 / 9;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-rows: repeat(2, 32px);
+  gap: 4px 2px;
 }
 
 .simple-diary-year-month {
@@ -1842,8 +1841,10 @@ body.simple-readable-custom-tags .markdown-source-view.mod-cm6.is-live-preview .
   align-items: center;
   justify-content: center;
   min-width: 0;
-  min-height: 0;
-  padding: 6px;
+  min-height: 0 !important;
+  height: 32px !important;
+  width: 100%;
+  padding: 0 2px !important;
   border: 0 !important;
   border-radius: 6px;
   background: transparent !important;
@@ -1867,6 +1868,31 @@ body.simple-readable-custom-tags .markdown-source-view.mod-cm6.is-live-preview .
   background: var(--text-selection) !important;
   color: var(--text-normal);
   font-weight: 600;
+}
+
+body.is-mobile .simple-diary-view {
+  gap: 10px;
+}
+
+body.is-mobile .simple-diary-month {
+  --simple-calendar-day-height: clamp(28px, 10cqw, 34px);
+}
+
+body.is-mobile .simple-diary-day-cell {
+  height: var(--simple-calendar-day-height);
+  aspect-ratio: auto;
+}
+
+body.is-mobile .simple-diary-day {
+  height: 100% !important;
+  min-height: 0 !important;
+  aspect-ratio: auto;
+  padding: 0 !important;
+}
+
+body.is-mobile .simple-diary-year {
+  gap: 4px;
+  padding-top: 0;
 }
 
 .simple-diary-toolbar {

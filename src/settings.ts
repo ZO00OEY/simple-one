@@ -1673,8 +1673,8 @@ export class SimpleSettingTab extends PluginSettingTab {
         }
       };
       new Setting(card)
-        .setName("显示年历")
-        .setDesc("在月历下方显示 12 个月概览。")
+        .setName("显示月份导航")
+        .setDesc("在月历下方以两行显示全年月份，点击月份可切换月历。")
         .addToggle((toggle) =>
           toggle.setValue(navigator?.settings.calendarShowYearCalendar ?? diary.showYearCalendar).onChange(async (value) => {
             if (navigator) navigator.settings.calendarShowYearCalendar = value;
