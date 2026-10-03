@@ -100,10 +100,6 @@ export default class ShareFeature extends Component {
   async initialize(): Promise<void> {
     await this.reload().catch(error => { this.error = String(error); });
     await this.readTemplate().catch(error => { this.templateMessage = error instanceof Error ? error.message : String(error); });
-    try {
-      const display = JSON.parse(window.localStorage.getItem(this.displayStorageKey()) || "null") as Record<string, unknown> | null;
-      if (display && typeof display === "object") { this.restoreDisplay(display); this.displayStored = true; }
-    } catch { /* Invalid display preferences fall back to the saved workspace layout. */ }
     if (this.manifest.site.repo && this.manifest.site.initialized) { this.guideStep = 4; this.guideAvailableStep = 4; }
     addIcon("simple-share-location", '<g fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><path d="M50 92S81 59 81 38a31 31 0 0 0-62 0c0 21 31 54 31 54Z"/><circle cx="50" cy="38" r="11"/></g>');
     addIcon("simple-share-sort-asc", '<g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M25 85V15m-12 12 12-12 12 12M60 35l10-25 10 25M64 27h12M60 60h20L60 85h20"/></g>');
@@ -416,10 +412,8 @@ export default class ShareFeature extends Component {
   }
   updateDisplay(change: Partial<ShareDisplaySettings>): void {
     Object.assign(this.display, change); this.displayStored = true;
-    window.localStorage.setItem(this.displayStorageKey(), JSON.stringify(this.display));
     this.host.app.workspace.requestSaveLayout(); this.renderViews();
   }
-  private displayStorageKey(): string { return `simple-one-share-display:${this.host.app.vault.getName()}`; }
   private async readTemplate(): Promise<string> {
     const adapter = this.host.app.vault.adapter;
     const path = this.path("share-template.html");

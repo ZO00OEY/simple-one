@@ -150,9 +150,8 @@ try {
   };
   try {
     const uiCalls = [];
-    const displayStore = new Map();
-    globalThis.window.localStorage = { setItem: (key, value) => displayStore.set(key, JSON.parse(value)) };
-    const ui = new combined.ShareFeature({ app: { vault: { getName: () => "fixture" }, workspace: { getLeavesOfType: () => [], requestSaveLayout() {} } }, sync: { exec: async (program, args, _auth, _trim, _timeout, output, stdin, signal) => {
+    let savedLayouts = 0;
+    const ui = new combined.ShareFeature({ app: { vault: { getName: () => "fixture" }, workspace: { getLeavesOfType: () => [], requestSaveLayout() { savedLayouts++; } } }, sync: { exec: async (program, args, _auth, _trim, _timeout, output, stdin, signal) => {
       uiCalls.push({ program, args, stdin });
       if (args.includes("--web")) {
         output("First copy your one-time code: ABCD-1234");
@@ -251,7 +250,8 @@ try {
     const selects = rootEl.querySelectorAll("select");
     selects[0].value = "public"; selects[0].dispatchEvent(new dom.window.Event("change"));
     assert.equal(ui.display.layout, "public");
-    assert.equal(displayStore.get("simple-one-share-display:fixture").layout, "public");
+    assert.equal(ui.display.layout, "public");
+    assert(savedLayouts > 0, "display preferences use Obsidian workspace persistence");
     ui.restoreDisplay({ layout: "source", showPaths: true });
     assert.equal(ui.display.layout, "public", "obsolete workspace state cannot override persisted display settings");
     const deploymentCalls = [];

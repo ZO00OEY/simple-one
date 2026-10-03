@@ -1,3 +1,5 @@
+import { gunzipSync, strFromU8 } from "fflate";
+import { desktopProcess, base64Bytes, type NodeFs, type NodePath } from "../../shared/desktopNode";
 import { FileSystemAdapter, Platform } from "obsidian";
 import type SimplePlugin from "../../main";
 import { managedPath, parsePublishState, SHARE_FOLDER, type ShareManifest, type PublishState } from "./model";
@@ -56,22 +58,22 @@ export class ShareRepository {
   }
   private async safePath(relative: string): Promise<void> {
     const requireNode = (window as unknown as { require: (name: string) => unknown }).require;
-    const fs = (requireNode("fs") as typeof import("fs")).promises;
-    const path = requireNode("path") as typeof import("path");
+    const fs = (requireNode("fs") as NodeFs).promises;
+    const path = requireNode("path") as NodePath;
     const absolute = path.resolve(this.root, relative);
     if (!absolute.startsWith(path.resolve(this.root) + path.sep)) throw new Error("发布路径越过分享目录边界。");
     let current = this.root;
     for (const part of ["", ...relative.split("/")]) {
       if (part) current = path.join(current, part);
       try { if ((await fs.lstat(current)).isSymbolicLink()) throw new Error("分享缓存存在符号链接，停止文件操作。"); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      catch (error) { if ((error as { code?: string }).code !== "ENOENT") throw error; }
     }
   }
   private async canonical(value: string): Promise<string> {
     const requireNode = (window as unknown as { require: (name: string) => unknown }).require;
-    const fs = (requireNode("fs") as typeof import("fs")).promises;
+    const fs = (requireNode("fs") as NodeFs).promises;
     const canonical = (await fs.realpath(value)).replace(/\\/g, "/");
-    return process.platform === "win32" ? canonical.toLowerCase() : canonical;
+    return desktopProcess?.platform === "win32" ? canonical.toLowerCase() : canonical;
   }
   async checkPrivateFreshness(): Promise<void> {
     const run = (args: string[]) => this.host.sync.exec("git", args, true);
@@ -199,9 +201,7 @@ export function websiteFiles(template = DEFAULT_SHARE_TEMPLATE): Map<string, str
   files.set("reader/appearance.css", "");
   let readerFiles: Record<string, string> = {};
   if (readerArchive) {
-    const requireNode = (window as unknown as { require: (name: string) => unknown }).require;
-    const zlib = requireNode("zlib") as typeof import("zlib");
-    readerFiles = JSON.parse(zlib.gunzipSync(Buffer.from(readerArchive, "base64")).toString("utf8")) as Record<string, string>;
+    readerFiles = JSON.parse(strFromU8(gunzipSync(base64Bytes(readerArchive)))) as Record<string, string>;
   }
   for (const [path, value] of Object.entries(readerFiles)) {
     const bytes = Uint8Array.from(atob(value), char => char.charCodeAt(0)); files.set(path, bytes.buffer);

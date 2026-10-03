@@ -19,10 +19,13 @@ const context = await esbuild.context({
   logLevel: "info",
   sourcemap: prod ? false : "inline",
   treeShaking: true,
+  minify: prod,
   outfile: "main.js",
   plugins: [{ name: "share-reader", setup(build) {
     build.onLoad({ filter: /readerPayload\.ts$/ }, async () => {
-      const reader = await esbuild.build({ entryPoints: { app: "src/features/share/reader/app.ts" }, bundle: true, write: false, outdir: "reader", format: "esm", splitting: true, minify: true, target: "es2020", loader: { ".woff2": "file", ".woff": "file", ".ttf": "file" }, logLevel: "warning", metafile: true });
+      const reader = await esbuild.build({ entryPoints: { app: "src/features/share/reader/app.ts" }, bundle: true, write: false, outdir: "reader", format: "esm", splitting: true, minify: true, target: "es2020", loader: { ".woff2": "file", ".woff": "file", ".ttf": "file" }, logLevel: "warning", metafile: true, plugins: [{ name: "modern-fonts", setup(readerBuild) {
+        readerBuild.onLoad({ filter: /katex\.min\.css$/ }, async args => ({ contents: (await fs.readFile(args.path, "utf8")).replace(/,url\([^)]*\.(?:woff|ttf)\) format\([^)]*\)/g, ""), loader: "css", resolveDir: path.dirname(args.path) }));
+      } }] });
       const entries = reader.outputFiles.map(file => [path.relative(process.cwd(), file.path).replaceAll("\\", "/"), Buffer.from(file.contents).toString("base64")]);
       const files = Object.fromEntries(entries.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0));
       const packageNames = new Set();
@@ -39,7 +42,7 @@ const context = await esbuild.context({
         if (file) licenses.push(`\n=== ${name} ===\n${(await fs.readFile(`${directory}/${file}`, "utf8")).replace(/\r\n/g, "\n")}`);
       }
       files["reader/licenses.txt"] = Buffer.from(licenses.join("\n")).toString("base64");
-      const compressed = gzipSync(Buffer.from(JSON.stringify(files)));
+      const compressed = gzipSync(Buffer.from(JSON.stringify(files)), { level: 9 });
       // The gzip OS byte otherwise differs between Windows and Linux builds.
       compressed[9] = 255;
       const archive = compressed.toString("base64");
@@ -51,6 +54,7 @@ const context = await esbuild.context({
 if (prod) {
   await context.rebuild();
   await context.dispose();
+  if ((await fs.stat("main.js")).size > 5_000_000) throw new Error("main.js exceeds the Obsidian Sync Standard 5 MB limit");
   console.log("Build complete.");
 } else {
   await context.watch();

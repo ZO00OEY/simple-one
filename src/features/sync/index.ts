@@ -1,3 +1,4 @@
+import { desktopProcess, type NodeFs, type NodePath, type NodeCommands } from "../../shared/desktopNode";
 import {
   addIcon,
   App,
@@ -443,6 +444,20 @@ export default class SyncFeature extends Component {
       }));
     }
     return this.mobileGithub;
+  }
+
+  async restartLightweightSetup(): Promise<boolean> {
+    if (this.syncing || this.switchingSyncMode || this.desktopTaskActive || this.host.share?.busy) throw new Error("请等待当前同步或发布任务停止后重新接入。");
+    if (legacySyncRunning(this.app)) throw new Error("请先关闭旧 Simple Link 同步，再重新接入。");
+    this.switchingSyncMode = true;
+    try {
+      const preserved = await this.getMobileGithub().restartSetup();
+      this.settings.mobile.bound = false;
+      await this.saveSettings();
+      await this.mobileHost().save();
+      this.setStatus(preserved ? "已清理未完成同步，保留共同基线 · 请重新接入" : "已清理未完成同步 · 请重新接入并核对两端文件");
+      return preserved;
+    } finally { this.switchingSyncMode = false; }
   }
 
   async completeLightweightGuide(options: MobileOptions): Promise<void> {
@@ -1004,7 +1019,7 @@ export default class SyncFeature extends Component {
     if (!this.settings.setupComplete) throw new Error("请先完成电脑端 Git 接入");
     const nodeRequire = (window as unknown as { require?: (name: string) => unknown }).require;
     if (!nodeRequire) throw new Error("本地历史瘦身仅支持电脑端");
-    const path = nodeRequire("path") as typeof import("path");
+    const path = nodeRequire("path") as NodePath;
     const root = await this.git(["rev-parse", "--show-toplevel"]);
     if (path.resolve(root).toLowerCase() !== path.resolve(this.vaultBasePath()).toLowerCase()) {
       throw new Error("当前 Vault 不是独立 Git 仓库，无法安全清理历史");
@@ -1766,8 +1781,8 @@ export default class SyncFeature extends Component {
     if (Platform.isMobile || !this.settings.setupComplete) throw new Error("请先完成电脑端 Git 接入");
     const nodeRequire = (window as unknown as { require?: (name: string) => unknown }).require;
     if (!nodeRequire) throw new Error("文件追踪检查仅支持电脑端");
-    const fs = (nodeRequire("fs") as typeof import("fs")).promises;
-    const path = nodeRequire("path") as typeof import("path");
+    const fs = (nodeRequire("fs") as NodeFs).promises;
+    const path = nodeRequire("path") as NodePath;
     const vaultPath = this.vaultBasePath();
     const root = (await this.gitRaw(["rev-parse", "--show-toplevel"])).trim();
     if ((await fs.realpath(root)).toLowerCase() !== (await fs.realpath(vaultPath)).toLowerCase()) {
@@ -1776,7 +1791,7 @@ export default class SyncFeature extends Component {
     await this.ensureNormalGitState();
     let existingIgnore = "";
     try { existingIgnore = await fs.readFile(path.join(vaultPath, ".gitignore"), "utf8"); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    catch (error) { if ((error as { code?: string }).code !== "ENOENT") throw error; }
     const tracked = (await this.gitRaw(["ls-files", "--cached", "-z"])).split("\0").filter(Boolean);
     const ignored = (await this.gitRaw(["ls-files", "-ci", "--exclude-standard", "-z"])).split("\0").filter(Boolean);
     const nestedRepos = await findNestedRepos(vaultPath, this.app.vault.configDir);
@@ -2013,8 +2028,8 @@ export default class SyncFeature extends Component {
     }
     const nodeRequire = (window as unknown as { require?: (name: string) => unknown }).require;
     if (!nodeRequire) throw new Error("当前平台不支持桌面命令");
-    const childProcess = nodeRequire("child_process") as typeof import("child_process");
-    const env: NodeJS.ProcessEnv = { ...process.env };
+    const childProcess = nodeRequire("child_process") as NodeCommands;
+    const env: Record<string, string | undefined> = { ...desktopProcess?.env };
     if (program === "git") env.GIT_TERMINAL_PROMPT = "0";
     if (program === "git" && authenticated) {
       // 本次 Git 命令直接向已登录的 gh 取凭据，避免系统 GCM 在自动同步时弹出登录窗口。
@@ -2039,8 +2054,8 @@ export default class SyncFeature extends Component {
         }
       );
       if (onOutput) {
-        child.stdout?.on("data", (chunk: string | Buffer) => onOutput(String(chunk)));
-        child.stderr?.on("data", (chunk: string | Buffer) => onOutput(String(chunk)));
+        child.stdout?.on("data", (chunk: unknown) => onOutput(String(chunk)));
+        child.stderr?.on("data", (chunk: unknown) => onOutput(String(chunk)));
       }
       if (stdinText !== undefined) {
         child.stdin?.on("error", () => { /* command failure is handled by execFile callback */ });
@@ -2139,12 +2154,12 @@ export default class SyncFeature extends Component {
     if (!repos.length) return;
     const nodeRequire = (window as unknown as { require?: (name: string) => unknown }).require;
     if (!nodeRequire) throw new Error("内嵌仓库同步仅支持桌面端");
-    const fs = (nodeRequire("fs") as typeof import("fs")).promises;
-    const path = nodeRequire("path") as typeof import("path");
+    const fs = (nodeRequire("fs") as NodeFs).promises;
+    const path = nodeRequire("path") as NodePath;
     const ignorePath = path.join(vaultPath, ".gitignore");
     let existing = "";
     try { existing = await fs.readFile(ignorePath, "utf8"); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    catch (error) { if ((error as { code?: string }).code !== "ENOENT") throw error; }
     const missing = nestedGitIgnoreRules(repos).filter((rule) => !existing.split(/\r?\n/).includes(rule));
     if (missing.length) {
       const eol = existing.includes("\r\n") ? "\r\n" : "\n";
@@ -3409,13 +3424,22 @@ export class SyncSettingsTab extends PluginSettingTab {
     connectionCopy.createEl("p", { text: this.lightweightGuideStateError || (completed ? "轻量同步已建立共同基线；可重新检查授权、仓库和同步规则。" : "按下方步骤核验授权与仓库，确认首次同步后完成接入。") });
     const restart = connectionStatus.createEl("button", { text: "重新检查或修复接入", attr: { type: "button" } });
     restart.disabled = this.lightweightGuideBusy || this.plugin.isSyncing();
-    restart.addEventListener("click", () => {
+    restart.addEventListener("click", () => { void (async () => {
       if (restart.disabled) return;
-      this.lightweightGuideController?.abort(); this.lightweightGuideStep = 1;
-      this.lightweightGuideToken = ""; this.lightweightGuideLogin = ""; this.lightweightGuideVerified = undefined;
-      this.lightweightGuideStateChecked = false; this.lightweightGuideStateError = "";
-      this.lightweightGuideDraft = undefined; this.renderSettings();
-    });
+      this.lightweightGuideBusy = true;
+      restart.disabled = true; restart.setText("正在清理…");
+      try {
+        await this.plugin.restartLightweightSetup();
+        this.lightweightGuideController?.abort(); this.lightweightGuideStep = 1;
+        this.lightweightGuideToken = ""; this.lightweightGuideLogin = ""; this.lightweightGuideVerified = undefined;
+        this.lightweightGuideStateChecked = false; this.lightweightGuideStateError = "";
+        this.lightweightGuideDraft = undefined;
+      } catch (error) { this.lightweightGuideStateError = messageOf(error); }
+      finally {
+        this.lightweightGuideBusy = false;
+        if (this.desktopPage === "beginner-mobile") this.renderSettings();
+      }
+    })(); });
     const nav = page.createDiv({ cls: "simple-one-sync-setup-nav simple-one-sync-lightweight-nav" });
     const available = this.lightweightGuideVerified ? 4 : this.lightweightGuideLogin ? 3 : 2;
     ["获取 Token", "核验 Token", "选择仓库", "同步规则"].forEach((label, index) => {

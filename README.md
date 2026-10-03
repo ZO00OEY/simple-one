@@ -24,6 +24,10 @@ Find **Simple One** in Obsidian's community plugins, or download it from [Releas
 
 See the [English user guide](USAGE.md) or [中文使用说明](USAGE.zh-CN.md) for setup and everyday use.
 
+## Access and privacy
+
+Sync requires GitHub authorization; sharing publishes selected notes publicly. Web capture contacts the requested website. Sync and attachment tools scan vault files, copy actions use the clipboard, and desktop Git uses local files and commands. No telemetry. See [review notes](docs/automated-review-notes.md) for technical details.
+
 ## Feedback and license
 
 Questions, problems, or ideas? Visit [GitHub Issues](https://github.com/ZO00OEY/simple-one/issues).

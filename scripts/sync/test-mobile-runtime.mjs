@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import vm from "node:vm";
 import esbuild from "esbuild";
+import { zipSync } from "fflate";
 
 const output = resolve("../../../.codex/output");
 await mkdir(output, { recursive: true });
@@ -11,7 +12,7 @@ const folder = await mkdtemp(join(output, "mobile-runtime-test-"));
 try {
   const bundle = join(folder, "runtime.cjs");
   await esbuild.build({ stdin: {
-    contents: 'export { default as LinkPlugin } from "./src/features/sync/index"; export { MobileGithub } from "./src/features/sync/mobileGithub"; export { blobSha } from "./src/features/sync/linkDiff"; export { ZoeySyncConflictPreviewModal } from "./src/features/sync/conflictPreview"; export { textParts, resolveTextParts } from "./src/features/sync/textDiff";',
+    contents: 'export { default as LinkPlugin } from "./src/features/sync/index"; export { MobileGithub } from "./src/features/sync/mobileGithub"; export { extractRepositoryArchive } from "./src/features/sync/repositoryArchive"; export { blobSha } from "./src/features/sync/linkDiff"; export { ZoeySyncConflictPreviewModal } from "./src/features/sync/conflictPreview"; export { textParts, resolveTextParts } from "./src/features/sync/textDiff";',
     resolveDir: process.cwd()
   }, bundle: true, platform: "browser", format: "cjs", external: ["obsidian"],
     loader: { ".png": "dataurl" }, outfile: bundle });
@@ -35,7 +36,14 @@ try {
     context.window = context;
     vm.runInContext(source, context);
     assert.deepEqual(nodeLoads, [], `${platform}: plugin loads without Node modules`);
-    const { LinkPlugin, MobileGithub, blobSha, ZoeySyncConflictPreviewModal, textParts, resolveTextParts } = context.module.exports;
+    const { LinkPlugin, MobileGithub, extractRepositoryArchive, blobSha, ZoeySyncConflictPreviewModal, textParts, resolveTextParts } = context.module.exports;
+    const zip = zipSync({ 'vault/note.md': new TextEncoder().encode('mobile archive'),
+      'vault/.obsidian/plugins/unselected/main.js': new TextEncoder().encode('excluded plugin') });
+    const extracted = await extractRepositoryArchive(zip, { 'note.md': { sha: 'fixture', mode: '100644' } }, () => {});
+    assert.equal(extracted.size, 1);
+    assert.equal(new TextDecoder().decode(extracted.get('note.md')), 'mobile archive');
+    const unsafe = zipSync({ 'vault/../outside.md': new TextEncoder().encode('unsafe') });
+    await assert.rejects(extractRepositoryArchive(unsafe, {}, () => {}), /路径/);
     assert.equal(typeof LinkPlugin, "function");
     let stored = { ignorePatterns: ["private/", "!private/keep.md"] };
     const settingsPlugin = { app: { vault: { configDir: ".custom" } },

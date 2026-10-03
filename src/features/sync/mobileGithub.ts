@@ -1,6 +1,7 @@
 import { DataAdapter, requestUrl } from "obsidian";
 import { blobSha, syncBytes, sameContent, FileEntry, identityPaths, included, linkDiff, LocalState, Manifest, MobileOptions, newLocalState, newPathRecords, normalizePaths, PathRecords, noteChange, safePath, scanCurrent } from "./linkDiff";
 import { parseGithubRepoUrl } from "./onboarding";
+import { extractRepositoryArchive } from "./repositoryArchive";
 
 export interface RemoteSnapshot { commit: string; tree: string; files: Manifest; plugins: string[]; branch: string; renames: Record<string, string> }
 interface Side extends FileEntry { path: string; source: "local" | "remote" }
@@ -22,8 +23,10 @@ interface PendingTransaction {
   commit: string; parent: string; base: Manifest; actions: LocalAction[];
   revision: number; paths: PathRecords;
   scope: string;
+  archive?: { commit: string; files: Manifest };
 }
 interface StoredState extends LocalState {
+  rejoinReview?: boolean;
   pending?: PendingTransaction;
   downloadVerification?: { phase: "downloading" | "verifying"; scope: string; commit: string; files: Manifest };
 }
@@ -58,6 +61,7 @@ export class MobileGithub {
   private savePromise?: Promise<void>;
   private saveRequested = false;
   private loaded = false;
+  private loadPromise?: Promise<void>;
   private deferredEvents: Array<{ type: "create" | "modify" | "delete" | "rename"; path: string; oldPath?: string }> = [];
   private running = false;
 
@@ -70,6 +74,14 @@ export class MobileGithub {
 
   async load(): Promise<void> {
     if (this.loaded) return;
+    if (this.loadPromise) return this.loadPromise;
+    const loading = this.readState();
+    this.loadPromise = loading;
+    try { await loading; }
+    finally { if (this.loadPromise === loading) this.loadPromise = undefined; }
+  }
+
+  private async readState(): Promise<void> {
     let parsed: StoredState | undefined;
     let recovered = false;
     for (const path of [this.statePath, this.recoveryPath]) {
@@ -151,7 +163,7 @@ export class MobileGithub {
     return read(await this.api(path, method, body));
   }
 
-  private async api(path: string, method = "GET", body?: unknown, raw = false): Promise<unknown> {
+  private async api(path: string, method = "GET", body?: unknown, raw = false, timeoutMs = 60000): Promise<unknown> {
     const token = this.getOptions().token.trim();
     if (!token) throw new Error("请先填写 GitHub Token。");
     const remainingRevision = this.remainingRevision;
@@ -162,7 +174,7 @@ export class MobileGithub {
           headers: { Authorization: `Bearer ${token}`, Accept: raw ? "application/vnd.github.raw+json" : "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
           body: body === undefined ? undefined : JSON.stringify(body), throw: false }),
-        new Promise<never>((_, reject) => { timer = window.setTimeout(() => reject(new Error("GitHub 请求超时；下次同步会核对提交结果。")), 60000); })
+        new Promise<never>((_, reject) => { timer = window.setTimeout(() => reject(new Error("GitHub 请求超时；下次同步会核对提交结果。")), timeoutMs); })
       ]);
       const left = Object.entries(response.headers).find(([key]) => key.toLowerCase() === "x-ratelimit-remaining")?.[1];
       if (remainingRevision === this.remainingRevision && token === this.getOptions().token.trim() &&
@@ -313,6 +325,52 @@ export class MobileGithub {
     return remote;
   }
 
+  async restartSetup(): Promise<boolean> {
+    if (this.running) throw new Error("正在检查缓存或执行同步，请等待任务停止后重新接入。");
+    this.running = true;
+    try {
+      await this.savePromise;
+      // Wait for a guide's initial state read before replacing its snapshot.
+      await this.loadPromise?.catch(() => undefined);
+      let previous = this.state;
+      const complete = (state: StoredState): boolean => state?.schema === 1 &&
+        typeof state.binding === "string" && !!state.binding &&
+        typeof state.baseCommitSha === "string" && !!state.baseCommitSha &&
+        !!state.base && typeof state.base === "object" && !Array.isArray(state.base) &&
+        Object.values(state.base).every(entry => !!entry && typeof entry.sha === "string" && !!entry.sha &&
+          (entry.mode === "100644" || entry.mode === "100755"));
+      if (!this.loaded) {
+        previous = newLocalState();
+        for (const path of [this.statePath, this.recoveryPath]) {
+          if (!await this.adapter.exists(path)) continue;
+          const source = await this.adapter.read(path);
+          let candidate: StoredState;
+          try { candidate = JSON.parse(source) as StoredState; }
+          catch (error) { if (error instanceof SyntaxError) continue; throw error; }
+          if (complete(candidate)) { previous = candidate; break; }
+        }
+      }
+      const preserved = complete(previous);
+      const next: StoredState = newLocalState(preserved ? previous.binding : "");
+      if (preserved) {
+        next.base = previous.base;
+        next.baseCommitSha = previous.baseCommitSha;
+        next.baseScope = previous.baseScope;
+      }
+      // A partial download must not turn missing files into inferred deletions.
+      next.rejoinReview = true;
+      next.revision = (Number.isFinite(previous.revision) ? previous.revision : 0) + 1;
+      const original = this.state;
+      this.state = next;
+      try { await this.save(); }
+      catch (error) { this.state = original; throw error; }
+      this.loaded = true;
+      this.deferredEvents = [];
+      this.resetRemaining();
+      return preserved;
+    } finally { this.running = false; }
+  }
+
   async refreshCache(force = false): Promise<{ files: number; seconds: number }> {
     await this.load();
     if (this.running || this.state.pending || this.state.downloadVerification) throw new Error("同步执行或下载验证期间不能重新建立缓存。");
@@ -431,7 +489,8 @@ export class MobileGithub {
       for (const path of Object.keys(base)) {
         const b: Side = { ...base[path], path, source: "remote" };
         const l = sideAt(local, lMap[path], "local"); const r = sideAt(remote.files, rMap[path], "remote");
-        if (!l && r && this.state.downloadVerification?.files[r.path] && !records.moves[path]) put(r);
+        if (this.state.rejoinReview && (!!l !== !!r)) choose({ id: `base:${path}`, label: path, kind: "delete", base: b, local: l, remote: r });
+        else if (!l && r && this.state.downloadVerification?.files[r.path] && !records.moves[path]) put(r);
         else if (same(l, r)) put(l);
         else if (same(l, b)) put(r);
         else if (same(r, b)) put(l);
@@ -484,7 +543,7 @@ export class MobileGithub {
         const r = !claimedRemote.has(path) ? sideAt(remote.files, path, "remote") : undefined;
         if (!l && r && this.state.downloadVerification?.files[path]) put(r);
         else if (l && r && !sameContent(l, r)) choose({ id: `new:${path}`, label: path, kind: "initial", local: l, remote: r });
-        else if (!this.state.baseCommitSha && (!!l !== !!r)) {
+        else if ((!this.state.baseCommitSha || this.state.rejoinReview) && (!!l !== !!r)) {
           choose({ id: `new:${path}`, label: path, kind: "unpaired", local: l, remote: r });
         } else put(l ?? r);
       }
@@ -628,6 +687,13 @@ export class MobileGithub {
       if (plan.scope !== this.scope()) throw new Error("上传准备期间同步范围已变化，请重新预览。");
       this.state.pending = { commit: commitSha, parent: plan.remote.commit, base: plan.desired, actions,
         revision: plan.revision, paths: plan.paths, scope: plan.scope };
+      const emptyVault = Object.keys(plan.local).every(path => path.startsWith(`${this.configDir}/`));
+      if (plan.downloads.length && (emptyVault || plan.downloads.length >= 50 ||
+          Object.values(plan.pendingChoices).some(choice => choice.choice === "both"))) {
+        const wanted = new Set(plan.downloads.map(path => plan.desired[path].sha));
+        this.state.pending.archive = { commit: plan.remote.commit,
+          files: Object.fromEntries(Object.entries(plan.remote.files).filter(([, entry]) => wanted.has(entry.sha))) };
+      }
       this.state.downloadVerification = { phase: "downloading", scope: plan.scope, commit: commitSha,
         files: Object.fromEntries(plan.downloads.map(path => [path, plan.desired[path]])) };
       await this.save();
@@ -675,9 +741,47 @@ export class MobileGithub {
     for (const part of parts) { current = current ? `${current}/${part}` : part; if (!await this.adapter.exists(current)) await this.adapter.mkdir(current); }
   }
 
+  private async downloadArchive(pending: PendingTransaction): Promise<Map<string, Uint8Array>> {
+    const blobs = new Map<string, Uint8Array>();
+    if (!pending.archive) return blobs;
+    const needed = new Set<string>();
+    for (let index = 0; index < pending.actions.length; index++) {
+      const action = pending.actions[index];
+      if (action.sha && await this.liveSha(action.path) !== action.sha) needed.add(action.sha);
+      if (index % 25 === 0) await new Promise<void>(resolve => window.setTimeout(resolve, 0));
+    }
+    if (!needed.size) return blobs;
+    const wanted = Object.fromEntries(Object.entries(pending.archive.files)
+      .filter(([path, entry]) => this.allowed(path) && needed.has(entry.sha)));
+    if (!Object.keys(wanted).length) return blobs;
+    try {
+      this.progress("正在打包下载云端仓库 · 完成后按同步规则筛选文件…");
+      const bytes = await this.api(`${this.repo().prefix}/zipball/${encodeURIComponent(pending.archive.commit)}`, "GET", undefined, true, 180000);
+      if (!(bytes instanceof Uint8Array)) throw new Error("压缩包响应无效。");
+      const files = await extractRepositoryArchive(bytes, wanted, message => this.progress(message));
+      let checked = 0;
+      for (const [path, content] of files) {
+        const sha = wanted[path].sha;
+        // Archive attributes can change file contents; use the original blob then.
+        if (await blobSha(content) === sha) blobs.set(sha, content);
+        files.delete(path);
+        if (++checked % 25 === 0) {
+          this.progress(`正在校验压缩包内容 · 已检查 ${checked} 个文件`);
+          await new Promise<void>(resolve => window.setTimeout(resolve, 0));
+        }
+      }
+      return blobs;
+    } catch {
+      this.progress("整库打包下载未完成或超过解压容量，正在改用逐文件下载…");
+      return new Map();
+    }
+  }
+
   private async applyPending(onApplied?: (path?: string) => void): Promise<void> {
     const pending = this.state.pending!;
     if (pending.scope !== this.scope()) throw new Error("未完成同步的范围已变化，请恢复原同步范围再继续。");
+    const archived = await this.downloadArchive(pending);
+    if (pending.scope !== this.scope()) throw new Error("打包下载期间同步范围已变化，请重新预览。");
     // Reuse a verified local copy when multiple paths download the same blob.
     const downloaded = new Map<string, string>();
     const remaining = new Set(pending.actions.map(action => action.path));
@@ -701,8 +805,8 @@ export class MobileGithub {
         await this.adapter.remove(action.path);
       } else {
         const source = downloaded.get(action.sha);
-        let bytes: Uint8Array | undefined = source && await this.adapter.exists(source)
-          ? new Uint8Array(await this.adapter.readBinary(source)) : undefined;
+        let bytes: Uint8Array | undefined = archived.get(action.sha) ?? (source && await this.adapter.exists(source)
+          ? new Uint8Array(await this.adapter.readBinary(source)) : undefined);
         if (!bytes || await blobSha(bytes) !== action.sha) bytes = await this.getBlob(action.sha);
         await this.ensureParent(action.path);
         if (await this.liveSha(action.path) !== action.expected) throw new Error("下载期间本地内容发生变化，已停止写入。");
@@ -711,7 +815,9 @@ export class MobileGithub {
       }
       delete this.state.cache[action.path];
       report(action.path);
+      if (remaining.size % 25 === 0) await new Promise<void>(resolve => window.setTimeout(resolve, 0));
     }
+    archived.clear();
     if (this.state.downloadVerification) this.state.downloadVerification.phase = "verifying";
     await this.save();
     this.progress(`正在验证下载结果 · 0/${pending.actions.length} 个文件 · 验证通过后确认基准`);
@@ -721,6 +827,7 @@ export class MobileGithub {
         throw new Error(`下载结果验证未通过：${action.path}。已保留未完成状态和原共同基准，请重新预览恢复同步。`);
       }
       this.progress(`正在验证下载结果 · ${i + 1}/${pending.actions.length} 个文件 · 验证通过后确认基准`);
+      if (i % 25 === 0) await new Promise<void>(resolve => window.setTimeout(resolve, 0));
     }
     // A failed cache refresh must leave the download transaction recoverable.
     this.progress("下载验证通过 · 正在更新本地哈希缓存，尚未确认新基准…");
@@ -745,6 +852,7 @@ export class MobileGithub {
     this.state.baseScope = pending.scope;
     this.state.paths = rebased; this.state.pending = undefined;
     this.state.downloadVerification = undefined;
+    delete this.state.rejoinReview;
     // Keep event dirty markers: edits made while uploading remain detectable.
     await this.save();
     this.progress("同步已对齐 · 下载验证通过 · 待同步 0 个文件 · 新基准已确认");

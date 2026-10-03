@@ -1,15 +1,16 @@
+import { desktopProcess, base64Bytes, type NodeFs, type NodePath, type NodeCrypto } from "../../shared/desktopNode";
 import { describeGitIndexLockError } from "./gitError";
 import { defaultSyncIgnorePatterns, recommendedIgnoreRules as setupGitIgnore, shouldIgnore } from "./dirty";
 export { recommendedIgnoreRules as setupGitIgnore } from "./dirty";
 import { parseGitStatus } from "./gitStatus";
 import { findNestedRepos, nestedGitIgnoreRules, nestedRepoFiles, rebuildNestedRepoTracking, seedNestedRepoFiles, NestedRepo } from "./nestedRepos";
 
-const nodeRequire = typeof process !== "undefined" && process.versions?.node
+const nodeRequire = desktopProcess?.versions?.node
   ? (window as unknown as { require?: (name: string) => unknown }).require : undefined;
-const nodeFs = nodeRequire ? (nodeRequire("fs") as typeof import("fs")).promises : null;
-const nodeFsStream = nodeRequire ? nodeRequire("fs") as typeof import("fs") : null;
-const nodePath = nodeRequire ? nodeRequire("path") as typeof import("path") : null;
-const nodeCrypto = nodeRequire ? nodeRequire("crypto") as typeof import("crypto") : null;
+const nodeFs = nodeRequire ? (nodeRequire("fs") as NodeFs).promises : null;
+const nodeFsStream = nodeRequire ? nodeRequire("fs") as NodeFs : null;
+const nodePath = nodeRequire ? nodeRequire("path") as NodePath : null;
+const nodeCrypto = nodeRequire ? nodeRequire("crypto") as NodeCrypto : null;
 
 export type OverlapChoice = "local" | "remote";
 export interface SetupPreview {
@@ -285,7 +286,7 @@ export class GitSetup {
   private async readIgnore(): Promise<string> {
     try { return await nodeFs!.readFile(nodePath!.join(this.vaultPath, ".gitignore"), "utf8"); }
     catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
+      if ((error as { code?: string }).code === "ENOENT") return "";
       throw error;
     }
   }
@@ -369,7 +370,7 @@ export class GitSetup {
       const hash = nodeCrypto!.createHash("sha256");
       const gitHash = nodeCrypto!.createHash("sha1").update(`blob ${stat.size}\0`);
       for await (const chunk of nodeFsStream!.createReadStream(nodePath!.join(this.vaultPath, file))) {
-        if (!Buffer.isBuffer(chunk)) throw new Error("无法读取本地文件字节，已停止检查。");
+        if (!(chunk instanceof Uint8Array)) throw new Error("无法读取本地文件字节，已停止检查。");
         hash.update(chunk);
         gitHash.update(chunk);
       }
@@ -448,7 +449,7 @@ export class GitSetup {
         await nodeFs!.lstat(nodePath!.join(this.vaultPath, name));
         ignoredLocalCollisions.push(name);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        if ((error as { code?: string }).code !== "ENOENT") throw error;
       }
     }
     if (ignoredLocalCollisions.length > 0) {
@@ -468,7 +469,7 @@ export class GitSetup {
       const raw = await this.run("gh", ["api", `repos/${repo.owner}/${repo.name}/git/blobs/${remoteBlobs[".gitignore"].sha}`]);
       const data = JSON.parse(raw) as { encoding?: string; content?: string };
       if (data.encoding !== "base64" || typeof data.content !== "string") throw new Error("无法读取远端 .gitignore，请重新检查。");
-      remoteIgnore = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.from(data.content.replace(/\s/g, ""), "base64"));
+      remoteIgnore = new TextDecoder("utf-8", { fatal: true }).decode(base64Bytes(data.content.replace(/\s/g, "")));
     }
     const nestedRules = nestedGitIgnoreRules(nestedRepos);
     const effectiveIgnore = [...existingIgnore.split(/\r?\n/), ...setupGitIgnore(this.configDir), ...nestedRules];
@@ -504,10 +505,10 @@ export class GitSetup {
     const raw = await this.run("gh", ["api", `repos/${repo.owner}/${repo.name}/git/blobs/${blob.sha}`]);
     const data = JSON.parse(raw) as { content?: string; encoding?: string };
     if (data.encoding !== "base64" || !data.content) throw new Error("无法读取远端文件内容");
-    return { path: file, local, remote: this.describeContent(Buffer.from(data.content.replace(/\s/g, ""), "base64")) };
+    return { path: file, local, remote: this.describeContent(base64Bytes(data.content.replace(/\s/g, ""))) };
   }
 
-  private describeContent(buffer: Buffer): string {
+  private describeContent(buffer: Uint8Array): string {
     if (buffer.includes(0)) return `二进制文件（${buffer.length} 字节），请在对应位置查看原文件。`;
     try { return new TextDecoder("utf-8", { fatal: true }).decode(buffer).slice(0, 10000); }
     catch { return `非 UTF-8 文本或二进制文件（${buffer.length} 字节）。`; }
@@ -647,7 +648,7 @@ export class GitSetup {
           const stat = await nodeFs!.stat(nodePath!.join(this.vaultPath, file));
           const hash = nodeCrypto!.createHash("sha256");
           for await (const chunk of nodeFsStream!.createReadStream(nodePath!.join(this.vaultPath, file))) {
-            if (!Buffer.isBuffer(chunk)) throw new Error("无法读取本地文件字节，已停止检查。");
+            if (!(chunk instanceof Uint8Array)) throw new Error("无法读取本地文件字节，已停止检查。");
             hash.update(chunk);
           }
           if (`${stat.size}:${hash.digest("hex")}` !== latest.localSignatures[file] && file !== ".gitignore") changedDuringStage.push(file);

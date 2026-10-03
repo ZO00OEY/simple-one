@@ -32,14 +32,14 @@ main h2 { font-size:1.4em }
 main h3 { font-size:1.2em }
 main h4,main h5,main h6 { font-size:1em; margin-top:1.4em }
 main code,main pre {
-  font-family:Consolas,"Cascadia Mono",ui-monospace,monospace;
+  font-family:Consolas,"Cascadia Mono",monospace;
   letter-spacing:0;
   overflow-wrap:normal;
 }
 main pre { line-height:1.6 }
 .simple-column > :first-child,.heading-body > :first-child { margin-top:0 }
 .simple-column > :last-child,.heading-body > :last-child { margin-bottom:0 }
-main:has(.simple-columns) { max-width:1000px }
+main.has-columns { max-width:1000px }
 #content :is(p,ul,ol,blockquote) { max-width:696px }
 .simple-columns :is(p,ul,ol,blockquote) { max-width:none }
 main h1,main h2,main h3,main h4,main h5,main h6 { color:var(--share-text) }

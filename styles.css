@@ -6433,7 +6433,6 @@ body.simple-one-active.is-mobile.simple-mobile-native-header .view-header :is(.v
 .simple-one-sync-setup-page .simple-share-guide-body > :first-child,
 .simple-one-sync-mobile-guide-page .simple-one-sync-mobile-guide__card > :first-child { margin-top: 0; }
 .simple-one-sync-setup-page .simple-share-guide-body p,
-.simple-one-sync-mobile-guide-page .simple-one-sync-mobile-guide__card p { text-indent: 0; }
 .simple-share-settings-card > .simple-share-settings-dependent,
 .simple-share-settings-card .simple-share-settings-dependent > .setting-item + .setting-item { border-top: 1px dashed var(--background-modifier-border); }
 .simple-share-settings-card > .setting-item + .setting-item { border-top: 1px dashed var(--background-modifier-border); }

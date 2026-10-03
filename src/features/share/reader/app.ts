@@ -1,3 +1,4 @@
+// Standalone GitHub Pages reader; this file never executes inside Obsidian.
 import MarkdownIt from "markdown-it";
 import footnote from "markdown-it-footnote";
 import mark from "markdown-it-mark";
@@ -85,11 +86,11 @@ function foldHeadings(root: HTMLElement): void {
     for (const node of Array.from(parent.childNodes)) {
       const tag = node.nodeType === Node.ELEMENT_NODE ? (node as Element).tagName : "";
       const level = /^H[1-6]$/.test(tag) ? Number(tag[1]) : 0;
-      if (!level) { stack.at(-1)?.body.append(node); continue; }
-      while (stack.length && stack.at(-1)!.level >= level) stack.pop();
+      if (!level) { stack[stack.length - 1]?.body.append(node); continue; }
+      while (stack.length && stack[stack.length - 1].level >= level) stack.pop();
       const heading = node as HTMLElement;
       const section = document.createElement("section"); section.className = "heading-section";
-      if (stack.length) stack.at(-1)!.body.append(section); else parent.insertBefore(section, heading);
+      if (stack.length) stack[stack.length - 1].body.append(section); else parent.insertBefore(section, heading);
       const body = document.createElement("div"); body.className = "heading-body";
       const button = document.createElement("button"); button.type = "button"; button.className = "heading-toggle";
       button.dataset.heading = heading.textContent || "标题"; button.textContent = "▾";
@@ -183,6 +184,7 @@ async function route(): Promise<void> {
   const current = ++request;
   const match = /^#\/notes\/([a-z0-9]{12})(?:\/(.*))?$/.exec(location.hash);
   content.replaceChildren();
+  content.closest("main")?.classList.remove("has-columns");
   if (!match) { title.textContent = "分享笔记"; content.textContent = `共 ${catalog.length} 篇笔记，请从目录选择。`; return; }
   const note = catalog.find(item => item.id === match[1]);
   title.textContent = note?.title || "笔记不存在或已撤下";
@@ -195,6 +197,7 @@ async function route(): Promise<void> {
     if (current !== request) return;
     // DOMPurify is the final filter after Markdown, HTML, columns and math expansion.
     content.replaceChildren(DOMPurify.sanitize(md.render(source), { RETURN_DOM_FRAGMENT: true, ADD_TAGS: ["math", "annotation", "think", "thinking", "think_nya~", "snapshot", "abstract", "todo", "seeds", "events"], FORBID_TAGS: ["iframe", "object", "embed", "form", "style", "link", "meta"], FORBID_ATTR: ["srcdoc"] }));
+    content.closest("main")?.classList.toggle("has-columns", Boolean(content.querySelector(".simple-columns")));
     decorate(content);
     foldHeadings(content);
     mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default" });

@@ -25,6 +25,8 @@ Follow the assistant to sign in, create or connect a repository, and review whic
 
 The **当前应用** badge shows the mode you are actually using. Mobile background sync depends on your operating system. If you previously used Simple Link, disable its sync before enabling Simple One sync.
 
+Lightweight sync prefers a repository archive for an empty local vault, keeping both sides, or larger download batches. Only files allowed by your rules and plugin choices are written. Unselected plugins and private settings are excluded; unavailable or large archives fall back to individual downloads.
+
 ## Share a note online
 
 Keep editing in your current vault and publish only the notes you choose. Sharing setup and publishing are available on desktop; anyone can read the website on a computer or phone.

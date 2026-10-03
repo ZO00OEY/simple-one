@@ -17,7 +17,6 @@ const MODE_ICONS: Record<QuickCopyLinkMode, string> = {
 
 const ACTION_ATTR = "data-simple-quick-copy-link";
 const NOTEBOOK_NAVIGATOR_ID = "notebook-navigator";
-const NOTEBOOK_NAVIGATOR_SELECTED_FOLDER_KEY = "notebook-navigator-selected-folder";
 
 export function registerQuickCopyLink(plugin: SimplePlugin): void {
   let openMenu: Menu | null = null;
@@ -109,10 +108,6 @@ function getNotebookNavigatorSelectedFolderPath(plugin: SimplePlugin): string | 
   const pluginPath = getNotebookNavigatorPluginFolderPath(plugin);
   if (pluginPath !== null) return pluginPath;
 
-  const storedPath = window.localStorage.getItem(NOTEBOOK_NAVIGATOR_SELECTED_FOLDER_KEY);
-  const parsedStoredPath = parseStoredString(storedPath);
-  if (parsedStoredPath) return parsedStoredPath;
-
   const selected = document.querySelector<HTMLElement>(".nn-navitem.nn-selected[data-nav-item-type='folder']");
   const folderPath = selected?.getAttribute("data-path") ?? "";
   return folderPath || null;
@@ -126,16 +121,6 @@ function getNotebookNavigatorPluginFolderPath(plugin: SimplePlugin): string | nu
   } | undefined;
   const navItem = notebookNavigator?.api?.selection?.getNavItem?.();
   return navItem?.type === "folder" ? navItem.folder?.path ?? null : null;
-}
-
-function parseStoredString(value: string | null): string {
-  if (!value) return "";
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return typeof parsed === "string" ? parsed : "";
-  } catch {
-    return value;
-  }
 }
 
 function makeVaultAbsolutePath(plugin: SimplePlugin, vaultRelativePath: string): string {

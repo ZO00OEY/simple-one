@@ -1,9 +1,10 @@
+import { desktopProcess, type NodeFs, type NodePath } from "../../shared/desktopNode";
 import { defaultSyncIgnorePatterns, shouldIgnore } from "./dirty";
 
-const nodeRequire = typeof process !== "undefined" && process.versions?.node
+const nodeRequire = desktopProcess?.versions?.node
   ? (window as unknown as { require?: (name: string) => unknown }).require : undefined;
-const fs = nodeRequire ? (nodeRequire("fs") as typeof import("fs")).promises : null;
-const path = nodeRequire ? nodeRequire("path") as typeof import("path") : null;
+const fs = nodeRequire ? (nodeRequire("fs") as NodeFs).promises : null;
+const path = nodeRequire ? nodeRequire("path") as NodePath : null;
 
 export interface NestedRepo { directory: string; gitIsDirectory: boolean }
 export type GitCommand = (args: string[]) => Promise<string>;
@@ -38,7 +39,7 @@ export async function nestedRepoFiles(vaultPath: string, repos: readonly NestedR
   const files: string[] = [];
   let vaultIgnore: string[] = [];
   try { vaultIgnore = (await fs.readFile(path.join(vaultPath, ".gitignore"), "utf8")).split(/\r?\n/); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  catch (error) { if ((error as { code?: string }).code !== "ENOENT") throw error; }
   for (const repo of repos) {
     if (repo.directory === ".gitshare" || repo.directory.startsWith(".gitshare/")) continue;
     const absolute = path.join(vaultPath, repo.directory);

@@ -29,3 +29,7 @@ Simple One 将常用工具集中在一个插件里，按需开启，适应自己
 遇到问题或有新的想法，欢迎通过 [GitHub Issues](https://github.com/ZO00OEY/simple-one/issues) 反馈。
 
 [MIT License](LICENSE) · [第三方依赖许可](THIRD_PARTY_NOTICES.md)
+
+## 权限与隐私
+
+同步需要 GitHub 授权；分享会公开所选笔记。网页采集会访问指定网站，同步与附件工具需要扫描笔记库，复制功能使用剪贴板，电脑端 Git 需要访问本地文件并执行命令。不收集遥测数据。技术说明见[审核说明](docs/automated-review-notes.md)。
