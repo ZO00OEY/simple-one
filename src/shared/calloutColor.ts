@@ -7,7 +7,14 @@ export function readCalloutColor(type: string, context: HTMLElement = document.b
   const probe = doc.createElement("div");
   probe.className = "markdown-preview-view markdown-rendered";
   probe.setAttribute("aria-hidden", "true");
-  probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;width:0;height:0;overflow:hidden;";
+  probe.setCssStyles({
+    position: "absolute",
+    visibility: "hidden",
+    pointerEvents: "none",
+    width: "0",
+    height: "0",
+    overflow: "hidden",
+  });
   const callout = doc.createElement("div");
   callout.className = "callout";
   callout.dataset.callout = type.trim().toLowerCase() || "note";
