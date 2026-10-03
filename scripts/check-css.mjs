@@ -6,12 +6,15 @@ const tags = new Set("a abbr address area article aside audio b base bdi bdo blo
 const css = postcss.parse(fs.readFileSync("styles.css", "utf8"));
 const issues = [];
 css.walkDecls((decl) => { if (decl.important) issues.push(`Line ${decl.source.start.line}: avoid !important`); });
-css.walkRules((rule) => selectorParser((selectors) => {
+css.walkRules((rule) => {
+  if (rule.parent.type === "atrule" && /keyframes$/i.test(rule.parent.name)) return;
+  selectorParser((selectors) => {
   selectors.walkPseudos((pseudo) => { if (pseudo.value === ":has") issues.push(`Line ${rule.source.start.line}: avoid :has()`); });
   selectors.walkTags((tag) => {
     // Selector parsers represent nth-child arithmetic (e.g. 7n) as tags.
     if (!tags.has(tag.value.toLowerCase()) && !/^[\d+-]/.test(tag.value)) issues.push(`Line ${rule.source.start.line}: unknown tag ${tag.value}`);
   });
-}).processSync(rule.selector));
+}).processSync(rule.selector);
+});
 if (issues.length) throw new Error(issues.join("\n"));
 console.log("CSS checks passed.");

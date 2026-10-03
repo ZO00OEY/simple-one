@@ -1,9 +1,10 @@
+import { SyncSettingsTab } from "./features/sync";
 import { runAsync } from "./shared/async";
 import { confirmAction } from "./shared/confirm";
 // ============================================================
 // Settings tab UI
 // ============================================================
-import { App, Menu, Modal, Notice, PluginSettingTab, Setting, TFile, TFolder, normalizePath, setIcon, type SettingDefinitionItem, type SettingDefinitionAction } from "obsidian";
+import { App, Menu, Modal, Notice, PluginSettingTab, Setting, TFile, TFolder, normalizePath, requireApiVersion, setIcon, type SettingDefinitionItem, type SettingDefinitionAction } from "obsidian";
 import type SimplePlugin from "./main";
 import {
   checkUnusedAttachments,
@@ -93,6 +94,7 @@ function attachmentOrganizerDisabledReasons(
 
 type SettingsPage =
   | { type: "overview" }
+  | { type: "sync-sharing" }
   | { type: "html-preview" }
   | { type: "link-rules" }
   | { type: "template-rules" }
@@ -135,6 +137,7 @@ const QUICK_FORMAT_HEADING_LABELS: Record<QuickFormatHeadingLevel, string> = {
 
 export class SimpleSettingTab extends PluginSettingTab {
   plugin: SimplePlugin;
+  private syncTab: SyncSettingsTab;
   private page: SettingsPage = { type: "overview" };
   private parameterPlatform: "desktop" | "mobile";
   private expandedQuickFormatCalloutSections = new Set(["native", "custom"]);
@@ -150,10 +153,13 @@ export class SimpleSettingTab extends PluginSettingTab {
   constructor(app: App, plugin: SimplePlugin) {
     super(app, plugin);
     this.plugin = plugin;
+    this.syncTab = new SyncSettingsTab(app, plugin.sync);
+    plugin.sync.openSettings = () => this.openPage({ type: "sync-sharing" });
     this.parameterPlatform = plugin.isMobile ? "mobile" : "desktop";
   }
 
   hide(): void {
+    this.syncTab.hide();
     this.parameterPlatform = this.plugin.isMobile ? "mobile" : "desktop";
   }
 
@@ -162,29 +168,34 @@ export class SimpleSettingTab extends PluginSettingTab {
   getSettingDefinitions(): SettingDefinitionItem[] {
     // Custom rule editors keep their existing layout; native entries expose
     // each feature and its keywords to Obsidian 1.13's settings search.
-    const entry = (name: string, type: Exclude<SettingsPage["type"], "category-sites">, aliases: string[], desc = ""): SettingDefinitionAction => ({
-      name,
-      aliases,
-      desc,
-      action: () => this.openPage({ type }),
-    });
+    const entry = (name: string, type: Exclude<SettingsPage["type"], "category-sites">, aliases: string[], desc = ""): SettingDefinitionAction => {
+      const description = createFragment();
+      description.append(document.createTextNode(desc));
+      const arrow = description.createSpan({ cls: "simple-native-entry-arrow" });
+      arrow.setAttr("aria-hidden", "true");
+      setIcon(arrow, "chevron-right");
+      return { name, aliases, desc: description, action: () => this.openPage({ type }) };
+    };
     return [
-      { type: "group", heading: "显示与排版", cls: "simple-settings", items: [
+      { type: "group", heading: "功能拓展", cls: "simple-settings simple-native-overview", items: [
+        entry("同步与分享", "sync-sharing", ["GitHub", "Git Ignore", "同步", "仓库", "手机", "服务器", "Token"], "绑定仓库、配置电脑与轻量同步，管理需要共享和自动屏蔽的文件。"),
+      ] },
+      { type: "group", heading: "显示与排版", cls: "simple-settings simple-native-overview", items: [
         entry("显示增强", "display-enhancements", ["正文宽度", "图片高度", "窗口缩放", "窗口定位", "双列", "HTML 预览", "Mermaid", "颜色代码", "手机按钮"], "调整正文宽度、图片显示与内容预览。"),
         entry(QUICK_FORMAT_NAME, "quick-format", ["标题", "引用", "Callout", "标题颜色", "标题字号"], "把当前行或选中文本快速转换为标题、引用或 Callout。"),
         entry(REFORMAT_NAME, "reformat", ["粘贴", "链接", "排版规则", "换行", "网址标题"], "处理粘贴内容（链接）、对整篇笔记进行重排版。"),
       ] },
-      { type: "group", heading: "快捷操作", cls: "simple-settings", items: [
+      { type: "group", heading: "快捷操作", cls: "simple-settings simple-native-overview", items: [
         { name: "快速复制当前笔记链接", aliases: ["Obsidian URL", "绝对路径", "剪贴板"],
           desc: this.plugin.isMobile ? "检测到当前为移动端，已自动禁用。" : "在当前笔记标题栏增加复制按钮。左键复制链接，右键切换复制格式。",
           control: { type: "toggle", key: "quickCopyLink", disabled: this.plugin.isMobile } },
         entry("新建快速笔记", "template-rules", ["网页采集", "网站搜索", "分类", "网站规则"], "使用剪贴板链接或已配置的网站搜索快速生成笔记。"),
       ] },
-      { type: "group", heading: "内容管理", cls: "simple-settings", items: [
+      { type: "group", heading: "内容管理", cls: "simple-settings simple-native-overview", items: [
         entry("日历与日记", "calendar-diary", ["日记模板", "结转", "周期提醒", "纪念日", "节假日", "季度", "周数"], "管理日历、每日笔记、周期事件提醒、纪念日和节假日。"),
         entry("附件优化", "attachment-organizer", ["未引用附件", "重命名", "归位", "内嵌图片", "回收站"], "清理未引用附件，并按引用笔记重命名、归位附件。"),
       ] },
-      { type: "group", heading: "功能增强", cls: "simple-settings", items: [
+      { type: "group", heading: "功能增强", cls: "simple-settings simple-native-overview", items: [
         entry("搜索时默认屏蔽", "search-folders", ["文件夹", "排除", "包含"], searchFolderSummary(this.plugin.settings.searchFolders)),
         entry("新建笔记时自动补全属性", "new-note-defaults", ["Notebook Navigator", "Base", "数据库", "属性"], "Notebook Navigator 新建空白笔记后，按目录参考 .base 数据库补齐属性。"),
       ] },
@@ -203,16 +214,17 @@ export class SimpleSettingTab extends PluginSettingTab {
 
   private renderSettings(): void {
     const { containerEl } = this;
+    if (this.page.type !== "sync-sharing") this.syncTab.hide();
     containerEl.empty();
     containerEl.addClass("simple-settings");
-    containerEl.createDiv({
-      cls: "simple-platform-hint",
-      text: this.plugin.isMobile
-        ? "已使用手机平台，已切换为手机端专属配置"
-        : `检测到当前平台为 ${this.plugin.platformName}，当前使用桌面显示设置。`,
-    });
+    this.renderPlatformHint(containerEl);
 
-    if (this.page.type === "overview") {
+    if (this.page.type === "sync-sharing") {
+      this.renderPageHeader(containerEl, "同步与分享", () => {
+        if (!this.syncTab.backToOverview()) this.openPage({ type: "overview" });
+      });
+      this.syncTab.renderInto(containerEl.createDiv({ cls: "simple-one-sync-feature" }));
+    } else if (this.page.type === "overview") {
       this.renderOverview(containerEl);
     } else if (this.page.type === "html-preview") {
       this.renderHtmlPreviewSettings(containerEl);
@@ -255,6 +267,15 @@ export class SimpleSettingTab extends PluginSettingTab {
     } else {
       this.renderCategorySites(containerEl, this.page.categoryId);
     }
+  }
+
+  private renderPlatformHint(container: HTMLElement): HTMLDivElement {
+    return container.createDiv({
+      cls: "simple-platform-hint",
+      text: this.plugin.isMobile
+        ? "已使用手机平台，已切换为手机端专属配置"
+        : `检测到当前平台为 ${this.plugin.platformName}，当前使用桌面显示设置。`,
+    });
   }
 
   private renderOverview(container: HTMLElement): void {
@@ -1541,9 +1562,17 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private openPage(page: SettingsPage): void {
+    if (page.type === "sync-sharing") this.syncTab.resetNavigation();
     this.page = page;
     this.deleteMode = null;
-    this.renderSettings();
+    if (requireApiVersion("1.13.0") && page.type === "overview") {
+      this.syncTab.hide();
+      this.containerEl.empty();
+      this.containerEl.removeClass("simple-settings");
+      this.update();
+    } else {
+      this.renderSettings();
+    }
   }
 
   private textInput(

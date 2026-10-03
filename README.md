@@ -26,6 +26,12 @@ Deletion follows the trash preference selected in **Files and links**.
 The desktop window-position option keeps settings and community-plugin popout
 windows inside the usable monitor area.
 
+## Sync and sharing
+
+Open **Settings → Simple One → 功能拓展 → 同步与分享** for the enable switch, bound repository, setup assistant, and desktop/mobile/server settings. On first load, existing Simple Link settings are copied without replacing its files or Simple One settings. Sync starts disabled; stop the old Simple Link sync before enabling this entry. If the old engine is running, transaction-state migration waits until it is stopped.
+
+Native Git setup reviews ignore rules and tracked private files before synchronization resumes. The mobile plugin selector shares selected program files and shared settings, while forcibly excluding credentials, local state, caches, recovery files and their backups. Keep these private files when upgrading.
+
 ## Data and access
 
 - Settings are saved locally through the Obsidian plugin data API.
@@ -33,7 +39,9 @@ windows inside the usable monitor area.
 - Link and capture tools access the clipboard and the websites requested by the user.
 - The Notebook Navigator integration may read its selected-folder value from local storage.
 - Base64 decoding is used to extract inline images into attachment files.
-- No analytics service or plugin server receives vault contents.
+- No analytics service receives vault contents. Sync and sharing sends selected files to the GitHub repository or compatible server you configure.
+- Desktop sync runs locally installed Git and, during guided GitHub authorization, GitHub CLI. Mobile sync uses GitHub API requests.
+- Sync credentials and device state are stored locally in `sync-local.json`, `link-state.json` and recovery files; these and `data.json` are excluded from synchronization. `sync-settings.json` contains only whitelisted shared settings.
 
 ## Documentation
 
@@ -43,6 +51,7 @@ windows inside the usable monitor area.
 
 | Tool | Purpose |
 | --- | --- |
+| Sync and sharing | Guided desktop Git, mobile GitHub API, and compatible server synchronization with privacy exclusions. |
 | Text formatting | Apply headings, quotations and callouts to a line or selection. |
 | Note cleanup | Run configurable formatting rules across a note, preserving URLs and frontmatter. |
 | Pasted links | Fetch page titles, clean titles and convert Obsidian URLs to internal links. |

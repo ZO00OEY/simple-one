@@ -8,7 +8,8 @@
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "lint": "eslint src --max-warnings 0 && node scripts/check-css.mjs",
     "check": "npm run lint && npm run test && npm run build",
-    "test": "node scripts/smoke.mjs"
+    "test": "node scripts/smoke.mjs && npm run test:sync",
+    "test:sync": "node scripts/sync/test-dirty.mjs && node scripts/sync/test-onboarding.mjs && node scripts/sync/test-lightweight-guide.mjs && node scripts/sync/test-mobile-sync.mjs && node scripts/sync/test-mobile-runtime.mjs && node scripts/sync/test-migration.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

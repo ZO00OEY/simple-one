@@ -5,3 +5,10 @@ data.json
 *.log
 .codex/
 AGENTS.md
+
+# 同步与分享的个人配置、凭据与运行状态
+data.json*
+sync-local.json*
+sync-settings.json
+link-state.json*
+mobile-ignore.json*
