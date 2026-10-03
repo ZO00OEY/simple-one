@@ -102,16 +102,17 @@ export function included(path: string, options: MobileOptions, configDir: string
       path === `${configDir}/plugins/${pluginId}/__link_scan__`) return true;
   const parts = path.split("/");
   if (parts.some((part) => part === ".git" || part === "node_modules" || part === ".codex") ||
-      path === ".simple-link" || path.startsWith(".simple-link/") ||
+      path === ".simple-link" || path.startsWith(".simple-link/") || path === ".gitshare" || path.startsWith(".gitshare/") ||
       path === ".trash" || path.startsWith(".trash/") ||
       path.startsWith(".codex/") || path.startsWith(".claudian/sessions/")) return false;
   if (isPrivateSyncPath(path, configDir)) return false;
+  if (path === `${configDir}/plugins/${pluginId}/share-manifest.json`) return true;
   if (path === `${configDir}/plugins/${pluginId}/sync-settings.json`) return true;
   const ownPrefix = configDir + "/plugins/" + pluginId + "/";
   if (path.startsWith(ownPrefix)) {
     const relative = path.slice(ownPrefix.length);
     // Device state and recovery/backup variants cannot be enabled by ignore rules.
-    if (/^(?:data\.json|sync-local\.json|link-state\.json|mobile-ignore\.json)(?:$|[.~_-])/i.test(relative)) return false;
+    if (/^(?:data\.json|sync-local\.json|share-local\.json|link-state\.json|mobile-ignore\.json)(?:$|[.~_-])/i.test(relative)) return false;
   }
   if (path.startsWith(`${configDir}/plugins/`)) {
     const id = path.slice(`${configDir}/plugins/`.length).split("/")[0];

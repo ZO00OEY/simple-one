@@ -9,7 +9,6 @@ import {
   Modal,
   Notice,
   Platform,
-  Plugin,
   PluginSettingTab,
   requestUrl,
   setIcon,
@@ -22,6 +21,8 @@ import {
 } from "obsidian";
 import { migrateLinkFiles, readLocalSyncSettings, writeLocalSyncSettings, legacySyncRunning } from "./storage";
 import { runAsync } from "../../shared/async";
+import { settingsSection } from "../../shared/settingsLayout";
+import type SimplePlugin from "../../main";
 import { assertNoPrivateSyncFiles, coalesceDirty, defaultSyncIgnorePatterns, DirtyEntry, shouldIgnore } from "./dirty";
 import {
   ChangeItem,
@@ -128,8 +129,6 @@ interface PluginSettings {
   mobileSyncEnabled: boolean;
   enabled: boolean;
   viewLayout: "list" | "tree";
-  showVersionViewSwitcher: boolean;
-  changeViewMode: ChangeViewMode;
   lastSyncAt: number;
   lastPullAt: number;
   serverUrl: string;
@@ -156,9 +155,7 @@ interface PluginSettings {
   setupMutationStarted: boolean;
   viewRefreshDelaySeconds: number;
   autoCommitIdleMinutes: number;
-  autoPushIdleMinutes: number;
   maxUncommittedMinutes: number;
-  maxUnpushedMinutes: number;
   pullOnStartup: boolean;
   autoPullIntervalMinutes: number;
   pendingMergePushAfterResolve: boolean;
@@ -174,8 +171,6 @@ const DEFAULT_SETTINGS: PluginSettings = {
   desktopLightweightEnabled: false,
   mobileSyncEnabled: true,
   viewLayout: "list",
-  showVersionViewSwitcher: false,
-  changeViewMode: "upload",
   lastSyncAt: 0,
   lastPullAt: 0,
   serverUrl: "",
@@ -200,9 +195,7 @@ const DEFAULT_SETTINGS: PluginSettings = {
   setupMutationStarted: false,
   viewRefreshDelaySeconds: 7,
   autoCommitIdleMinutes: 5,
-  autoPushIdleMinutes: 30,
   maxUncommittedMinutes: 30,
-  maxUnpushedMinutes: 60,
   pullOnStartup: true,
   autoPullIntervalMinutes: 5,
   pendingMergePushAfterResolve: false,
@@ -212,7 +205,6 @@ const DEFAULT_SETTINGS: PluginSettings = {
 const SHARED_SETTING_KEYS = new Set<keyof PluginSettings>([
   "boundRepoUrl",
   "viewLayout",
-  "showVersionViewSwitcher",
   "serverUrl",
   "ignorePatterns",
   "mobileAutoSyncMinutes",
@@ -223,9 +215,7 @@ const SHARED_SETTING_KEYS = new Set<keyof PluginSettings>([
   "gitAuthorEmail",
   "viewRefreshDelaySeconds",
   "autoCommitIdleMinutes",
-  "autoPushIdleMinutes",
   "maxUncommittedMinutes",
-  "maxUnpushedMinutes",
   "pullOnStartup",
   "autoPullIntervalMinutes"
 ]);
@@ -296,7 +286,7 @@ function formatStatusError(message: string): string {
 }
 
 export default class SyncFeature extends Component {
-  constructor(readonly host: Plugin) { super(); }
+  constructor(readonly host: SimplePlugin) { super(); }
   get app(): App { return this.host.app; }
   get manifest() { return this.host.manifest; }
   openSettings?: () => void;
@@ -305,6 +295,7 @@ export default class SyncFeature extends Component {
 
   settings: PluginSettings = { ...DEFAULT_SETTINGS };
   private syncing = false;
+  private desktopTaskActive = false;
   private featureActive = false;
   private suppressPaths = new Set<string>();
   private statusEl?: HTMLElement;
@@ -313,14 +304,11 @@ export default class SyncFeature extends Component {
   private featureIntervals: number[] = [];
   private viewRefreshTimer?: number;
   private idleCommitTimer?: number;
-  private idlePushTimer?: number;
   private maxCommitTimer?: number;
-  private maxPushTimer?: number;
   private desktopPushRetryTimer?: number;
   private firstUncommittedAt = 0;
-  private firstUnpushedAt = 0;
-  private lastFileChangeAt = 0;
   private automaticPushQueued = false;
+  private automaticBackupQueued = false;
   private startupPullScheduled = false;
   private desktopGitQueue: Promise<void> = Promise.resolve();
   private desktopGitTrace: string[] = [];
@@ -363,7 +351,6 @@ export default class SyncFeature extends Component {
     this.host.addCommand({ id: "test-connection", name: "测试同步连接", callback: () => void this.testConnection(true) });
     this.host.addCommand({ id: "recalibrate-mobile-hashes", name: "重新校验轻量同步范围哈希", callback: () => void this.calibrateMobileHashes() });
     this.host.addCommand({ id: "open-sync-view", name: "打开同步面板", callback: () => void this.openSyncView() });
-    this.host.addCommand({ id: "preview-conflict-ui", name: "预览冲突界面", callback: () => void this.openConflictPreview() });
     if (this.settings.enabled) {
       this.activateFeature();
       if (!Platform.isMobile) {
@@ -442,13 +429,24 @@ export default class SyncFeature extends Component {
   }
 
   getMobileGithub(): MobileGithub {
-    if (!this.mobileGithub) this.mobileGithub = new MobileGithub(this.app.vault.adapter,
-      this.app.vault.configDir, this.manifest.id, () => this.settings.mobile,
-      (message) => this.setStatus(message));
+    if (!this.mobileGithub) {
+      this.mobileGithub = new MobileGithub(this.app.vault.adapter,
+        this.app.vault.configDir, this.manifest.id, () => this.settings.mobile,
+        (message) => {
+          if (this.syncing) this.setSyncActivity(message, "checking");
+          else this.setStatus(message);
+        });
+      this.register(this.mobileGithub.onRemainingChange(() => {
+        for (const leaf of this.app.workspace.getLeavesOfType(ZoeySyncView.type)) {
+          if (leaf.view instanceof ZoeySyncView) leaf.view.updateQuota();
+        }
+      }));
+    }
     return this.mobileGithub;
   }
 
   async completeLightweightGuide(options: MobileOptions): Promise<void> {
+    if (this.host.share?.busy) throw new Error("请等待笔记分享发布完成。");
     if (legacySyncRunning(this.app)) throw new Error("请先关闭旧 Simple Link 的同步，再完成新入口的接入。");
     if (this.syncing || this.switchingSyncMode) throw new Error("请等待当前同步或模式切换完成后重试。");
     this.switchingSyncMode = true;
@@ -586,18 +584,13 @@ export default class SyncFeature extends Component {
   private clearDesktopTimeouts(): void {
     if (this.viewRefreshTimer !== undefined) window.clearTimeout(this.viewRefreshTimer);
     if (this.idleCommitTimer !== undefined) window.clearTimeout(this.idleCommitTimer);
-    if (this.idlePushTimer !== undefined) window.clearTimeout(this.idlePushTimer);
     if (this.maxCommitTimer !== undefined) window.clearTimeout(this.maxCommitTimer);
-    if (this.maxPushTimer !== undefined) window.clearTimeout(this.maxPushTimer);
     if (this.desktopPushRetryTimer !== undefined) window.clearTimeout(this.desktopPushRetryTimer);
     this.viewRefreshTimer = undefined;
     this.idleCommitTimer = undefined;
-    this.idlePushTimer = undefined;
     this.maxCommitTimer = undefined;
-    this.maxPushTimer = undefined;
     this.desktopPushRetryTimer = undefined;
     this.firstUncommittedAt = 0;
-    this.firstUnpushedAt = 0;
   }
 
   private configureDesktopAutomation(): void {
@@ -644,17 +637,12 @@ export default class SyncFeature extends Component {
     for (const interval of this.featureIntervals) window.clearInterval(interval);
     this.featureIntervals = [];
     if (this.idleCommitTimer !== undefined) window.clearTimeout(this.idleCommitTimer);
-    if (this.idlePushTimer !== undefined) window.clearTimeout(this.idlePushTimer);
     if (this.maxCommitTimer !== undefined) window.clearTimeout(this.maxCommitTimer);
-    if (this.maxPushTimer !== undefined) window.clearTimeout(this.maxPushTimer);
     if (this.desktopPushRetryTimer !== undefined) window.clearTimeout(this.desktopPushRetryTimer);
     this.idleCommitTimer = undefined;
-    this.idlePushTimer = undefined;
     this.maxCommitTimer = undefined;
-    this.maxPushTimer = undefined;
     this.desktopPushRetryTimer = undefined;
     this.firstUncommittedAt = 0;
-    this.firstUnpushedAt = 0;
     this.configureDesktopAutomation();
     await this.resumeDesktopDirtyState();
   }
@@ -837,12 +825,9 @@ export default class SyncFeature extends Component {
   private handleVaultChange(paths: string[]): void {
     const relevantPaths = paths.filter((path) => !shouldIgnore(path, this.settings.ignorePatterns, this.app.vault.configDir));
     if (relevantPaths.length === 0) return;
-    const now = Date.now();
-    this.lastFileChangeAt = now;
     this.scheduleViewRefresh();
     if (this.nativeGitEnabled() && this.settings.setupComplete) {
       this.scheduleDesktopCommit();
-      if (this.firstUnpushedAt > 0) this.scheduleDesktopPush();
     }
   }
 
@@ -876,25 +861,7 @@ export default class SyncFeature extends Component {
   private scheduleDesktopPush(): void {
     if (!this.settings.setupComplete) return;
     if (this.desktopPushRetryTimer !== undefined) return;
-    if (this.lastFileChangeAt === 0) this.lastFileChangeAt = Date.now();
-    if (this.settings.autoPushIdleMinutes > 0) {
-      if (this.idlePushTimer !== undefined) window.clearTimeout(this.idlePushTimer);
-      const idleThreshold = Math.max(0.1, this.settings.autoPushIdleMinutes) * 60 * 1000;
-      const idleFor = Math.max(0, Date.now() - this.lastFileChangeAt);
-      this.idlePushTimer = window.setTimeout(() => {
-        this.idlePushTimer = undefined;
-        void this.runAutomaticPush(false);
-      }, Math.max(0, idleThreshold - idleFor));
-    }
-    if (this.firstUnpushedAt === 0) this.firstUnpushedAt = Date.now();
-    if (this.maxPushTimer === undefined && this.settings.maxUnpushedMinutes > 0) {
-      const maxThreshold = Math.max(1, this.settings.maxUnpushedMinutes) * 60 * 1000;
-      const pendingFor = Math.max(0, Date.now() - this.firstUnpushedAt);
-      this.maxPushTimer = window.setTimeout(() => {
-        this.maxPushTimer = undefined;
-        void this.runAutomaticPush(true);
-      }, Math.max(0, maxThreshold - pendingFor));
-    }
+    void this.runAutomaticPush();
   }
 
   private clearDesktopPushRetry(): void {
@@ -927,29 +894,23 @@ export default class SyncFeature extends Component {
   }
 
   private async runAutomaticCommit(): Promise<void> {
-    let result: DesktopCommitResult = { committed: false };
+    if (this.automaticBackupQueued) return;
+    this.automaticBackupQueued = true;
     try {
-      await this.enqueueDesktopGit(async () => {
-        result = await this.desktopCommitOnly();
-        this.resetDesktopCommitTracking();
-        if (await this.hasDesktopChanges()) {
-          this.scheduleDesktopCommit();
-        }
-      }, "自动 Commit");
-      if (result.committed) {
-        this.scheduleDesktopPush();
-      }
+      await this.enqueueDesktopGit(() => this.desktopAutomaticPush(true), "自动备份（Commit + Push）");
     } catch {
-      // 队列会记录错误；保留未提交状态，等待下一次文件变化重新安排。
+      // 上传失败由 Git 队列安排重试，本地 Commit 保留。
+    } finally {
+      this.automaticBackupQueued = false;
     }
   }
 
-  private async runAutomaticPush(forceCommit: boolean): Promise<void> {
+  private async runAutomaticPush(): Promise<void> {
     if (this.automaticPushQueued) return;
     this.automaticPushQueued = true;
     try {
       await this.enqueueDesktopGit(async () => {
-        return await this.desktopAutomaticPush(forceCommit);
+        return await this.desktopAutomaticPush();
       }, "自动 Push");
     } catch {
       // 队列会记录错误；后续文件变化会再次尝试。
@@ -962,9 +923,12 @@ export default class SyncFeature extends Component {
     if (!this.nativeGitEnabled()) return Promise.reject(new SyncDeferredError("电脑端原生 Git 同步已关闭"));
     if (!this.settings.setupComplete) return Promise.reject(new Error("请先完成首次使用引导"));
     const trackedTask = async (): Promise<void> => {
+      if (this.host.share?.busy) throw new SyncDeferredError("笔记分享正在发布，主库自动同步暂缓。");
       if (legacySyncRunning(this.app)) throw new SyncDeferredError("旧 Simple Link 仍在运行，已暂停新入口的 Git 操作");
       if (!this.nativeGitEnabled()) throw new SyncDeferredError("电脑端原生 Git 同步已关闭");
       if (!this.settings.setupComplete) throw new SyncDeferredError("请先完成首次使用引导");
+      this.desktopTaskActive = true;
+      try {
       const isFetchTask = !!errorContext && (errorContext.includes("Fetch") || errorContext.includes("Pull"));
       const isPushTask = !!errorContext && (errorContext.includes("Push") || errorContext.includes("同步"));
       this.desktopGitTrace = isFetchTask || isPushTask
@@ -984,7 +948,10 @@ export default class SyncFeature extends Component {
         await this.recordSuccess(errorContext, detail);
       }
       this.clearSyncActivity();
-      await this.refreshSyncView();
+      } finally {
+        this.desktopTaskActive = false;
+        await this.refreshSyncView();
+      }
     };
     const run = this.desktopGitQueue.then(trackedTask, trackedTask);
     this.desktopGitQueue = run.catch(async (error) => {
@@ -1111,14 +1078,6 @@ export default class SyncFeature extends Component {
     return { oldestAt: timestamps[0], latestAt: timestamps[timestamps.length - 1] };
   }
 
-  private resetDesktopPushTracking(): void {
-    if (this.idlePushTimer !== undefined) window.clearTimeout(this.idlePushTimer);
-    if (this.maxPushTimer !== undefined) window.clearTimeout(this.maxPushTimer);
-    this.idlePushTimer = undefined;
-    this.maxPushTimer = undefined;
-    this.firstUnpushedAt = 0;
-  }
-
   private async resumeDesktopDirtyState(): Promise<void> {
     try {
       const interrupted = await this.getInterruptedGitOperation();
@@ -1134,17 +1093,10 @@ export default class SyncFeature extends Component {
       }
       const hasChanges = await this.hasDesktopChanges();
       if (hasChanges) {
-        this.lastFileChangeAt = Date.now();
         this.scheduleDesktopCommit();
       }
       const unpushed = await this.getUnpushedCommitWindow();
       if (unpushed) {
-        if (this.idlePushTimer !== undefined) window.clearTimeout(this.idlePushTimer);
-        if (this.maxPushTimer !== undefined) window.clearTimeout(this.maxPushTimer);
-        this.idlePushTimer = undefined;
-        this.maxPushTimer = undefined;
-        this.firstUnpushedAt = unpushed.oldestAt;
-        if (!hasChanges) this.lastFileChangeAt = unpushed.latestAt;
         this.scheduleDesktopPush();
       }
     } catch {
@@ -1306,10 +1258,6 @@ export default class SyncFeature extends Component {
     return await leaf.view.reviewDifferences(live);
   }
 
-  async openConflictPreview(): Promise<void> {
-    new ZoeySyncConflictPreviewModal(this.app).open();
-  }
-
   async refreshSyncView(): Promise<void> {
     const views = this.app.workspace
       .getLeavesOfType(ZoeySyncView.type)
@@ -1325,20 +1273,7 @@ export default class SyncFeature extends Component {
   }
 
   getChangeViewMode(): ChangeViewMode {
-    return !this.nativeGitEnabled() ? "upload" : this.settings.showVersionViewSwitcher ? this.settings.changeViewMode : "upload";
-  }
-
-  async setChangeViewMode(mode: ChangeViewMode): Promise<void> {
-    this.settings.changeViewMode = mode;
-    await this.saveSettings();
-    await this.refreshSyncView();
-  }
-
-  async setVersionViewSwitcher(visible: boolean): Promise<void> {
-    this.settings.showVersionViewSwitcher = visible;
-    if (!visible) this.settings.changeViewMode = "upload";
-    await this.saveSettings();
-    await this.refreshSyncView();
+    return "upload";
   }
 
   openPluginSettings(): void {
@@ -1361,6 +1296,8 @@ export default class SyncFeature extends Component {
   getLightweightPendingStatus(): ViewStatusState | undefined {
     if (!this.useLightweightSync() || this.settings.mobile.mode !== "github") return undefined;
     if (!this.settings.mobile.bound) return { tone: "pending", text: "轻量同步尚未接入" };
+    const verification = this.mobileGithub?.state.downloadVerification;
+    if (verification) return { tone: "pending", text: `下载${verification.phase === "verifying" ? "验证" : "同步"}未完成 · 保留原基准 · 点击同步继续恢复` };
     if (this.needsLightweightBaseline()) return { tone: "pending", text: "尚未建立同步基准 · 需核对云端" };
     return undefined;
   }
@@ -1369,7 +1306,7 @@ export default class SyncFeature extends Component {
     if (Platform.isMobile && !this.settings.mobileSyncEnabled) return [];
     if (this.useLightweightSync()) {
       if (this.settings.mobile.mode === "github") {
-        if (!this.settings.mobile.bound || this.syncing || this.needsLightweightBaseline()) return [];
+        if (!this.settings.mobile.bound || this.syncing || this.needsLightweightBaseline() || this.getMobileGithub().state.downloadVerification) return [];
         const changes = this.getMobileGithub().cachedChanges(this.app.vault.getFiles().map(file => file.path));
         return changes.map((change) => ({ path: change.currentPath ?? change.basePath!,
           oldPath: change.status === "renamed" ? change.basePath! : undefined,
@@ -1438,7 +1375,7 @@ export default class SyncFeature extends Component {
   }
 
   isSyncing(): boolean {
-    return this.syncing;
+    return this.syncing || this.desktopTaskActive;
   }
 
   private registerMobileEvents(): void {
@@ -1555,6 +1492,7 @@ export default class SyncFeature extends Component {
   }
 
   async syncNow(showNotice: boolean): Promise<void> {
+    if (this.host.share?.busy) { if (showNotice) new Notice("笔记分享正在发布，请稍后同步主库。"); return; }
     if (legacySyncRunning(this.app)) { if (showNotice) new Notice("请先关闭旧 Simple Link 的同步。"); return; }
     if (!this.useLightweightSync() && !this.nativeGitEnabled()) { if (showNotice) new Notice("当前设备同步已关闭"); return; }
     if (!this.useLightweightSync() && !this.settings.setupComplete) {
@@ -1607,6 +1545,7 @@ export default class SyncFeature extends Component {
       else console.error("同步与分享", error);
     } finally {
       this.syncing = false;
+      this.clearSyncActivity();
       await this.refreshSyncView();
     }
   }
@@ -2067,23 +2006,8 @@ export default class SyncFeature extends Component {
     }
   }
 
-  async getLightweightCliToken(repoUrl: string): Promise<{ token: string; repoUrl: string }> {
-    if (Platform.isMobile) throw new Error("请在电脑端取得 Token，或在 GitHub 中创建后填写。");
-    const { owner, name } = parseGithubRepoUrl(repoUrl);
-    try { await this.exec("gh", ["auth", "status", "--active", "--hostname", "github.com"], false, true, 30000); }
-    catch (error) { throw new Error("登录检查失败：" + messageOf(error)); }
-    try {
-      const permission = await this.exec("gh", ["api", "repos/" + owner + "/" + name, "--jq", ".permissions.push"], false, true, 30000);
-      if (permission.trim() !== "true") throw new Error("当前账号没有目标仓库的写入权限。");
-    } catch (error) { throw new Error("仓库权限检查失败：" + messageOf(error)); }
-    try {
-      const token = (await this.exec("gh", ["auth", "token", "--hostname", "github.com"], false, true, 30000)).trim();
-      if (!token) throw new Error("GitHub CLI 未返回 Token。");
-      return { token, repoUrl: "https://github.com/" + owner + "/" + name + ".git" };
-    } catch (error) { throw new Error("获取 Token 失败：" + messageOf(error)); }
-  }
-
   async exec(program: string, args: string[], authenticated = false, trim = true, timeoutMs = 120000, onOutput?: (chunk: string) => void, stdinText?: string, signal?: AbortSignal): Promise<string> {
+    if (this.host.share?.busy && program === "git" && !args.includes("-C") && args.some(arg => ["add", "commit", "push", "pull", "merge", "rebase", "reset", "checkout", "switch", "rm", "init", "clean", "stash", "update-index", "update-ref", "read-tree", "gc"].includes(arg))) throw new Error("笔记分享正在发布，主库 Git 修改暂缓。");
     if (program === "git" && args.some(arg => ["add", "commit", "push", "pull", "fetch", "merge", "rebase", "reset", "checkout", "switch", "rm", "init", "clean", "stash", "update-index", "update-ref", "read-tree", "gc"].includes(arg)) && legacySyncRunning(this.app)) {
       throw new Error("旧 Simple Link 仍在运行，请先关闭旧同步，再操作新的 Git 引导。");
     }
@@ -2166,7 +2090,11 @@ export default class SyncFeature extends Component {
   }
 
   private async desktopAutomaticPush(forceCommit = false): Promise<boolean> {
-    if (forceCommit) await this.desktopCommitOnly();
+    if (forceCommit) {
+      await this.desktopCommitOnly();
+      this.resetDesktopCommitTracking();
+      if (await this.hasDesktopChanges()) this.scheduleDesktopCommit();
+    }
     return await this.desktopPushOnly();
   }
 
@@ -2312,7 +2240,6 @@ export default class SyncFeature extends Component {
     );
     this.clearDesktopPushRetry();
     this.settings.pendingMergePushAfterResolve = false;
-    this.resetDesktopPushTracking();
     this.settings.lastSyncAt = Date.now();
     await this.saveSettings();
     this.setStatus("已上传 · 刚刚");
@@ -2895,6 +2822,20 @@ class ZoeySyncView extends ItemView {
     status.querySelector<HTMLElement>(".simple-one-sync-view__status-text")?.setText(state.text);
   }
 
+  updateQuota(): void {
+    const container = this.containerEl.children[1] as HTMLElement;
+    const quota = container.querySelector<HTMLElement>(".simple-one-sync-view__quota");
+    if (!quota) return;
+    const visible = this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github";
+    if (!visible) {
+      quota.remove();
+      return;
+    }
+    const remaining = this.plugin.getMobileGithub().remaining;
+    quota.setText(remaining === null ? "GitHub 额度待查询" : `当前窗口剩余 ${remaining.toLocaleString()} 次`);
+    quota.setAttr("title", "以最近一次 GitHub 响应为准；下一次请求会更新额度，同账号其他设备可能共享额度。");
+  }
+
   async render(): Promise<void> {
     if (this.closed || this.review || !this.app.workspace.layoutReady) return;
     const generation = ++this.renderGeneration;
@@ -2958,7 +2899,12 @@ class ZoeySyncView extends ItemView {
     const status = container.createDiv({ cls: "simple-one-sync-view__status" });
     status.addClass(`is-${statusState.tone}`);
     status.createSpan({ cls: "simple-one-sync-view__status-dot" });
-    status.createSpan({ text: statusState.text, cls: "simple-one-sync-view__status-text" });
+    const statusCopy = status.createDiv({ cls: "simple-one-sync-view__status-copy" });
+    statusCopy.createSpan({ text: statusState.text, cls: "simple-one-sync-view__status-text" });
+    if (this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github") {
+      statusCopy.createSpan({ cls: "simple-one-sync-view__quota" });
+      this.updateQuota();
+    }
 
     if (pendingConflictPaths.length > 0) {
       const reminder = container.createDiv({ cls: "simple-one-sync-view__conflict-reminder" });
@@ -3013,10 +2959,6 @@ class ZoeySyncView extends ItemView {
         actionButton.removeClass("is-loading");
       }
     }));
-    if (this.plugin.settings.showVersionViewSwitcher) {
-      sectionHeader.addClass("has-mode-control");
-      this.createModeControl(sectionHeader, mode);
-    }
 
     if (!changesError) {
       if (mode === "commit" && changes.length === 0) actionButton.disabled = true;
@@ -3056,45 +2998,8 @@ class ZoeySyncView extends ItemView {
     }
   }
 
-  private createModeControl(parent: HTMLElement, current: ChangeViewMode): void {
-    const control = parent.createDiv({ cls: "simple-one-sync-view__mode-control" });
-    control.setAttr("role", "group");
-    control.setAttr("aria-label", "选择文件列表");
-    const createChoice = (value: ChangeViewMode, tooltip: string, svg: string): void => {
-      const button = control.createEl("button", { cls: "simple-one-sync-view__mode-choice" });
-      button.toggleClass("is-active", value === current);
-      button.setAttr("aria-pressed", String(value === current));
-      button.setAttr("aria-label", tooltip);
-      addIcon(`simple-one-sync-mode-${value}`, svg);
-      setIcon(button, `simple-one-sync-mode-${value}`);
-      setTooltip(button, tooltip);
-      button.addEventListener("click", () => void this.plugin.setChangeViewMode(value));
-    };
-    createChoice(
-      "commit",
-      "显示待 Commit 文件",
-      '<svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="m6 9.1 2 2 4.2-4.5"/></svg>'
-    );
-    createChoice(
-      "upload",
-      "显示待上传文件",
-      '<svg viewBox="0 0 18 18" aria-hidden="true"><path d="M9 12V4"/><path d="m6 7 3-3 3 3"/><path d="M4 13v1.5h10V13"/></svg>'
-    );
-  }
-
   private openViewSettingsMenu(event: MouseEvent): void {
     const menu = new Menu();
-    menu.addItem((item) =>
-      item
-        .setTitle("显示待 commit 列表")
-        .setIcon(this.plugin.settings.showVersionViewSwitcher ? CHECKBOX_CHECKED_ICON : "square")
-        .onClick(() => void this.plugin.setVersionViewSwitcher(!this.plugin.settings.showVersionViewSwitcher))
-    );
-    menu.addSeparator();
-    menu.addItem((item) =>
-      item.setTitle("预览冲突界面").setIcon("git-merge").onClick(() => void this.plugin.openConflictPreview())
-    );
-    menu.addSeparator();
     menu.addItem((item) =>
       item.setTitle("打开高级设置").setIcon("settings").onClick(() => this.plugin.openPluginSettings())
     );
@@ -3220,6 +3125,8 @@ export class SyncSettingsTab extends PluginSettingTab {
   private lightweightGuideRepoMode: "existing" | "create" = "existing";
   private lightweightGuideRepoName = "";
   private lightweightGuideBusy = false;
+  private lightweightGuideStateChecked = false;
+  private lightweightGuideStateError = "";
   private setupRepoInput = "";
   private setupRepoNameInput = "";
   private setupRepoMode: "existing" | "create" = "existing";
@@ -3256,8 +3163,25 @@ export class SyncSettingsTab extends PluginSettingTab {
   }
 
   private settingsHost?: HTMLElement;
+  private settingsTitleChanged?: (title: string) => void;
 
-  renderInto(container: HTMLElement): void { this.settingsHost = container; this.renderSettings(); }
+  renderInto(container: HTMLElement, onTitleChanged?: (title: string) => void): void {
+    this.settingsHost = container; this.settingsTitleChanged = onTitleChanged; this.renderSettings();
+  }
+
+  getPageTitle(): string {
+    const titles: Record<SyncSettingsPage, string> = {
+      root: "同步与分享",
+      setup: "电脑端同步引导",
+      "beginner-desktop": "电脑端同步引导",
+      "beginner-mobile": "轻量同步引导",
+      "beginner-server": "笔记分享引导",
+      "desktop-settings": "电脑端 Git 同步设置",
+      mobile: "轻量 Git 同步设置",
+      server: "笔记分享设置"
+    };
+    return titles[this.desktopPage];
+  }
 
   resetNavigation(): void {
     this.stopSetupBrowserAuthorization();
@@ -3285,15 +3209,19 @@ export class SyncSettingsTab extends PluginSettingTab {
   }
 
   hide(): void {
+    this.plugin.host?.share?.detachSettings();
     this.lightweightGuideController?.abort(); this.setupBrowserController?.abort();
     this.lightweightGuideController = undefined; this.setupBrowserController = undefined;
     this.settingsHost = undefined;
+    this.settingsTitleChanged = undefined;
   }
 
   display(): void { this.renderSettings(); }
 
   private renderSettings(): void {
+    this.plugin.host?.share?.detachSettings();
     const containerEl = this.settingsHost ?? this.containerEl;
+    this.settingsTitleChanged?.(this.getPageTitle());
     containerEl.empty();
     if (this.desktopPage !== "beginner-mobile") { this.lightweightGuideController?.abort(); this.lightweightGuideController = undefined; this.lightweightGuideToken = ""; this.lightweightGuideStatus = ""; this.lightweightGuideStep = 1; this.lightweightGuideDraft = undefined; this.lightweightGuideLogin = ""; this.lightweightGuideVerified = undefined; }
     containerEl.addClass("simple-one-sync-settings");
@@ -3302,9 +3230,9 @@ export class SyncSettingsTab extends PluginSettingTab {
 
     if (this.desktopPage === "beginner-mobile") { this.displayBeginnerMobile(containerEl); return; }
     if (this.desktopPage === "beginner-desktop") { this.displayDevicePreview(containerEl, "从创建仓库开始：电脑端同步", "请在电脑端打开此引导，完成 GitHub 授权、仓库接入与两端检查。"); return; }
-    if (this.desktopPage === "beginner-server") { this.displayDevicePreview(containerEl, "从零开始的服务器端同步指南", "服务器端接入引导将在这里补充。"); return; }
+    if (this.desktopPage === "beginner-server") { this.plugin.host?.share?.renderSettings(containerEl, true, !this.settingsTitleChanged); return; }
     if (this.desktopPage === "mobile") { this.displayMobilePreview(containerEl); return; }
-    if (this.desktopPage === "server") { this.displayServerPreview(containerEl); return; }
+    if (this.desktopPage === "server") { this.plugin.host?.share?.renderSettings(containerEl, false, !this.settingsTitleChanged); return; }
     if (!Platform.isMobile && this.desktopPage === "setup") { this.displaySetup(containerEl); return; }
     if (!Platform.isMobile && this.desktopPage === "desktop-settings") { this.displayDesktopSettings(containerEl); return; }
 
@@ -3411,13 +3339,15 @@ export class SyncSettingsTab extends PluginSettingTab {
     );
   }
 
-  private currentDevice(): "git" | "mobile" | "server" {
-    if (Platform.isMobile) return "mobile";
-    return typeof process !== "undefined" && process.platform === "linux" ? "server" : "git";
+  private currentDevice(): "git" | "mobile" {
+    return Platform.isMobile ? "mobile" : "git";
   }
 
-  private addCurrentDeviceBadge(button: HTMLButtonElement): void {
-    button.createSpan({ text: "系统识别 · 当前设备", cls: "simple-one-sync-device-badge" });
+  private addSyncBadges(button: HTMLButtonElement, recommended: boolean, active: boolean): void {
+    if (!recommended && !active) return;
+    const badges = button.createSpan({ cls: "simple-one-sync-device-badges" });
+    if (recommended) badges.createSpan({ text: "当前平台推荐", cls: "simple-one-sync-device-badge" });
+    if (active) badges.createSpan({ text: "当前应用", cls: "simple-one-sync-device-badge is-applied" });
   }
 
   private addBeginnerLink(parent: HTMLElement, title: string, icon: string, page: "setup" | "beginner-desktop" | "beginner-mobile" | "beginner-server"): void {
@@ -3446,7 +3376,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     const links = containerEl.createDiv({ cls: "simple-one-sync-beginner-links" });
     this.addBeginnerLink(links, "电脑端同步引导", "monitor", Platform.isMobile ? "beginner-desktop" : "setup");
     this.addBeginnerLink(links, "轻量同步引导", "smartphone", "beginner-mobile");
-    this.addBeginnerLink(links, "服务器端同步引导", "server", "beginner-server");
+    this.addBeginnerLink(links, "笔记分享引导", "share-2", "beginner-server");
   }
 
   private displayBeginnerMobile(containerEl: HTMLElement): void {
@@ -3459,7 +3389,33 @@ export class SyncSettingsTab extends PluginSettingTab {
       this.lightweightGuideDraft = { ...options, plugins: [...options.plugins], ignorePatterns: [...options.ignorePatterns],
         repoUrl, branch: options.repoUrl === repoUrl ? options.branch : "" };
     }
-    page.createDiv({ text: "接入进度", cls: "simple-one-sync-setup-progress-label" });
+    const options = this.plugin.settings.mobile;
+    const engine = this.plugin.getMobileGithub();
+    if (options.bound && !this.lightweightGuideStateChecked && !this.plugin.isSyncing()) {
+      this.lightweightGuideStateChecked = true;
+      void engine.load().catch(error => { this.lightweightGuideStateError = messageOf(error); }).finally(() => {
+        if (this.desktopPage === "beginner-mobile") this.renderSettings();
+      });
+    }
+    let completed = false;
+    try {
+      const repo = parseGithubRepoUrl(options.repoUrl);
+      completed = options.mode === "github" && options.bound && !!engine.state.baseCommitSha && engine.state.binding === `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}#${options.branch}`;
+    } catch { /* An incomplete repository address remains an unfinished setup. */ }
+    const connectionStatus = page.createDiv({ cls: `simple-one-sync-setup-status is-${completed ? "success" : "disconnected"}`, attr: { role: "status" } });
+    setIcon(connectionStatus.createSpan({ cls: "simple-one-sync-setup-status__icon" }), completed ? "check" : "unplug");
+    const connectionCopy = connectionStatus.createDiv({ cls: "simple-one-sync-setup-status__copy" });
+    connectionCopy.createEl("strong", { text: completed ? "首次接入已完成" : options.bound ? "仓库已绑定，首次同步待核验" : "首次接入尚未完成" });
+    connectionCopy.createEl("p", { text: this.lightweightGuideStateError || (completed ? "轻量同步已建立共同基线；可重新检查授权、仓库和同步规则。" : "按下方步骤核验授权与仓库，确认首次同步后完成接入。") });
+    const restart = connectionStatus.createEl("button", { text: "重新检查或修复接入", attr: { type: "button" } });
+    restart.disabled = this.lightweightGuideBusy || this.plugin.isSyncing();
+    restart.addEventListener("click", () => {
+      if (restart.disabled) return;
+      this.lightweightGuideController?.abort(); this.lightweightGuideStep = 1;
+      this.lightweightGuideToken = ""; this.lightweightGuideLogin = ""; this.lightweightGuideVerified = undefined;
+      this.lightweightGuideStateChecked = false; this.lightweightGuideStateError = "";
+      this.lightweightGuideDraft = undefined; this.renderSettings();
+    });
     const nav = page.createDiv({ cls: "simple-one-sync-setup-nav simple-one-sync-lightweight-nav" });
     const available = this.lightweightGuideVerified ? 4 : this.lightweightGuideLogin ? 3 : 2;
     ["获取 Token", "核验 Token", "选择仓库", "同步规则"].forEach((label, index) => {
@@ -3478,7 +3434,6 @@ export class SyncSettingsTab extends PluginSettingTab {
     if (this.lightweightGuideStep !== 1) { this.displayLightweightGuideStep(page); return; }
     const card = page.createDiv({ cls: "simple-one-sync-mobile-guide__card" });
     const ready = !!this.lightweightGuideToken;
-    new Setting(card).setName("1 · 获取 token").setHeading();
     card.createEl("p", { text: "建议先在电脑端完成浏览器登录授权，再在本引导内一键获取 token。手机端可选择「已有 token，直接填入」核验连接。", cls: "simple-one-sync-section-desc" });
     const loginStatus = card.createDiv({ cls: "simple-one-sync-setup-status", attr: { role: "status", "aria-live": "polite" } });
     const loginIcon = loginStatus.createSpan({ cls: "simple-one-sync-setup-status__icon" });
@@ -3733,23 +3688,23 @@ export class SyncSettingsTab extends PluginSettingTab {
   private displayDesktopSettings(containerEl: HTMLElement): void {
     const page = containerEl.createDiv({ cls: "simple-one-sync-setup-layout" });
     this.renderDeviceHeader(page, "电脑端 Git 同步");
-    this.addDesktopEngineControls(page);
+    this.addDesktopEngineControls(page.createDiv({ cls: "simple-card" }));
     const body = this.syncSettingsBody(page, this.plugin.nativeGitEnabled());
     this.displayDesktopAdvanced(body);
   }
 
   private displayDesktop(containerEl: HTMLElement): void {
     const currentDevice = this.currentDevice();
-    new Setting(containerEl).setName("设不同设备同步设置").setHeading();
-    containerEl.createEl("p", { text: "已自动识别当前设备；电脑也可以进入手机轻量同步进行配置和运行。", cls: "simple-one-sync-section-desc" });
+    new Setting(containerEl).setName("同步设置").setHeading();
+    containerEl.createEl("p", { text: "按当前平台自动推荐同步方式；绿色标记表示实际启用的方式。电脑端也可使用轻量同步。", cls: "simple-one-sync-section-desc" });
     this.addSetupEntry(containerEl, currentDevice === "git");
     const entries = [
       { page: "mobile", title: "轻量 Git 同步", desc: "适用于安卓、iOS，也适用于电脑", icon: "smartphone" },
-      { page: "server", title: "服务器端 脚本 Git 同步设置", desc: "Linux · 服务器同步设置", icon: "server" }
+      { page: "server", title: "笔记分享设置", desc: "公开仓库 · GitHub Pages · 分享管理", icon: "share-2" }
     ] as const;
     for (const entry of entries) {
       const isCurrent = currentDevice === entry.page;
-      const accessible = isCurrent || (entry.page === "mobile" && !Platform.isMobile);
+      const accessible = isCurrent || !Platform.isMobile;
       const button = containerEl.createEl("button", {
         cls: `simple-one-sync-page-link simple-one-sync-device-link${accessible ? "" : " is-disabled"}`,
         attr: { type: "button" }
@@ -3760,7 +3715,7 @@ export class SyncSettingsTab extends PluginSettingTab {
       copy.createSpan({ text: entry.title, cls: "simple-one-sync-page-link__title" });
       copy.createSpan({ text: entry.desc, cls: "simple-one-sync-page-link__desc" });
       if (accessible) {
-        if (isCurrent) this.addCurrentDeviceBadge(button);
+        if (entry.page === "mobile") this.addSyncBadges(button, isCurrent, this.plugin.settings.enabled && this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github");
         setIcon(button.createSpan({ cls: "simple-one-sync-page-link__chevron" }), "chevron-right");
         button.addEventListener("click", () => this.navigateTo(entry.page));
       }
@@ -3781,21 +3736,11 @@ export class SyncSettingsTab extends PluginSettingTab {
     containerEl.createEl("p", { text: description, cls: "simple-one-sync-section-desc" });
   }
 
-  private displayServerPreview(containerEl: HTMLElement): void {
-    this.displayDevicePreview(containerEl, "服务器端同步", "Linux 服务器端的同步设置将在这里补充。");
-    new Setting(containerEl).setName("待更新").setHeading();
-    const todo = containerEl.createEl("ul");
-    todo.createEl("li", { text: "本地 Git 历史瘦身：仅整理服务器本机的旧历史，保留 GitHub 上的完整历史；执行前确认本地提交已上传。" });
-    todo.createEl("li", { text: "按 .gitignore 重建追踪：让已追踪、后来被忽略的文件退出 Git 索引，保留服务器本机文件；不改变手机端的文件拉取设置。" });
-    todo.createEl("li", { text: "电脑端和手机端同步页待增加「高级设置」：顶部放便捷开关，下面先放「重建追踪」，最后放「预览当前的」；具体追踪范围待确认。" });
-    todo.createEl("li", { text: "待决定 .Obsidian 目录的策略：整目录退出 Git 追踪，或按核心配置、插件、主题分类保留；每台设备的下载范围另行设置。" });
-    todo.createEl("li", { text: "维护任务与同步操作错开执行，并展示检查结果、执行记录和操作前后的空间占用。" });
-  }
-
   private displayMobilePreview(containerEl: HTMLElement): void {
-    this.displayDevicePreview(containerEl, "轻量 Git 同步", "适用于安卓、iOS，也适用于电脑");
-    this.addLightweightEngineControl(containerEl);
-    const body = this.syncSettingsBody(containerEl, this.plugin.useLightweightSync());
+    const page = containerEl.createDiv({ cls: "simple-one-sync-setup-layout" });
+    this.displayDevicePreview(page, "轻量 Git 同步", "适用于安卓、iOS，也适用于电脑");
+    this.addLightweightEngineControl(settingsSection(page, "同步开关"));
+    const body = this.syncSettingsBody(page, this.plugin.useLightweightSync());
     renderMobileSettings(body, this.plugin.mobileHost(), false, () => this.renderSettings());
     if (this.plugin.settings.mobile.mode === "server") this.displayMobile(body);
   }
@@ -3808,7 +3753,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     copy.createSpan({ text: "电脑端 Git 同步设置", cls: "simple-one-sync-page-link__title" });
     copy.createSpan({ text: "界面、自动同步时间与 Git 设置", cls: "simple-one-sync-page-link__desc" });
     if (!isCurrent) return;
-    this.addCurrentDeviceBadge(button);
+    this.addSyncBadges(button, isCurrent, this.plugin.settings.enabled && this.plugin.nativeGitEnabled());
     setIcon(button.createSpan({ cls: "simple-one-sync-page-link__chevron" }), "chevron-right");
     button.addEventListener("click", () => {
       this.navigateTo("desktop-settings");
@@ -4029,9 +3974,7 @@ export class SyncSettingsTab extends PluginSettingTab {
       cancel.disabled = this.setupBusy;
       cancel.addEventListener("click", () => void this.runSetup(() => this.plugin.cancelSetup(), "已恢复之前的同步配置。"));
     }
-    new Setting(page).setName("接入引导").setHeading();
     const panel = page.createDiv({ cls: "simple-one-sync-setup-tab-panel" });
-    panel.createDiv({ text: "接入进度", cls: "simple-one-sync-setup-progress-label" });
     const steps = ["安装与授权", "选择仓库", "检查两端", "完成接入"];
     const nav = panel.createDiv({ cls: "simple-one-sync-setup-nav" });
     steps.forEach((label, index) => {
@@ -4547,71 +4490,25 @@ export class SyncSettingsTab extends PluginSettingTab {
 
   private displayDesktopAdvanced(containerEl: HTMLElement): void {
     const preview = this.currentDevice() !== "git";
-    containerEl.createEl("p", { text: "通常不需要修改", cls: "simple-one-sync-advanced-intro" });
-    const advancedBody = containerEl.createDiv({ cls: "simple-one-sync-card simple-one-sync-advanced__body" });
-    new Setting(advancedBody).setName("界面设置").setHeading();
-    const versionViewSetting = new Setting(advancedBody)
-      .setName("显示待 commit 列表")
-      .setDesc("在同步按钮旁显示待上传和待 commit 切换。关闭时只显示待上传文件。");
-    const versionViewIcon = versionViewSetting.nameEl.createSpan({ cls: "simple-one-sync-setting-mode-icon" });
-    addIcon("simple-one-sync-mode-setting", '<svg viewBox="0 0 32 18" aria-hidden="true"><g><circle cx="7.5" cy="9" r="5.25"/><path d="m4.9 9.1 1.7 1.7 3.5-3.8"/></g><path class="mode-divider" d="M16 3.25v11.5"/><g><path d="M23.75 11.75v-7.5"/><path d="m20.75 7.25 3-3 3 3"/><path d="M19.25 12.75v1.5h9v-1.5"/></g></svg>');
-    setIcon(versionViewIcon, "simple-one-sync-mode-setting");
-    versionViewSetting.nameEl.prepend(versionViewIcon);
-    versionViewSetting.addToggle((toggle) =>
-      toggle
-        .setValue(this.plugin.settings.showVersionViewSwitcher)
-        .onChange((value) => void this.plugin.setVersionViewSwitcher(value))
-    );
-
-    new Setting(advancedBody).setName("文件追踪").setHeading();
-    new Setting(advancedBody).setName("按忽略规则修复追踪")
-      .setDesc("先检查 .gitignore 和已追踪文件，再只让应忽略的文件退出 Git 跟踪。本机文件保留；不会立即 commit 或 push。若有未解决的合并冲突，请先处理。")
-      .addButton((button) => button.setButtonText("检查并修复文件追踪").setDisabled(preview).onClick(async () => {
-        button.setDisabled(true);
-        button.setButtonText("正在检查…");
-        try {
-          const result = await this.plugin.inspectFileTracking();
-          new FileTrackingModal(this.app, this.plugin, result).open();
-        } catch (error) {
-          new Notice(`同步与分享：无法检查文件追踪。${messageOf(error)}`, 10000);
-        } finally {
-          button.setDisabled(false);
-          button.setButtonText("检查并修复文件追踪");
-        }
-      }));
-
-    new Setting(advancedBody).setName("同步时间设置").setHeading();
+    const section = (title: string): HTMLElement => {
+      const card = settingsSection(containerEl, title);
+      card.addClass("simple-one-sync-advanced__body");
+      return card;
+    };
+    let advancedBody = section("自动备份设置");
     new Setting(advancedBody)
-      .setName("空闲后汇总变化文件列表（秒）")
-      .setDesc("持续多久没有文件变化后汇总所有变化文件，生成待 commit／上传列表。")
-      .addText((text) => {
-        text.inputEl.type = "number";
-        text.inputEl.min = "0.5";
-        text.inputEl.step = "0.5";
-        text.setValue(String(this.plugin.settings.viewRefreshDelaySeconds)).onChange(async (value) => {
-          this.plugin.settings.viewRefreshDelaySeconds = Math.max(0.5, Number(value) || 7);
-          await this.plugin.saveSettings();
-        });
-      });
-    new Setting(advancedBody)
-      .setName("空闲后自动 commit（分钟）")
-      .setDesc("持续多久没有文件变化后创建 commit。设为 0 可关闭。")
+      .setName("停止修改后备份（分钟）")
+      .setDesc("持续多久没有文件变化后保存本地版本（commit），随即上传（push）。设为 0 可关闭。")
       .addText((text) => this.addTimingInput(text, "autoCommitIdleMinutes", 5));
     new Setting(advancedBody)
-      .setName("空闲后自动 push（分钟）")
-      .setDesc("有待上传 commit 时，持续多久没有文件变化后 fetch、按需 merge 并 push；不会提前自动 commit。设为 0 可关闭。")
-      .addText((text) => this.addTimingInput(text, "autoPushIdleMinutes", 30));
-    new Setting(advancedBody)
-      .setName("强制 commit 间隔（分钟）")
-      .setDesc("从首次检测到未提交改动起，到点即 commit 当前所有本机改动，不再等待空闲。设为 0 可关闭。")
+      .setName("连续修改时备份（分钟）")
+      .setDesc("从首次未备份改动起，最长等待此时间就 commit 并 push；持续修改不会推迟。设为 0 可关闭。")
       .addText((text) => this.addTimingInput(text, "maxUncommittedMinutes", 30));
+
+    advancedBody = section("自动获取云端更新设置");
     new Setting(advancedBody)
-      .setName("强制 push 间隔（分钟）")
-      .setDesc("最早的待上传 commit 到点后，先强制 commit 当前本机更改（包括正在编辑的文件），再 fetch、按需 merge 并 push。设为 0 可关闭。")
-      .addText((text) => this.addTimingInput(text, "maxUnpushedMinutes", 60));
-    new Setting(advancedBody)
-      .setName("启动后自动 commit、fetch 并 merge")
-      .setDesc("启动后先 commit 当前本机改动，再获取云端最新提交并合并到本机；不会立即 push。")
+      .setName("启动后备份并检查云端更新")
+      .setDesc("启动后先 commit 当前本机改动，再获取并合并云端更新；有待上传版本时接着 push。")
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.pullOnStartup).onChange(async (value) => {
           this.plugin.settings.pullOnStartup = value;
@@ -4623,7 +4520,7 @@ export class SyncSettingsTab extends PluginSettingTab {
       .setDesc("按此时间间隔获取云端最新提交并合并到本机；不会执行 push。设为 0 可关闭。")
       .addText((text) => this.addTimingInput(text, "autoPullIntervalMinutes", 5));
 
-    new Setting(advancedBody).setName("Git 设置").setHeading();
+    advancedBody = section("Git 上传设置");
     new Setting(advancedBody)
       .setName("分支")
       .setDesc("默认使用 master；只有仓库使用其他分支时才需要修改。")
@@ -4652,7 +4549,22 @@ export class SyncSettingsTab extends PluginSettingTab {
         })
       );
 
-    new Setting(advancedBody).setName("故障排查").setHeading();
+    advancedBody = section("故障排查");
+    new Setting(advancedBody).setName("按忽略规则修复追踪")
+      .setDesc("先检查 .gitignore 和已追踪文件，再只让应忽略的文件退出 Git 跟踪。本机文件保留；不会立即 commit 或 push。若有未解决的合并冲突，请先处理。")
+      .addButton((button) => button.setButtonText("检查并修复文件追踪").setDisabled(preview).onClick(async () => {
+        button.setDisabled(true);
+        button.setButtonText("正在检查…");
+        try {
+          const result = await this.plugin.inspectFileTracking();
+          new FileTrackingModal(this.app, this.plugin, result).open();
+        } catch (error) {
+          new Notice(`同步与分享：无法检查文件追踪。${messageOf(error)}`, 10000);
+        } finally {
+          button.setDisabled(false);
+          button.setButtonText("检查并修复文件追踪");
+        }
+      }));
     new Setting(advancedBody)
       .setName("异常修复")
       .setDesc("恢复未完成的 rebase、merge 等 Git 操作，以当前本机内容重新 commit，再 fetch 并 merge；不会立即 push。")
@@ -4711,9 +4623,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     text: import("obsidian").TextComponent,
     key:
       | "autoCommitIdleMinutes"
-      | "autoPushIdleMinutes"
       | "maxUncommittedMinutes"
-      | "maxUnpushedMinutes"
       | "autoPullIntervalMinutes",
     fallback: number
   ): void {

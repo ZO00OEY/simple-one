@@ -23,7 +23,10 @@ interface PendingTransaction {
   revision: number; paths: PathRecords;
   scope: string;
 }
-interface StoredState extends LocalState { pending?: PendingTransaction }
+interface StoredState extends LocalState {
+  pending?: PendingTransaction;
+  downloadVerification?: { phase: "downloading" | "verifying"; scope: string; commit: string; files: Manifest };
+}
 type ApiObject = Record<string, unknown>;
 interface TreeEntry { path: string; type: string; mode: string; sha: string }
 interface CompareEntry { status: string; filename: string; previous_filename: string }
@@ -90,6 +93,12 @@ export class MobileGithub {
         !!parsed.pending && (!("moves" in parsed.pending.paths) || "copies" in parsed.pending.paths);
       parsed.paths = normalizePaths(parsed.paths);
       if (parsed.pending) parsed.pending.paths = normalizePaths(parsed.pending.paths);
+      if (parsed.pending && !parsed.downloadVerification) {
+        parsed.downloadVerification = { phase: "downloading", scope: parsed.pending.scope, commit: parsed.pending.commit,
+          files: Object.fromEntries(parsed.pending.actions.filter(action => action.sha !== null)
+            .map(action => [action.path, parsed.pending!.base[action.path]])) };
+        await this.save();
+      }
       // Drop the obsolete baseline tree identifier without changing the baseline.
       const legacy = parsed as StoredState & { baseTreeSha?: string };
       if (recovered || oldPaths || "baseTreeSha" in legacy) {
@@ -296,7 +305,7 @@ export class MobileGithub {
   async bind(verified?: RemoteSnapshot): Promise<RemoteSnapshot> {
     if (this.running) throw new Error("正在检查缓存或执行同步，请稍后再绑定仓库。");
     await this.load();
-    if (this.state.pending) throw new Error("还有未完成同步，请先用原仓库恢复，再更换绑定。");
+    if (this.state.pending || this.state.downloadVerification) throw new Error("还有未完成同步或下载验证，请先用原仓库恢复，再更换绑定。");
     const remote = verified ?? await this.verify();
     const binding = this.binding(remote.branch);
     if (this.state.binding !== binding) this.state = newLocalState(binding);
@@ -306,7 +315,7 @@ export class MobileGithub {
 
   async refreshCache(force = false): Promise<{ files: number; seconds: number }> {
     await this.load();
-    if (this.running || this.state.pending) throw new Error("同步执行或恢复期间不能重新建立缓存。");
+    if (this.running || this.state.pending || this.state.downloadVerification) throw new Error("同步执行或下载验证期间不能重新建立缓存。");
     this.running = true;
     const started = performance.now();
     try {
@@ -358,6 +367,9 @@ export class MobileGithub {
     this.running = true;
     try {
       await this.recover();
+      if (this.state.downloadVerification && this.state.downloadVerification.scope !== this.scope()) {
+        throw new Error("下载验证尚未完成，请恢复原同步范围后继续；不会将缺失文件视为删除。");
+      }
       this.progress("正在读取 GitHub 文件树…");
       const remote = await this.remote(true);
       if (this.state.binding !== this.binding(remote.branch)) throw new Error("仓库或分支已变化，请重新绑定；旧基准不会被复用。");
@@ -419,7 +431,8 @@ export class MobileGithub {
       for (const path of Object.keys(base)) {
         const b: Side = { ...base[path], path, source: "remote" };
         const l = sideAt(local, lMap[path], "local"); const r = sideAt(remote.files, rMap[path], "remote");
-        if (same(l, r)) put(l);
+        if (!l && r && this.state.downloadVerification?.files[r.path] && !records.moves[path]) put(r);
+        else if (same(l, r)) put(l);
         else if (same(l, b)) put(r);
         else if (same(r, b)) put(l);
         else if (!l || !r) choose({ id: `base:${path}`, label: path, kind: "delete", base: b, local: l, remote: r });
@@ -469,7 +482,8 @@ export class MobileGithub {
       for (const path of additions) {
         const l = !claimedLocal.has(path) ? sideAt(local, path, "local") : undefined;
         const r = !claimedRemote.has(path) ? sideAt(remote.files, path, "remote") : undefined;
-        if (l && r && !sameContent(l, r)) choose({ id: `new:${path}`, label: path, kind: "initial", local: l, remote: r });
+        if (!l && r && this.state.downloadVerification?.files[path]) put(r);
+        else if (l && r && !sameContent(l, r)) choose({ id: `new:${path}`, label: path, kind: "initial", local: l, remote: r });
         else if (!this.state.baseCommitSha && (!!l !== !!r)) {
           choose({ id: `new:${path}`, label: path, kind: "unpaired", local: l, remote: r });
         } else put(l ?? r);
@@ -482,6 +496,8 @@ export class MobileGithub {
         downloads: Object.keys(desired).filter((p) => !sameContent(desired[p], local[p])),
         localDeletes: Object.keys(local).filter((p) => !desired[p] && !conflictedLocal.has(p)),
         remoteDeletes: Object.keys(remote.files).filter((p) => !desired[p] && !conflictedRemote.has(p)) };
+      const count = new Set([...plan.uploads, ...plan.downloads, ...plan.localDeletes, ...plan.remoteDeletes]).size;
+      this.progress(`已整理同步计划 · 待同步 ${count} 个文件 · 待准备上传 ${plan.uploads.length} 个 · 待确认差异 ${conflicts.length} 项`);
       return plan;
     } finally { this.running = false; }
   }
@@ -528,8 +544,17 @@ export class MobileGithub {
   async execute(plan: MobilePlan): Promise<void> {
     if (plan.conflicts.length) throw new Error("仍有未选择的冲突，未执行同步。");
     if (this.running) throw new Error("本地缓存正在检查，请稍后重试。");
+    if (this.state.pending) throw new Error("还有未完成的下载或验证，请先重新预览以恢复同步；尚未确认新基准。");
     this.running = true;
     try {
+      const remoteRemaining = new Set([...plan.uploads, ...plan.remoteDeletes]);
+      const localRemaining = new Set([...plan.downloads, ...plan.localDeletes]);
+      let prepared = 0;
+      const report = (stage: string): void => {
+        const remaining = new Set([...remoteRemaining, ...localRemaining]).size;
+        this.progress(`${stage} · 待同步 ${remaining} 个文件 · 待准备上传 ${plan.uploads.length - prepared} 个 · 已准备 ${prepared}/${plan.uploads.length}`);
+      };
+      report("正在核对同步计划");
       if (plan.scope !== this.scope()) throw new Error("同步范围或仓库设置已变化，请重新预览。");
       if (this.state.revision !== plan.revision) throw new Error("预览后本地发生变化，请重新预览。");
       const repo = this.repo();
@@ -547,6 +572,7 @@ export class MobileGithub {
       let batch: ApiObject[] = []; let batchBytes = 0; let treeSha = plan.remote.tree;
       const flush = async (): Promise<void> => {
         if (!batch.length) return;
+        report("正在分批上传云端内容");
         const tree = await this.json(`${repo.prefix}/git/trees`, readSha, "POST", { base_tree: treeSha, tree: batch });
         treeSha = tree.sha; batch = []; batchBytes = 0;
       };
@@ -554,6 +580,7 @@ export class MobileGithub {
         batch.push(entry);
         if (batch.length >= 500) await flush();
       }
+      report("正在准备上传内容");
       for (let i = 0; i < plan.uploads.length; i++) {
         const path = plan.uploads[i]; const target = plan.desired[path];
         const item: ApiObject = { path, mode: target.mode, type: "blob" };
@@ -573,6 +600,7 @@ export class MobileGithub {
             if (batchBytes + size > 1024000) await flush();
             batchBytes += size;
           } else {
+            report("正在上传独立文件内容");
             const blob = await this.json(`${repo.prefix}/git/blobs`, readSha, "POST", { content: encodeBase64(bytes), encoding: "base64" });
             if (blob.sha !== target.sha) throw new Error("上传内容校验失败。");
             item.sha = blob.sha; known.add(blob.sha);
@@ -580,7 +608,8 @@ export class MobileGithub {
         }
         batch.push(item);
         if (batch.length >= 500) await flush();
-        this.progress(`准备云端内容 ${i + 1}/${plan.uploads.length}`);
+        prepared = i + 1;
+        report("正在准备上传内容");
       }
       await flush();
       if (this.state.revision !== plan.revision) throw new Error("上传准备期间本地发生变化，尚未更新远端分支，请重新预览。");
@@ -590,6 +619,7 @@ export class MobileGithub {
       ];
       let commitSha = plan.remote.commit;
       if (treeSha !== plan.remote.tree) {
+        report("正在生成云端版本");
         const commit = await this.json(`${repo.prefix}/git/commits`, readSha, "POST", {
           message: `同步与分享 mobile sync ${new Date().toISOString()}`, tree: treeSha, parents: [plan.remote.commit]
         });
@@ -598,21 +628,29 @@ export class MobileGithub {
       if (plan.scope !== this.scope()) throw new Error("上传准备期间同步范围已变化，请重新预览。");
       this.state.pending = { commit: commitSha, parent: plan.remote.commit, base: plan.desired, actions,
         revision: plan.revision, paths: plan.paths, scope: plan.scope };
+      this.state.downloadVerification = { phase: "downloading", scope: plan.scope, commit: commitSha,
+        files: Object.fromEntries(plan.downloads.map(path => [path, plan.desired[path]])) };
       await this.save();
+      report("正在确认云端更新");
       if (commitSha !== plan.remote.commit) await this.api(`${repo.prefix}/git/refs/heads/${encodeURIComponent(plan.remote.branch)}`,
         "PATCH", { sha: commitSha, force: false });
-      await this.applyPending();
+      remoteRemaining.clear();
+      await this.applyPending((path) => {
+        if (path) localRemaining.delete(path);
+        report("正在应用本地同步结果");
+      });
     } finally { this.running = false; }
   }
 
   private async recover(): Promise<void> {
     const pending = this.state.pending;
     if (!pending) return;
+    this.progress("检测到未完成的下载或验证 · 正在恢复同步，保留原共同基准…");
     const remote = await this.remote();
     if (this.state.binding !== this.binding(remote.branch)) throw new Error("未完成事务属于其他仓库，不能切换绑定。");
     if (remote.commit !== pending.commit) {
       if (remote.commit === pending.parent && pending.commit !== pending.parent) {
-        this.state.pending = undefined; await this.save(); return;
+        this.state.pending = undefined; this.state.downloadVerification = undefined; await this.save(); return;
       }
       const diff = await this.json(`${this.repo().prefix}/compare/${pending.commit}...${remote.commit}`, readCompare);
       if (!["ahead", "identical"].includes(diff.status)) throw new Error("未完成提交与远端历史不一致，请保留本机状态并检查仓库。");
@@ -637,16 +675,24 @@ export class MobileGithub {
     for (const part of parts) { current = current ? `${current}/${part}` : part; if (!await this.adapter.exists(current)) await this.adapter.mkdir(current); }
   }
 
-  private async applyPending(): Promise<void> {
+  private async applyPending(onApplied?: (path?: string) => void): Promise<void> {
     const pending = this.state.pending!;
     if (pending.scope !== this.scope()) throw new Error("未完成同步的范围已变化，请恢复原同步范围再继续。");
     // Reuse a verified local copy when multiple paths download the same blob.
     const downloaded = new Map<string, string>();
+    const remaining = new Set(pending.actions.map(action => action.path));
+    const report = (path?: string): void => {
+      if (path) remaining.delete(path);
+      if (onApplied) onApplied(path);
+      else this.progress(`正在恢复本地同步结果 · 待同步 ${remaining.size} 个文件`);
+    };
+    report();
     for (const action of pending.actions) {
       if (!this.allowed(action.path)) throw new Error("同步范围已变化，请恢复原范围后继续未完成事务。");
       const current = await this.liveSha(action.path);
       if (current === action.sha) {
         if (action.sha) downloaded.set(action.sha, action.path);
+        report(action.path);
         continue;
       }
       if (current !== action.expected) throw new Error(`本地文件又被修改，已保留：${action.path}。请先备份并恢复到预览内容后重试。`);
@@ -664,6 +710,28 @@ export class MobileGithub {
         downloaded.set(action.sha, action.path);
       }
       delete this.state.cache[action.path];
+      report(action.path);
+    }
+    if (this.state.downloadVerification) this.state.downloadVerification.phase = "verifying";
+    await this.save();
+    this.progress(`正在验证下载结果 · 0/${pending.actions.length} 个文件 · 验证通过后确认基准`);
+    for (let i = 0; i < pending.actions.length; i++) {
+      const action = pending.actions[i];
+      if (await this.liveSha(action.path) !== action.sha) {
+        throw new Error(`下载结果验证未通过：${action.path}。已保留未完成状态和原共同基准，请重新预览恢复同步。`);
+      }
+      this.progress(`正在验证下载结果 · ${i + 1}/${pending.actions.length} 个文件 · 验证通过后确认基准`);
+    }
+    // A failed cache refresh must leave the download transaction recoverable.
+    this.progress("下载验证通过 · 正在更新本地哈希缓存，尚未确认新基准…");
+    await scanCurrent(this.adapter, this.state, this.getOptions(), this.allowed, false,
+      message => this.progress(`正在完成下载验证 · ${message}`));
+    // Recheck after the asynchronous scan: user edits during verification must
+    // not be accepted as part of the downloaded baseline.
+    for (const action of pending.actions) {
+      if (await this.liveSha(action.path) !== action.sha) {
+        throw new Error(`验证期间本地文件发生变化：${action.path}。原共同基准已保留，请重新预览。`);
+      }
     }
     const moveOrigins = new Set([...Object.keys(this.state.paths.moves), ...Object.keys(pending.paths.moves)]);
     const outstanding = [...moveOrigins].filter((path) => this.state.paths.moves[path] !== pending.paths.moves[path])
@@ -676,12 +744,10 @@ export class MobileGithub {
     this.state.base = pending.base; this.state.baseCommitSha = pending.commit;
     this.state.baseScope = pending.scope;
     this.state.paths = rebased; this.state.pending = undefined;
+    this.state.downloadVerification = undefined;
     // Keep event dirty markers: edits made while uploading remain detectable.
     await this.save();
-    // Build the cache from the files after alignment, not the pre-download snapshot.
-    this.progress("同步已对齐，正在更新本地哈希缓存…");
-    await scanCurrent(this.adapter, this.state, this.getOptions(), this.allowed, false, this.progress);
-    await this.save();
+    this.progress("同步已对齐 · 下载验证通过 · 待同步 0 个文件 · 新基准已确认");
   }
 }
 

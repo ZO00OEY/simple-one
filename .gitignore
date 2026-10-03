@@ -12,3 +12,6 @@ sync-local.json*
 sync-settings.json
 link-state.json*
 mobile-ignore.json*
+share-manifest.json*
+share-local.json*
+share-template*.html

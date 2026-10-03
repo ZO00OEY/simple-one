@@ -12,6 +12,7 @@ export async function findNestedRepos(vaultPath: string, configDir: string): Pro
   if (!fs || !path) throw new Error("内嵌仓库检查仅支持桌面端");
   const found: NestedRepo[] = [];
   const visit = async (folder: string): Promise<void> => {
+    if (path.relative(vaultPath, folder).replace(/\\/g, "/").split("/")[0] === ".gitshare") return;
     const entries = await fs.readdir(folder, { withFileTypes: true });
     if (folder !== vaultPath) {
       const git = entries.find((entry) => entry.name === ".git" && (entry.isDirectory() || entry.isFile()));
@@ -39,6 +40,7 @@ export async function nestedRepoFiles(vaultPath: string, repos: readonly NestedR
   try { vaultIgnore = (await fs.readFile(path.join(vaultPath, ".gitignore"), "utf8")).split(/\r?\n/); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   for (const repo of repos) {
+    if (repo.directory === ".gitshare" || repo.directory.startsWith(".gitshare/")) continue;
     const absolute = path.join(vaultPath, repo.directory);
     const listed = await git(["-C", absolute, "ls-files", "--cached", "--others", "--exclude-standard", "-z"]);
     for (const name of listed.split("\0").filter(Boolean)) {

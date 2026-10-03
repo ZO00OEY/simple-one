@@ -1,0 +1,81 @@
+import assert from "node:assert/strict";
+import vm from "node:vm";
+import { build } from "esbuild";
+
+const output = await build({ entryPoints: ["src/features/sync/index.ts"], bundle: true,
+  platform: "browser", format: "cjs", external: ["obsidian"], write: false,
+  loader: { ".png": "dataurl" } });
+let now = 1, nextId = 0;
+const timers = new Map();
+const obsidian = new Proxy({ Platform: { isMobile: false } }, {
+  get: (target, key) => key in target ? target[key] : function () {}
+});
+const context = vm.createContext({ module: { exports: {} }, require: () => obsidian,
+  console, Date: class extends Date { static now() { return now; } },
+  setTimeout: (fn, delay) => { const id = ++nextId; timers.set(id, { at: now + delay, fn }); return id; },
+  clearTimeout: id => timers.delete(id) });
+context.window = context;
+vm.runInContext(output.outputFiles[0].text, context);
+const Sync = context.module.exports.default;
+const minute = 60_000;
+const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+async function advance(minutes) {
+  const end = now + minutes * minute;
+  while (true) {
+    const due = [...timers].filter(([, timer]) => timer.at <= end).sort((a, b) => a[1].at - b[1].at)[0];
+    if (!due) break;
+    now = due[1].at; timers.delete(due[0]); due[1].fn(); await flush();
+  }
+  now = end; await flush();
+}
+function fixture() {
+  timers.clear(); now = 1;
+  const calls = [];
+  const sync = Object.create(Sync.prototype);
+  Object.assign(sync, { settings: { setupComplete: true, autoCommitIdleMinutes: 5, maxUncommittedMinutes: 30 },
+    firstUncommittedAt: 0, automaticBackupQueued: false, automaticPushQueued: false,
+    enqueueDesktopGit: async task => await task(),
+    desktopCommitOnly: async () => { calls.push("commit"); sync.resetDesktopCommitTracking(); return { committed: true }; },
+    hasDesktopChanges: async () => false,
+    getInterruptedGitOperation: async () => null, getUnmergedPaths: async () => [], setStatus: () => {},
+    desktopPushOnly: async () => { calls.push("push"); return true; } });
+  return { sync, calls };
+}
+
+let { sync, calls } = fixture();
+sync.scheduleDesktopCommit();
+await advance(4); assert.deepEqual(calls, []);
+await advance(1); assert.deepEqual(calls, ["commit", "push"], "five idle minutes commit then push");
+await advance(30); assert.equal(calls.length, 2, "the other deadline is cancelled after backup");
+
+({ sync, calls } = fixture());
+sync.scheduleDesktopCommit();
+for (let i = 0; i < 7; i++) { await advance(4); sync.scheduleDesktopCommit(); }
+assert.deepEqual(calls, []);
+await advance(2); assert.deepEqual(calls, ["commit", "push"], "continuous edits cannot postpone the thirty-minute deadline");
+sync.scheduleDesktopCommit();
+await advance(5); assert.equal(calls.length, 4, "new changes begin a fresh backup cycle");
+
+({ sync, calls } = fixture());
+sync.desktopPushOnly = async () => { calls.push("push-failed"); throw new Error("offline"); };
+sync.scheduleDesktopCommit(); await advance(5);
+assert.deepEqual(calls, ["commit", "push-failed"]);
+sync.desktopPushOnly = async () => { calls.push("push-retry"); return true; };
+await sync.scheduleDesktopPushRetry();
+await advance(4); assert.equal(calls.length, 2);
+await advance(1);
+assert.deepEqual(calls, ["commit", "push-failed", "push-retry"], "retry uploads the existing commit without another commit");
+
+({ sync, calls } = fixture());
+sync.automaticPushQueued = true;
+await sync.runAutomaticCommit();
+assert.deepEqual(calls, ["commit", "push"], "an existing upload must not swallow a backup deadline");
+
+({ sync, calls } = fixture());
+await Promise.all([sync.runAutomaticCommit(), sync.runAutomaticCommit()]);
+assert.deepEqual(calls, ["commit", "push"], "simultaneous idle and maximum deadlines produce one backup");
+sync.settings.autoCommitIdleMinutes = 0; sync.settings.maxUncommittedMinutes = 0;
+sync.scheduleDesktopCommit(); await advance(60);
+assert.equal(calls.length, 2, "disabled backup triggers stay disabled");
+assert.equal(sync.getChangeViewMode(), "upload");
+console.log("Desktop backup: idle, continuous editing, new cycles, offline upload retry and concurrent deadlines passed");

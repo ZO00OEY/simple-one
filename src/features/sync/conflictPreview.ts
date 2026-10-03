@@ -3,7 +3,7 @@ import type { ConflictChoice } from "./mobileGithub";
 import { resolveTextParts, textParts, TextPart } from "./textDiff";
 
 type Side = "local" | "remote";
-type FileChoice = Side | "latest" | "both" | "delete";
+type FileChoice = Side | "both" | "delete";
 type BlockMethod = Side | "merged";
 type ChoiceTone = Side | "mixed";
 
@@ -46,35 +46,6 @@ interface BlockSelection {
   text?: string;
 }
 
-const SAMPLE_FILES: PreviewFile[] = [
-  {
-    path: "示例/项目方案.md",
-    totalLines: 1218,
-    localUpdatedAt: "2026-09-27T00:41:00+08:00",
-    remoteUpdatedAt: "2026-09-26T23:58:00+08:00",
-    blocks: [
-      { line: 318, local: "先整理现有笔记，再逐步调整分类。", remote: "先完成分类规则，再批量整理现有笔记。" },
-      { line: 742, local: "1. 检查重复笔记\n2. 确认链接\n3. 归档", remote: "1. 确认链接\n2. 归档\n3. 检查重复笔记" }
-    ]
-  },
-  { path: "示例/阅读记录.md", totalLines: 864, localUpdatedAt: "2026-09-26T21:12:00+08:00", remoteUpdatedAt: "2026-09-27T00:18:00+08:00", blocks: [{ line: 205, local: "保留原文摘录，之后补充想法。", remote: "整理为三条要点，方便之后检索。" }] },
-  { path: "示例/周会纪要.md", totalLines: 176, localUpdatedAt: "2026-09-27T00:22:00+08:00", remoteUpdatedAt: "2026-09-26T22:46:00+08:00", blocks: [{ line: 86, local: "周三完成初稿。", remote: "周五完成初稿，并邀请大家核对。" }] },
-  {
-    path: "示例/写作提纲.md",
-    totalLines: 392,
-    localUpdatedAt: "2026-09-26T20:30:00+08:00",
-    remoteUpdatedAt: "2026-09-27T00:36:00+08:00",
-    blocks: [
-      { line: 34, local: "第一章从主人公的回忆开始。", remote: "第一章从一封来信开始。" },
-      { line: 112, local: "结尾保留悬念。", remote: "结尾交代故事的时间线。" }
-    ]
-  },
-  { path: "示例/工具清单.md", totalLines: 98, localUpdatedAt: "2026-09-26T23:44:00+08:00", remoteUpdatedAt: "2026-09-26T22:16:00+08:00", blocks: [{ line: 52, local: "- 本地备份：每周一次", remote: "- 本地备份：每天一次" }] },
-  { path: "示例/日记.md", totalLines: 64, localUpdatedAt: "2026-09-26T19:50:00+08:00", remoteUpdatedAt: "2026-09-27T00:07:00+08:00", blocks: [{ line: 29, local: "今天先整理旧项目。", remote: "今天先完成新项目的准备。" }] },
-  { path: "示例/分类规则.md", totalLines: 631, localUpdatedAt: "2026-09-27T00:29:00+08:00", remoteUpdatedAt: "2026-09-26T23:20:00+08:00", blocks: [{ line: 441, local: "待整理内容先放入收集箱。", remote: "待整理内容按主题直接归类。" }] },
-  { path: "示例/旅行清单.md", totalLines: 82, localUpdatedAt: "2026-09-26T22:02:00+08:00", remoteUpdatedAt: "2026-09-27T00:25:00+08:00", blocks: [{ line: 63, local: "- 带充电器和雨伞", remote: "- 带充电器、雨伞和备用眼镜" }] }
-];
-
 export class ZoeySyncConflictPreviewModal extends Modal {
   private pending: Set<string>;
   private files: PreviewFile[];
@@ -94,11 +65,11 @@ export class ZoeySyncConflictPreviewModal extends Modal {
   private appliedCount = 0;
   private stage: "file" | "content" = "content";
 
-  constructor(app: App, private live?: LiveReview) {
+  constructor(app: App, private live: LiveReview) {
     super(app);
-    this.files = live?.files ?? SAMPLE_FILES;
+    this.files = live.files;
     this.pending = new Set(this.files.map(file => file.path));
-    if (this.live && this.files.some(file => file.reviewStage === "file")) this.stage = "file";
+    if (this.files.some(file => file.reviewStage === "file")) this.stage = "file";
   }
 
   wait(): Promise<Record<string, ConflictChoice> | null> {
@@ -155,8 +126,8 @@ export class ZoeySyncConflictPreviewModal extends Modal {
     const hasContent = this.files.some(file => file.reviewStage !== "file");
     const header = (this.compact() ? root : body).createDiv({ cls: "simple-one-sync-preview__header" });
     const heading = header.createDiv();
-    heading.createDiv({ text: this.live?.title ? "接入方案 · 规则确认" : this.live ? "轻量同步 · 文件与内容确认" : "界面预览 · 示例数据", cls: "simple-one-sync-preview__eyebrow" });
-    const title = heading.createEl("h2", { text: this.live?.title ?? (this.live ? (this.stage === "file" ? "文件差异确认" : "内容差异确认") : "处理文件差异") });
+    heading.createDiv({ text: this.live.title ? "接入方案 · 规则确认" : "轻量同步 · 文件与内容确认", cls: "simple-one-sync-preview__eyebrow" });
+    const title = heading.createEl("h2", { text: this.live.title ?? (this.stage === "file" ? "文件差异确认" : "内容差异确认") });
     const count = title.createSpan({ cls: "simple-one-sync-preview__title-count" });
     count.createSpan({ text: String(stageFiles.length), cls: "simple-one-sync-preview__title-number" });
     count.createSpan({ text: " 项" });
@@ -170,8 +141,7 @@ export class ZoeySyncConflictPreviewModal extends Modal {
     if (this.live?.description) body.createDiv({ text: this.live.description, cls: "simple-one-sync-preview__notice" });
     const toolbar = body.createDiv({ cls: "simple-one-sync-preview__toolbar" });
     const bulk = toolbar.createDiv({ cls: "simple-one-sync-preview__bulk" });
-    if (!this.live) this.createButton(bulk, "全选最新", () => this.selectAll("latest"), "simple-one-sync-preview__bulk-choice");
-    if (this.live && this.stage === "file") {
+    if (this.stage === "file") {
       this.createButton(bulk, "全部保留", () => this.keepAll());
       this.createButton(bulk, "全部删除", () => {
         for (const file of stageFiles) {
@@ -188,7 +158,7 @@ export class ZoeySyncConflictPreviewModal extends Modal {
     }
 
     if (this.appliedCount > 0) {
-      body.createDiv({ text: `${this.live ? "已保存选择" : "示例中已应用"} ${this.appliedCount} 个，剩余 ${this.pending.size} 个待处理。`, cls: "simple-one-sync-preview__feedback" });
+      body.createDiv({ text: `已保存选择 ${this.appliedCount} 个，剩余 ${this.pending.size} 个待处理。`, cls: "simple-one-sync-preview__feedback" });
     }
 
     const list = body.createDiv({ cls: "simple-one-sync-preview__list" });
@@ -202,15 +172,15 @@ export class ZoeySyncConflictPreviewModal extends Modal {
       pager.createSpan({ text: `${this.page + 1} / ${pages} 页` });
       this.createButton(pager, "下一页", () => { this.page++; this.render(false); }).disabled = this.page === pages - 1;
     }
-    if (this.pending.size === 0) list.createDiv({ text: "示例文件已全部处理。可以点“重置示例”重新查看。", cls: "simple-one-sync-preview__empty" });
+    if (this.pending.size === 0) list.createDiv({ text: "所有差异已确认。", cls: "simple-one-sync-preview__empty" });
 
     const ready = this.getReadyFiles().filter(file => stageFiles.includes(file));
     const footer = root.createDiv({ cls: "simple-one-sync-preview__footer" });
     footer.createSpan({ text: `已选好 ${ready.length} 个 · 仍需选择 ${stageFiles.length - ready.length} 个` });
     const actions = footer.createDiv({ cls: "simple-one-sync-preview__footer-actions" });
     if (this.live && this.stage === "content" && this.files.some(file => file.reviewStage === "file")) this.createButton(actions, "返回文件确认", () => { this.stage = "file"; this.page = 0; this.expandedPath = undefined; this.render(false); });
-    const apply = actions.createEl("button", { text: this.live ? (this.stage === "file" && hasContent ? "下一步：确认内容" : "确认同步") : `应用选择${ready.length > 0 ? ` (${ready.length})` : ""}`, cls: "mod-cta" });
-    apply.disabled = ready.length === 0 || !!this.live && ready.length !== stageFiles.length;
+    const apply = actions.createEl("button", { text: this.stage === "file" && hasContent ? "下一步：确认内容" : "确认同步", cls: "mod-cta" });
+    apply.disabled = ready.length === 0 || ready.length !== stageFiles.length;
     apply.addEventListener("click", () => this.applyReadyFiles());
     body.scrollTop = scrollTop;
   }
@@ -227,11 +197,10 @@ export class ZoeySyncConflictPreviewModal extends Modal {
     const name = toggle.createSpan({ cls: "simple-one-sync-preview__name" });
     const displayPath = file.label ?? file.path;
     name.createSpan({ text: this.compact() ? displayPath.split("/").pop() ?? displayPath : displayPath, cls: "simple-one-sync-preview__path" });
-    if (!this.live) name.createSpan({ text: file.description ?? `${file.blocks.length} 处差异`, cls: "simple-one-sync-preview__meta" });
-    else summary.createDiv({ text: file.description ?? "文件内容不同", cls: "simple-one-sync-preview__reason" });
+    summary.createDiv({ text: file.description ?? "文件内容不同", cls: "simple-one-sync-preview__reason" });
     const toggleFile = () => {
       this.expandedPath = expanded ? undefined : file.path;
-      if (!expanded && this.live && !this.loaded.has(file.path)) void this.loadFile(file);
+      if (!expanded && !this.loaded.has(file.path)) void this.loadFile(file);
       this.render();
     };
     summary.addEventListener("click", (event) => {
@@ -239,31 +208,16 @@ export class ZoeySyncConflictPreviewModal extends Modal {
       toggleFile();
     });
 
-    if (!this.live) {
-    const times = summary.createDiv({ cls: "simple-one-sync-preview__times" });
-    times.setAttr("aria-expanded", String(expanded));
-    times.setAttr("aria-label", `${expanded ? "收起" : "展开"}${file.path}，本机与 GitHub 更新时间`);
-    for (const [side, text, value] of [["local", "本机", file.localUpdatedAt], ["remote", "GitHub", file.remoteUpdatedAt]] as const) {
-      const line = times.createSpan({ cls: "simple-one-sync-preview__time" });
-      line.toggleClass("is-newer", !this.live && this.latestSide(file) === side);
-      line.createSpan({ text: this.live ? text : `${text}更新` });
-      if (this.live) line.createSpan({ text: (side === "local" ? file.localPaths : file.remotePaths)?.join("、") ?? file.missingLabel ?? "删除" });
-      else {
-        const time = line.createEl("time", { text: this.formatTime(value) });
-        time.setAttr("datetime", value);
-      }
-    }
-    }
     const selected = this.fileChoices.get(file.path);
     const control = summary.createDiv({ cls: "simple-one-sync-preview__choice-control" });
     control.setAttr("aria-label", `${file.path}当前${this.fileStatus(file)}`);
     const segments = control.createDiv({ cls: "simple-one-sync-preview__segments" });
-    const options: [FileChoice, string][] = this.live ? [["local", file.localChoiceLabel ?? "本机"], ["remote", file.remoteChoiceLabel ?? "GitHub"]] : [["latest", "最新"], ["local", "本机"], ["remote", "GitHub"]];
+    const options: [FileChoice, string][] = [["local", file.localChoiceLabel ?? "本机"], ["remote", file.remoteChoiceLabel ?? "GitHub"]];
     if (file.allowBoth) options.push(["both", "保留两边"]);
     if (selected === "delete") options.push(["delete", "删除文件"]);
     segments.style.gridTemplateColumns = `repeat(${options.length}, minmax(0, 1fr))`;
     for (const [choice, label] of options) {
-      const option = segments.createEl("button", { text: label, cls: `simple-one-sync-preview__segment is-${choice === "latest" ? this.latestSide(file) : choice}` });
+      const option = segments.createEl("button", { text: label, cls: `simple-one-sync-preview__segment is-${choice}` });
       option.toggleClass("is-selected", selected === choice);
       option.setAttr("aria-label", `${file.path}选择${label}`);
       option.setAttr("aria-pressed", String(selected === choice));
@@ -288,7 +242,7 @@ export class ZoeySyncConflictPreviewModal extends Modal {
   }
 
   private async loadFile(file: PreviewFile): Promise<void> {
-    if (!this.live || this.loading.has(file.path)) return;
+    if (this.loading.has(file.path)) return;
     this.loading.add(file.path); this.readErrors.delete(file.path);
     try {
       const content = await this.live.read(file);
@@ -337,7 +291,7 @@ export class ZoeySyncConflictPreviewModal extends Modal {
     file.blocks.forEach((block, index) => {
       const key = this.blockKey(file.path, index);
       const wholeChoice = this.fileChoices.get(file.path);
-      const selection: BlockSelection | undefined = this.blockChoices.get(key) ?? (wholeChoice ? { method: wholeChoice === "latest" ? this.latestSide(file) : wholeChoice === "both" || wholeChoice === "delete" ? "local" : wholeChoice } : undefined);
+      const selection: BlockSelection | undefined = this.blockChoices.get(key) ?? (wholeChoice ? { method: wholeChoice === "both" || wholeChoice === "delete" ? "local" : wholeChoice } : undefined);
       const blockRow = details.createDiv({ cls: "simple-one-sync-preview__block" });
       const title = blockRow.createDiv({ cls: "simple-one-sync-preview__block-title" });
       const caption = title.createDiv({ cls: "simple-one-sync-preview__block-caption" });
@@ -404,26 +358,18 @@ export class ZoeySyncConflictPreviewModal extends Modal {
     return `${path}:${index}`;
   }
 
-  private latestSide(file: PreviewFile): Side {
-    return Date.parse(file.localUpdatedAt) >= Date.parse(file.remoteUpdatedAt) ? "local" : "remote";
-  }
-
   private selectionTone(file: PreviewFile): ChoiceTone | undefined {
     const whole = this.fileChoices.get(file.path);
     if (whole === "delete") return undefined;
-    if (whole) return whole === "latest" ? this.latestSide(file) : whole === "both" ? "mixed" : whole;
+    if (whole) return whole === "both" ? "mixed" : whole;
     const methods = file.blocks.map((_, index) => this.blockChoices.get(this.blockKey(file.path, index))?.method);
     if (!methods.length || methods.some((method) => !method)) return undefined;
     return methods.every((method) => method === "local") ? "local" : methods.every((method) => method === "remote") ? "remote" : "mixed";
   }
 
-  private formatTime(value: string): string {
-    return new Date(value).toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
-  }
-
   private fileStatus(file: PreviewFile): string {
     const whole = this.fileChoices.get(file.path);
-    if (whole) return whole === "latest" ? `最新 · ${this.latestSide(file) === "local" ? "本机" : "GitHub"}` : whole === "delete" ? "删除文件" : whole === "both" ? "保留两边" : whole === "local" ? file.localChoiceLabel ?? "本机" : file.remoteChoiceLabel ?? "GitHub";
+    if (whole) return whole === "delete" ? "删除文件" : whole === "both" ? "保留两边" : whole === "local" ? file.localChoiceLabel ?? "本机" : file.remoteChoiceLabel ?? "GitHub";
     const chosen = file.blocks.filter((_, index) => this.blockChoices.has(this.blockKey(file.path, index))).length;
     return chosen === 0 ? "未决定" : chosen === file.blocks.length ? "区块已选好" : `已决定 ${chosen}/${file.blocks.length} 处`;
   }
@@ -453,7 +399,7 @@ export class ZoeySyncConflictPreviewModal extends Modal {
       : undefined;
     const wholeChoice = this.fileChoices.get(file.path);
     if (wholeChoice) {
-      const side = wholeChoice === "latest" ? this.latestSide(file) : wholeChoice === "both" || wholeChoice === "delete" ? "local" : wholeChoice;
+      const side = wholeChoice === "both" || wholeChoice === "delete" ? "local" : wholeChoice;
       for (let other = 0; other < file.blocks.length; other += 1) {
         this.blockChoices.set(this.blockKey(file.path, other), { method: side });
       }
@@ -474,7 +420,7 @@ export class ZoeySyncConflictPreviewModal extends Modal {
   }
 
   private stageFiles(): PreviewFile[] {
-    return this.files.filter(file => this.pending.has(file.path) && (!this.live || (file.reviewStage ?? "content") === this.stage));
+    return this.files.filter(file => this.pending.has(file.path) && (file.reviewStage ?? "content") === this.stage);
   }
 
   private clearStageChoices(): void {
@@ -502,43 +448,29 @@ export class ZoeySyncConflictPreviewModal extends Modal {
 
   private applyReadyFiles(): void {
     const ready = this.getReadyFiles();
-    if (this.live) {
-      if (this.stageFiles().some(file => !ready.includes(file))) return;
-      if (this.stage === "file" && this.files.some(file => file.reviewStage !== "file")) {
-        this.stage = "content"; this.page = 0; this.expandedPath = undefined; this.render(false); return;
-      }
-      if (ready.length !== this.pending.size) return;
+    if (this.stageFiles().some(file => !ready.includes(file))) return;
+    if (this.stage === "file" && this.files.some(file => file.reviewStage !== "file")) {
+      this.stage = "content"; this.page = 0; this.expandedPath = undefined; this.render(false); return;
     }
+    if (ready.length !== this.pending.size) return;
     for (const file of ready) {
-      if (this.live) {
-        const whole = this.fileChoices.get(file.path);
-        this.results[file.path] = whole ? { choice: whole === "latest" ? this.latestSide(file) : whole } : {
-          choice: "manual", text: resolveTextParts(this.parts.get(file.path)!, file.blocks.map((block, index) => {
-            const selected = this.blockChoices.get(this.blockKey(file.path, index))!;
-            return selected.method === "merged" ? selected.text ?? "" : block[selected.method];
-          }))
-        };
-      }
+      const whole = this.fileChoices.get(file.path);
+      this.results[file.path] = whole ? { choice: whole } : {
+        choice: "manual", text: resolveTextParts(this.parts.get(file.path)!, file.blocks.map((block, index) => {
+          const selected = this.blockChoices.get(this.blockKey(file.path, index))!;
+          return selected.method === "merged" ? selected.text ?? "" : block[selected.method];
+        }))
+      };
       this.pending.delete(file.path);
       this.fileChoices.delete(file.path);
       for (let index = 0; index < file.blocks.length; index += 1) this.blockChoices.delete(this.blockKey(file.path, index));
     }
     this.appliedCount += ready.length;
     if (this.expandedPath && !this.pending.has(this.expandedPath)) this.expandedPath = undefined;
-    if (this.live && this.pending.size === 0) {
+    if (this.pending.size === 0) {
       this.resolve?.(this.results); this.resolve = undefined; this.close(); return;
     }
     this.render(false);
   }
 
-  private reset(): void {
-    this.pending = new Set(this.files.map((file) => file.path));
-    this.results = {}; this.page = 0;
-    this.stage = this.live && this.files.some(file => file.reviewStage === "file") ? "file" : "content";
-    this.expandedPath = undefined;
-    this.fileChoices.clear();
-    this.blockChoices.clear();
-    this.appliedCount = 0;
-    this.render(false);
-  }
 }

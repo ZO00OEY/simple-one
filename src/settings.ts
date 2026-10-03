@@ -220,10 +220,10 @@ export class SimpleSettingTab extends PluginSettingTab {
     this.renderPlatformHint(containerEl);
 
     if (this.page.type === "sync-sharing") {
-      this.renderPageHeader(containerEl, "同步与分享", () => {
+      const titleEl = this.renderPageHeader(containerEl, "同步与分享", () => {
         if (!this.syncTab.backToOverview()) this.openPage({ type: "overview" });
       });
-      this.syncTab.renderInto(containerEl.createDiv({ cls: "simple-one-sync-feature" }));
+      this.syncTab.renderInto(containerEl.createDiv({ cls: "simple-one-sync-feature" }), title => titleEl.setText(title));
     } else if (this.page.type === "overview") {
       this.renderOverview(containerEl);
     } else if (this.page.type === "html-preview") {
@@ -1550,7 +1550,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     container: HTMLElement,
     title: string,
     onBack = () => this.openPage({ type: "overview" })
-  ): void {
+  ): HTMLElement {
     const header = container.createDiv({ cls: "simple-page-header" });
     const back = header.createEl("button", {
       cls: "simple-back-button",
@@ -1558,7 +1558,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     });
     setIcon(back, "arrow-left");
     back.addEventListener("click", onBack);
-    new Setting(header).setName(title).setHeading().setClass("simple-page-title");
+    return new Setting(header).setName(title).setHeading().setClass("simple-page-title").nameEl;
   }
 
   private openPage(page: SettingsPage): void {

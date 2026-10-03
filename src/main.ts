@@ -37,6 +37,7 @@ import { TemplateFillView, VIEW_TYPE } from "./features/templateFill";
 import { defaultTemplateCategories } from "./features/templateFillPresets";
 import defaultData from "./default.json";
 import SyncFeature from "./features/sync";
+import ShareFeature from "./features/share";
 import { reportError } from "./shared/async";
 import { SimpleSettingTab } from "./settings";
 import { normalizePopupScalePercent } from "./shared/popupSizing";
@@ -72,6 +73,7 @@ type RenderedPreviewObservers = {
 export default class SimplePlugin extends Plugin {
   settings!: SimplePluginSettings;
   sync!: SyncFeature;
+  share!: ShareFeature;
   readonly isMobile = Platform.isMobile;
 
   get platformName(): string {
@@ -191,6 +193,8 @@ export default class SimplePlugin extends Plugin {
 
     this.sync = this.addChild(new SyncFeature(this));
     await this.sync.initialize().catch(reportError);
+    this.share = this.addChild(new ShareFeature(this));
+    await this.share.initialize().catch(reportError);
     this.addSettingTab(new SimpleSettingTab(this.app, this));
   }
 
@@ -385,10 +389,6 @@ export default class SimplePlugin extends Plugin {
     } else {
       document.body.style.removeProperty("--simple-image-max-height");
     }
-  }
-
-  async activateView() {
-    await this.activateTemplateFill();
   }
 
   async activateTemplateFill(input?: string) {

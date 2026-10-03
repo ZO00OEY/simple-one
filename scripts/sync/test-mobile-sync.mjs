@@ -88,9 +88,10 @@ try {
     };
     const options = { repoUrl: "https://github.com/example/vault.git", token: "fixture", branch: "main", bound: true,
       syncImages: true, syncPlugins: false, plugins: [], ignorePatterns: [], cacheEnabled: true, trackPaths: true };
-    const engine = new MobileGithub(adapter, ".obsidian", "simple-link", () => options, () => {});
+    const progress = [];
+    const engine = new MobileGithub(adapter, ".obsidian", "simple-link", () => options, message => progress.push(message));
     await engine.bind();
-    return { engine, adapter, local, calls, options, remote: () => trees.get(root), head: () => head, root: () => root,
+    return { engine, adapter, local, calls, options, progress, remote: () => trees.get(root), head: () => head, root: () => root,
       fail: path => { failWrite = path; },
       move: (from, to) => { local.set(to, local.get(from)); local.delete(from); engine.event("rename", to, from); },
       cloudEdit: (path, text) => {
@@ -126,6 +127,22 @@ try {
     const plan = await f.engine.preview(choices);
     for (const c of plan.conflicts) if (c.kind === 'unpaired') choices[c.id] = { choice: c.local ? 'local' : 'remote' };
     return plan.conflicts.some(c => c.kind === 'unpaired') ? f.engine.preview(choices) : plan;
+  }
+  // Preparation counts are separate from completed synchronization, in both directions.
+  {
+    const f = await fixture({ "upload.md": "old", "download.md": "old" }, { "upload.md": "old", "download.md": "old" });
+    await align(f);
+    await f.adapter.write("upload.md", "new local"); f.engine.event("modify", "upload.md");
+    f.cloudEdit("download.md", "new cloud");
+    f.progress.length = 0;
+    const plan = await f.engine.preview();
+    assert(f.progress.some(text => text.includes("待同步 2 个文件 · 待准备上传 1 个")));
+    await f.engine.execute(plan);
+    assert(f.progress.some(text => text.includes("正在确认云端更新 · 待同步 2 个文件 · 待准备上传 0 个 · 已准备 1/1")), "prepared uploads remain pending until the branch update succeeds");
+    assert(f.progress.some(text => text.includes("正在应用本地同步结果 · 待同步 1 个文件")));
+    assert(f.progress.some(text => text.includes("正在应用本地同步结果 · 待同步 0 个文件")));
+    assert.equal(f.local.get("download.md").bytes.toString(), "new cloud");
+    assert.equal(f.remote()["upload.md"].sha, hash(Buffer.from("new local")));
   }
   // Missing first-sync files wait for direction; choosing absence means an explicit deletion.
   for (const side of ['local', 'remote']) {
@@ -225,6 +242,69 @@ try {
     assert.equal(f.engine.state.baseCommitSha, base);
     assert.equal(f.local.get('note.md').bytes.toString(), 'hello');
   }
+  // Interrupted multi-file downloads retain a durable guard and resume before
+  // interpreting absent local files as deletions, including after a restart.
+  {
+    const f = await fixture({ 'existing.md': 'base' }, { 'existing.md': 'base' });
+    await align(f);
+    const base = f.engine.state.baseCommitSha;
+    for (const name of ['first.md', 'second.md', 'third.md']) f.cloudEdit(name, name);
+    f.fail('second.md');
+    const plan = await f.engine.preview();
+    await assert.rejects(f.engine.execute(plan), /disk failure/);
+    assert(f.local.has('first.md'));
+    assert(!f.local.has('second.md') && !f.local.has('third.md'));
+    assert.equal(f.engine.state.baseCommitSha, base);
+    const saved = JSON.parse(await f.adapter.read(f.engine.statePath));
+    assert.equal(saved.baseCommitSha, base);
+    assert.equal(saved.downloadVerification.phase, 'downloading');
+    await assert.rejects(f.engine.execute(plan), /未完成的下载或验证/);
+    f.fail('');
+    const restarted = new MobileGithub(f.adapter, '.obsidian', 'simple-link', () => f.options, message => f.progress.push(message));
+    const resumed = await restarted.preview();
+    assert.equal(restarted.state.pending, undefined);
+    assert.equal(restarted.state.baseCommitSha, f.head());
+    assert.equal(resumed.remoteDeletes.length + resumed.localDeletes.length + resumed.downloads.length + resumed.uploads.length, 0);
+    for (const name of ['first.md', 'second.md', 'third.md']) assert.equal(f.local.get(name).bytes.toString(), name);
+    assert.equal(JSON.parse(await f.adapter.read(restarted.statePath)).pending, undefined);
+    assert.equal(JSON.parse(await f.adapter.read(restarted.statePath)).downloadVerification, undefined);
+  }
+  // Even if an existing base lists a missing file, an unfinished download guard
+  // makes that absence a download requirement, never an automatic cloud delete.
+  {
+    const f = await fixture({ 'protected.md': 'cloud content' }, { 'protected.md': 'cloud content' });
+    await align(f);
+    f.engine.state.downloadVerification = { phase: 'downloading', scope: f.engine.state.baseScope,
+      commit: f.head(), files: { 'protected.md': f.engine.state.base['protected.md'] } };
+    f.local.delete('protected.md');
+    f.engine.event('delete', 'protected.md');
+    await f.engine.save();
+    const plan = await f.engine.preview();
+    assert.deepEqual(plan.remoteDeletes, []);
+    assert.deepEqual(plan.downloads, ['protected.md']);
+    assert(f.engine.state.downloadVerification);
+    await f.engine.execute(plan);
+    assert.equal(f.local.get('protected.md').bytes.toString(), 'cloud content');
+    assert.equal(f.engine.state.downloadVerification, undefined);
+  }
+  // A successful write call is insufficient: verify the bytes actually landed.
+  {
+    const f = await fixture({ 'existing.md': 'base' }, { 'existing.md': 'base' });
+    await align(f);
+    const base = f.engine.state.baseCommitSha;
+    f.cloudEdit('lost.md', 'must be downloaded');
+    const originalWrite = f.adapter.writeBinary;
+    f.adapter.writeBinary = async (path, bytes) => { if (path !== 'lost.md') await originalWrite(path, bytes); };
+    await assert.rejects(f.engine.execute(await f.engine.preview()), /下载结果验证未通过/);
+    assert.equal(f.engine.state.baseCommitSha, base);
+    assert.equal(f.engine.state.downloadVerification.phase, 'verifying');
+    assert.equal(JSON.parse(await f.adapter.read(f.engine.statePath)).downloadVerification.phase, 'verifying');
+    f.adapter.writeBinary = originalWrite;
+    const recovered = await f.engine.preview();
+    assert.equal(recovered.remoteDeletes.length, 0);
+    assert.equal(f.local.get('lost.md').bytes.toString(), 'must be downloaded');
+    assert.equal(f.engine.state.pending, undefined);
+  }
   // Edits following interrupted downloads return to conflict review with the old baseline.
   {
     const f = await fixture({ 'note.md': 'base' }, { 'note.md': 'base' });
@@ -242,6 +322,7 @@ try {
     assert.equal(f.engine.state.baseCommitSha, base);
     assert.equal(f.local.get('note.md').bytes.toString(), 'new local edit');
     assert(plan.conflicts.some(c => c.kind === 'content'));
+    assert(f.engine.state.downloadVerification, 'download guard survives returning to conflict review');
   }
   // Empty vault: import, preserve excluded cloud config, persist baseline/tree and final cache.
   // A startup/bulk event storm must retain the latest state without thousands
@@ -683,6 +764,24 @@ try {
     assert.equal(tab.backToOverview(), false);
   }
   console.log("All sync pages: parent navigation, nested login help and overview reopening passed");
+  {
+    const tab = Object.create(SyncSettingsTab.prototype);
+    const titles = [], sharedTitles = [];
+    tab.desktopPage = "root"; tab.navigationParents = [];
+    tab.plugin = { host: { share: { detachSettings() {}, renderSettings(_root, _guide, showTitle) { sharedTitles.push(showTitle); } } } };
+    const container = { empty() {}, addClass() {}, toggleClass() {} };
+    for (const method of ["addEnableSetting", "addDefaultRepoSetting", "displayBeginner", "displayDesktop", "displayBeginnerMobile", "displayDevicePreview", "displayMobilePreview", "displaySetup", "displayDesktopSettings"]) tab[method] = () => {};
+    tab.renderInto(container, title => titles.push(title));
+    tab.navigateTo("beginner-mobile"); tab.navigateTo("setup"); tab.backToOverview(); tab.backToOverview();
+    tab.navigateTo("desktop-settings"); tab.backToOverview();
+    tab.navigateTo("mobile"); tab.backToOverview();
+    tab.navigateTo("beginner-server"); tab.backToOverview();
+    tab.navigateTo("server"); tab.backToOverview();
+    assert.deepEqual(titles, ["同步与分享", "轻量同步引导", "电脑端同步引导", "轻量同步引导", "同步与分享", "电脑端 Git 同步设置", "同步与分享", "轻量 Git 同步设置", "同步与分享", "笔记分享引导", "同步与分享", "笔记分享设置", "同步与分享"]);
+    assert.deepEqual(sharedTitles, [false, false], "share pages suppress their own title under the shared header");
+    tab.hide(); assert.equal(tab.settingsTitleChanged, undefined);
+  }
+  console.log("Sync page titles: child titles, nested back navigation and duplicate share title suppression passed");
   // The migrated guide renders inside Simple One, rather than the old tab root.
   for (const step of [1, 2, 3]) {
     const tab = Object.create(SyncSettingsTab.prototype);

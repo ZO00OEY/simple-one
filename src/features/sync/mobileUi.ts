@@ -1,4 +1,5 @@
 import { App, Notice, Platform, Setting } from "obsidian";
+import { settingsSection } from "../../shared/settingsLayout";
 import { MobileOptions, sameContent } from "./linkDiff";
 import { ConflictChoice, MobileConflict, MobileGithub, MobilePlan } from "./mobileGithub";
 import { LiveReview, PreviewFile, ZoeySyncConflictPreviewModal } from "./conflictPreview";
@@ -169,8 +170,8 @@ export function renderMobileSettings(root: HTMLElement, host: MobileHost, guide 
   }
   const persist = async (): Promise<void> => { await host.save(); host.restart(); };
   if (options.mode === "server") { root.createEl("p", { text: "服务器地址和密码在下方原服务器设置中填写。" }); return; }
-  root.createEl("h3", { text: "账户设置" });
-  const account = root.createDiv({ cls: "simple-one-sync-lightweight-account" });
+  const account = settingsSection(root, "账户设置");
+  account.addClass("simple-one-sync-lightweight-account");
   const engine = host.engine();
   const quota = new Setting(account).setName("GitHub API 剩余额度");
   const updateQuota = (remaining: number | null): void => {
@@ -209,15 +210,15 @@ export function renderMobileSettings(root: HTMLElement, host: MobileHost, guide 
       } catch (error) { report(error instanceof Error ? error.message : String(error), true); }
       finally { button.setDisabled(false); }
     }));
-  root.createEl("h3", { text: "同步设置" });
-  new Setting(root).setName("自动同步间隔（分钟）").setDesc("默认 0，仅手动同步；自动同步发现冲突或删除时等待手动预览。")
+  const timing = settingsSection(root, "同步设置");
+  new Setting(timing).setName("自动同步间隔（分钟）").setDesc("默认 0，仅手动同步；自动同步发现冲突或删除时等待手动预览。")
     .addText((text) => text.setValue(String(options.autoSyncMinutes)).onChange(async (value) => {
       const minutes = Number(value); if (!Number.isFinite(minutes) || minutes < 0) return;
       options.autoSyncMinutes = minutes; await persist();
     }));
-  root.createEl("h3", { text: "基础规则" });
-  renderMobileSyncRules(root, options, persist, () => host.engine().listCloudPlugins());
-  new Setting(root).setName("本机额外忽略规则").setDesc("每行一个目录或通配符，例如 私人目录/。不改云端 .gitignore，排除项不会被当成删除。")
+  const rules = settingsSection(root, "基础规则");
+  renderMobileSyncRules(rules, options, persist, () => host.engine().listCloudPlugins());
+  new Setting(rules).setName("本机额外忽略规则").setDesc("每行一个目录或通配符，例如 私人目录/。不改云端 .gitignore，排除项不会被当成删除。")
     .addTextArea((text) => text.setValue(options.ignorePatterns.join("\n")).onChange(async (value) => {
       options.ignorePatterns = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean); await persist();
     }));

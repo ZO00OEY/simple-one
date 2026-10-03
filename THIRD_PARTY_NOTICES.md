@@ -1,6 +1,8 @@
 # Third-party license notices
 
-The production bundle includes code from these MIT-licensed packages. Their copyright notices and license texts follow.
+The production bundle includes code from the packages listed below. Their copyright notices and license texts follow.
+
+The embedded sharing reader also includes Markdown, formula, diagram, sanitization, and font dependencies. Their license texts are collected during the build and published with the reader as `reader/licenses.txt` on each sharing website.
 
 ## lunar-javascript 1.7.7
 

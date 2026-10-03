@@ -17,11 +17,13 @@ export function recommendedIgnoreRules(configDir: string): string[] {
   `${configDir}/workspaces/`,
   `${configDir}/trash/`,
   ".trash/",
+  ".gitshare/",
   "# 插件生成的本机状态与日志（同步设置保留）",
   `${configDir}/plugins/obsidian-git/data.json`,
   `${configDir}/plugins/recent-files-obsidian/data.json`,
   `${configDir}/plugins/simple-one/data.json*`,
   `${configDir}/plugins/simple-one/sync-local.json*`,
+  `${configDir}/plugins/simple-one/share-local.json*`,
   `${configDir}/plugins/simple-one/link-state.json*`,
   `${configDir}/plugins/simple-one/link-state.json.recovery`,
   `${configDir}/plugins/simple-one/mobile-ignore.json*`,
@@ -156,9 +158,10 @@ export function coalesceDirty(entries: DirtyEntry[], next: DirtyEntry): DirtyEnt
 }
 
 export function isPrivateSyncPath(path: string, configDir: string): boolean {
+  if (path === ".gitshare" || path.startsWith(".gitshare/")) return true;
   for (const id of ["simple-one", "simple-link"]) {
     const prefix = `${configDir}/plugins/${id}/`;
-    if (path.startsWith(prefix) && /^(?:data\.json|sync-local\.json|link-state\.json|mobile-ignore\.json)(?:$|[.~_-])/i.test(path.slice(prefix.length))) return true;
+    if (path.startsWith(prefix) && /^(?:data\.json|sync-local\.json|share-local\.json|link-state\.json|mobile-ignore\.json)(?:$|[.~_-])/i.test(path.slice(prefix.length))) return true;
   }
   return false;
 }

@@ -5,6 +5,7 @@ import { Component, MarkdownRenderChild, MarkdownRenderer, MarkdownView, Notice,
 import type SimplePlugin from "../main";
 import type { QuickFormatMode } from "../types";
 import { formatSelection, isHeadingMode, setQuickFormatColumnTarget } from "./quickFormat";
+import { parseColumns as parse } from "../shared/columns";
 
 type Columns = { widths: number[]; content: string[] };
 type Block = { from: number; to: number; source: string; columns: Columns };
@@ -30,21 +31,6 @@ function widthsWithAddedColumn(current: number[], side: "left" | "right"): numbe
     remaining += remaining > 0 ? -1 : 1;
   }
   return side === "left" ? [added, ...adjusted] : [...adjusted, added];
-}
-
-function parse(source: string): Columns | null {
-  const lines = source.replace(/\r\n/g, "\n").split("\n");
-  const match = /^widths: ([\d:]+)$/.exec(lines[0] || "");
-  if (!match) return null;
-  const sizes = match[1].split(":").map(Number);
-  const raw = lines.slice(1).join("\n").split(/^---column---$/m);
-  const content = raw.map((part, index) => {
-    const start = index && part.startsWith("\n") ? 1 : 0;
-    const end = index < raw.length - 1 && part.endsWith("\n") ? part.length - 1 : part.length;
-    return part.slice(start, end);
-  });
-  if (content.length < 2 || content.length > 4 || sizes.length !== content.length || sizes.some((n) => !Number.isFinite(n) || n < 10) || sizes.reduce((a, b) => a + b, 0) !== 100) return null;
-  return { widths: sizes, content };
 }
 
 function serialize(columns: Columns): string {

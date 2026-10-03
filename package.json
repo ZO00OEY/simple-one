@@ -1,6 +1,6 @@
 {
   "name": "simple-one",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "A collection of practical Obsidian tools",
   "main": "main.js",
   "scripts": {
@@ -8,14 +8,19 @@
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "lint": "eslint src --max-warnings 0 && node scripts/check-css.mjs",
     "check": "npm run lint && npm run test && npm run build",
-    "test": "node scripts/smoke.mjs && npm run test:sync",
-    "test:sync": "node scripts/sync/test-dirty.mjs && node scripts/sync/test-onboarding.mjs && node scripts/sync/test-lightweight-guide.mjs && node scripts/sync/test-mobile-sync.mjs && node scripts/sync/test-mobile-runtime.mjs && node scripts/sync/test-migration.mjs"
+    "test": "node scripts/smoke.mjs && npm run test:sync && npm run test:share",
+    "test:share": "node scripts/test-share.mjs && node scripts/test-share-reader.mjs",
+    "test:sync": "node scripts/sync/test-dirty.mjs && node scripts/sync/test-onboarding.mjs && node scripts/sync/test-lightweight-guide.mjs && node scripts/sync/test-mobile-sync.mjs && node scripts/sync/test-mobile-runtime.mjs && node scripts/sync/test-migration.mjs && node scripts/sync/test-desktop-backup.mjs"
   },
   "devDependencies": {
+    "@types/katex": "^0.16.8",
+    "@types/markdown-it": "^14.2.0",
+    "@types/markdown-it-footnote": "^3.0.4",
     "@types/node": "^20.0.0",
     "esbuild": "^0.28.2",
     "eslint": "^9.39.5",
     "eslint-plugin-obsidianmd": "^0.4.2",
+    "jsdom": "^30.1.1",
     "obsidian": "^1.13.1",
     "postcss": "^8.5.28",
     "postcss-selector-parser": "^7.1.6",
@@ -25,7 +30,13 @@
     "@codemirror/commands": "^6.11.1",
     "@codemirror/state": "6.5.0",
     "@codemirror/view": "6.38.6",
-    "lunar-javascript": "^1.7.7"
+    "dompurify": "^3.4.16",
+    "katex": "^0.19.0",
+    "lunar-javascript": "^1.7.7",
+    "markdown-it": "^15.0.2",
+    "markdown-it-footnote": "^4.0.0",
+    "markdown-it-mark": "^4.0.0",
+    "mermaid": "^12.1.0"
   },
   "overrides": {
     "moment": "^2.31.0"
