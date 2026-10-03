@@ -1544,7 +1544,6 @@ export function registerNotionColumns(plugin: SimplePlugin): void {
         return;
       }
       this.candidate = this.selectionAt(event);
-      if (event.button === 2 && this.candidate) this.suppressMenuUntil = Date.now() + 700;
     };
     private beginChord(event: MouseEvent): void {
       if (this.chordActive || !this.candidate) return;
@@ -1571,7 +1570,8 @@ export function registerNotionColumns(plugin: SimplePlugin): void {
       if (staged?.view === this.view) staged.armed = true;
     };
     private contextMenu = (event: MouseEvent): void => {
-      if (this.candidate || this.chordActive || Date.now() < this.suppressMenuUntil) {
+      // A selection is only a potential chord; ordinary right-clicks keep the native menu.
+      if (this.chordActive || Date.now() < this.suppressMenuUntil) {
         event.preventDefault();
         event.stopPropagation();
       }

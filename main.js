@@ -22200,7 +22200,6 @@ function registerNotionColumns(plugin) {
           return;
         }
         this.candidate = this.selectionAt(event);
-        if (event.button === 2 && this.candidate) this.suppressMenuUntil = Date.now() + 700;
       };
       this.mouseMove = (event) => {
         if (this.candidate && !this.chordActive && (event.buttons & 3) === 3) this.beginChord(event);
@@ -22218,7 +22217,7 @@ function registerNotionColumns(plugin) {
         if (staged?.view === this.view) staged.armed = true;
       };
       this.contextMenu = (event) => {
-        if (this.candidate || this.chordActive || Date.now() < this.suppressMenuUntil) {
+        if (this.chordActive || Date.now() < this.suppressMenuUntil) {
           event.preventDefault();
           event.stopPropagation();
         }
