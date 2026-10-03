@@ -1,5 +1,7 @@
 # Automated review notes
 
+The 1.0.15 scan confirmed the unsafe-type warnings were removed. Version 1.0.16 also upgrades fflate to 0.8.3 to address GHSA-px8p-9vwx-vf98 and adds production dependency auditing to release checks.
+
 The following changes address the 1.0.14 community review:
 
 - Production builds are minified, use gzip level 9, and ship only WOFF2 math fonts. A build fails if `main.js` exceeds 5,000,000 bytes. Mermaid, math and offline website publishing remain available.

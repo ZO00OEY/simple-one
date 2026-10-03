@@ -1,13 +1,13 @@
 {
   "name": "simple-one",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "description": "A collection of practical Obsidian tools",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "lint": "eslint src --max-warnings 0 && node scripts/check-css.mjs",
-    "check": "npm run lint && npm run test && npm run build",
+    "check": "npm audit --omit=dev && npm run lint && npm run test && npm run build",
     "test": "node scripts/smoke.mjs && npm run test:sync && npm run test:share",
     "test:share": "node scripts/test-share.mjs && node scripts/test-share-reader.mjs",
     "test:sync": "node scripts/sync/test-dirty.mjs && node scripts/sync/test-onboarding.mjs && node scripts/sync/test-lightweight-guide.mjs && node scripts/sync/test-mobile-sync.mjs && node scripts/sync/test-mobile-runtime.mjs && node scripts/sync/test-migration.mjs && node scripts/sync/test-desktop-backup.mjs"
@@ -31,7 +31,7 @@
     "@codemirror/state": "6.5.0",
     "@codemirror/view": "6.38.6",
     "dompurify": "^3.4.16",
-    "fflate": "0.8.2",
+    "fflate": "0.8.3",
     "katex": "^0.19.0",
     "lunar-javascript": "^1.7.7",
     "markdown-it": "^15.0.2",
