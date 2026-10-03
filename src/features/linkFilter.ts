@@ -270,7 +270,7 @@ async function reformatPastedTextBeforeInsert(
   const lines = output.split("\n");
   editor.setCursor(lines.length === 1
     ? { line: from.line, ch: from.ch + lines[0].length }
-    : { line: from.line + lines.length - 1, ch: lines.at(-1)?.length ?? 0 });
+    : { line: from.line + lines.length - 1, ch: lines[lines.length - 1]?.length ?? 0 });
 }
 
 function escapeMarkdownLinkText(text: string): string {

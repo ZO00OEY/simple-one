@@ -462,7 +462,7 @@ function normalizeEnhancements(settings: SimplePluginSettings, data: LoadedSetti
     "callout-summary": "callout-abstract",
     "callout-caution": "callout-warning",
   };
-  const storedCalloutColors = storedQuickFormat?.calloutColors as Record<string, string> | undefined;
+  const storedCalloutColors: Record<string, string> | undefined = storedQuickFormat?.calloutColors;
   const calloutColors = {
     ...DEFAULT_SETTINGS.enhancements.quickFormat.calloutColors,
     ...storedCalloutColors,

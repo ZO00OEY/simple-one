@@ -14933,7 +14933,7 @@ async function reformatPastedTextBeforeInsert(plugin, editor, pastedText, proces
   }
   editor.replaceRange(output, from, to);
   const lines = output.split("\n");
-  editor.setCursor(lines.length === 1 ? { line: from.line, ch: from.ch + lines[0].length } : { line: from.line + lines.length - 1, ch: lines.at(-1)?.length ?? 0 });
+  editor.setCursor(lines.length === 1 ? { line: from.line, ch: from.ch + lines[0].length } : { line: from.line + lines.length - 1, ch: lines[lines.length - 1]?.length ?? 0 });
 }
 function escapeMarkdownLinkText(text) {
   return text.replace(/[[\]\\]/g, "\\$&").replace(/\n+/g, " ").trim();
@@ -20740,7 +20740,8 @@ function findBlocks(doc) {
   return blocks;
 }
 function terminalColumnsLineSuffix(source) {
-  const last = findBlocks(source).at(-1);
+  const blocks = findBlocks(source);
+  const last = blocks[blocks.length - 1];
   if (!last) return "";
   const trailing = source.slice(last.to);
   return /^\n?$/.test(trailing) ? "\n".repeat(2 - trailing.length) : "";
@@ -21794,7 +21795,7 @@ var ColumnsSurface = class {
   applyColumnCommand(command2, view) {
     if (this.columnEditor?.view !== view) return;
     if (command2.startsWith("editor:set-heading-")) {
-      this.setColumnHeading(view, Number(command2.at(-1)));
+      this.setColumnHeading(view, Number(command2[command2.length - 1]));
     } else if (command2 === "editor:toggle-blockquote" || command2 === "editor:insert-callout") {
       const { from, to } = view.state.selection.main;
       const line = view.state.doc.lineAt(from);

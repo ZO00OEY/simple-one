@@ -86,7 +86,8 @@ function findBlocks(doc: string): Block[] {
 }
 
 function terminalColumnsLineSuffix(source: string): string {
-  const last = findBlocks(source).at(-1);
+  const blocks = findBlocks(source);
+  const last = blocks[blocks.length - 1];
   if (!last) return "";
   const trailing = source.slice(last.to);
   return /^\n?$/.test(trailing) ? "\n".repeat(2 - trailing.length) : "";
@@ -1146,7 +1147,7 @@ class ColumnsSurface {
   private applyColumnCommand(command: string, view: EditorView): void {
     if (this.columnEditor?.view !== view) return;
     if (command.startsWith("editor:set-heading-")) {
-      this.setColumnHeading(view, Number(command.at(-1)));
+      this.setColumnHeading(view, Number(command[command.length - 1]));
     } else if (command === "editor:toggle-blockquote" || command === "editor:insert-callout") {
       const { from, to } = view.state.selection.main;
       const line = view.state.doc.lineAt(from);
