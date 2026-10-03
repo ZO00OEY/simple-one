@@ -32,9 +32,11 @@ const context = await esbuild.context({
       }
       const licenses = [];
       for (const name of [...packageNames].sort()) {
-        for (const file of ["LICENSE", "LICENSE.md", "LICENSE.txt", "license", "COPYING"]) {
-          try { licenses.push(`\n=== ${name} ===\n${(await fs.readFile(`node_modules/${name}/${file}`, "utf8")).replace(/\r\n/g, "\n")}`); break; } catch { /* optional filename */ }
-        }
+        const directory = `node_modules/${name}`;
+        const filenames = (await fs.readdir(directory)).sort();
+        const file = ["license", "license.md", "license.txt", "copying"]
+          .map(candidate => filenames.find(filename => filename.toLowerCase() === candidate)).find(Boolean);
+        if (file) licenses.push(`\n=== ${name} ===\n${(await fs.readFile(`${directory}/${file}`, "utf8")).replace(/\r\n/g, "\n")}`);
       }
       files["reader/licenses.txt"] = Buffer.from(licenses.join("\n")).toString("base64");
       const compressed = gzipSync(Buffer.from(JSON.stringify(files)));
