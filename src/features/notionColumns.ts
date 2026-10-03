@@ -4,7 +4,6 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { Component, MarkdownRenderChild, MarkdownRenderer, MarkdownView, Notice, TFile, addIcon, setIcon, setTooltip } from "obsidian";
 import type SimplePlugin from "../main";
 import type { QuickFormatMode } from "../types";
-import { DEFAULT_COLUMNS_HOTKEY } from "../shared/commandHotkey";
 import { formatSelection, isHeadingMode, setQuickFormatColumnTarget } from "./quickFormat";
 
 type Columns = { widths: number[]; content: string[] };
@@ -767,6 +766,8 @@ class ColumnsSurface {
     holder.empty();
     const blankLine = !source.trim() && (!!source || holder.classList.contains("is-terminal-line"));
     holder.classList.toggle("is-blank-line", blankLine);
+    holder.classList.toggle("is-image", isImageLine(source));
+    holder.classList.remove("is-heading", "is-callout");
     if (!source.trim()) {
       if (!blankLine) holder.createSpan({ cls: "simple-columns-empty-block", text: "点击编辑" });
       return;
@@ -784,10 +785,12 @@ class ColumnsSurface {
       edit.addEventListener("pointerdown", (event) => event.stopPropagation());
       return;
     }
-    const rendered = holder.ownerDocument.createElement("div");
+    const rendered = holder.ownerDocument.win.createDiv();
     void MarkdownRenderer.render(this.plugin.app, source, rendered, this.sourcePath, this.renderComponent!).then(() => {
       if (this.renderVersion.get(holder) !== version || !holder.isConnected) return;
       holder.replaceChildren(...Array.from(rendered.childNodes));
+      holder.classList.toggle("is-heading", !!holder.querySelector(":scope > :is(h1,h2,h3,h4,h5,h6)"));
+      holder.classList.toggle("is-callout", !!holder.querySelector(":scope > .callout"));
     });
   }
 
@@ -801,7 +804,7 @@ class ColumnsSurface {
     const version = (this.renderVersion.get(preview) || 0) + 1;
     this.renderVersion.set(preview, version);
     if (!isImageLine(source)) { preview.empty(); return; }
-    const rendered = preview.ownerDocument.createElement("div");
+    const rendered = preview.ownerDocument.win.createDiv();
     void MarkdownRenderer.render(this.plugin.app, source, rendered, this.sourcePath, this.renderComponent!).then(() => {
       if (this.renderVersion.get(preview) !== version || !preview.isConnected) return;
       preview.replaceChildren(...Array.from(rendered.childNodes));
@@ -1177,7 +1180,7 @@ class ColumnsWidget extends WidgetType {
   constructor(private plugin: SimplePlugin, private block: Block) { super(); }
   eq(other: ColumnsWidget): boolean { return other.block.source === this.block.source && other.block.from === this.block.from; }
   toDOM(view: EditorView): HTMLElement {
-    const element = document.createElement("div");
+    const element = createDiv();
     element.dataset.columnsFrom = String(this.block.from);
     const sourcePath = pathForView(this.plugin, view);
     const surface = new ColumnsSurface(this.plugin, sourcePath, this.block.columns, element, (value, drag) => {
@@ -1257,7 +1260,6 @@ export function registerNotionColumns(plugin: SimplePlugin): void {
   plugin.addCommand({
     id: "create-two-column-view",
     name: "在当前位置创建双列视图",
-    hotkeys: [DEFAULT_COLUMNS_HOTKEY],
     editorCheckCallback: (checking, editor) => {
       if (!plugin.settings.enableNotionColumns) return false;
       if (!checking) {
@@ -1383,25 +1385,25 @@ export function registerNotionColumns(plugin: SimplePlugin): void {
   function showStage(selection: SelectionDrag, event: MouseEvent): void {
     clearStage();
     const doc = selection.view.dom.ownerDocument;
-    const card = doc.createElement("div");
+    const card = doc.win.createDiv();
     card.className = "simple-columns-stage";
     card.setAttribute("title", "移动到目标行，左键插入左侧，右键插入右侧；Esc 取消");
-    const grid = doc.createElement("div");
+    const grid = doc.win.createDiv();
     grid.className = "simple-columns-stage-grid";
-    const preview = doc.createElement("div");
+    const preview = doc.win.createDiv();
     preview.className = "simple-columns-stage-preview";
     preview.textContent = selection.selected.trim().slice(0, 90) || "已选内容";
-    const empty = doc.createElement("div");
+    const empty = doc.win.createDiv();
     empty.className = "simple-columns-stage-empty";
     grid.append(preview, empty);
-    const status = doc.createElement("small");
+    const status = doc.win.createEl("small");
     status.className = "simple-columns-stage-status";
     status.textContent = "左键点击插入左侧，右键点击插入右侧";
     card.append(grid, status);
     doc.body.append(card);
-    const caret = doc.createElement("div");
+    const caret = doc.win.createDiv();
     caret.className = "simple-columns-insert-caret";
-    const caretLabel = doc.createElement("span");
+    const caretLabel = doc.win.createSpan();
     caretLabel.textContent = "插入到此行";
     caret.append(caretLabel);
     doc.body.append(caret);

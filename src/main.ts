@@ -27,6 +27,7 @@ import { registerMermaidEnhancer } from "./features/mermaidEnhancer";
 import { registerLinkFilter } from "./features/linkFilter";
 import { registerNewNoteDefaults } from "./features/newNoteDefaults";
 import { registerPopupWindowSizing } from "./features/popupWindowSizing";
+import { registerWindowPositionOptimization } from "./features/windowPositionOptimization";
 import { registerQuickCopyLink } from "./features/quickCopyLink";
 import { registerNotionColumns } from "./features/notionColumns";
 import { applyQuickFormatStyles, registerQuickFormat } from "./features/quickFormat";
@@ -94,6 +95,8 @@ export default class SimplePlugin extends Plugin {
   private ownsFloatingButtonOptOut = false;
 
   async onload() {
+    document.body.classList.add("simple-one-active");
+    this.register(() => document.body.classList.remove("simple-one-active"));
     await this.loadSettings();
     if (this.needsPlatformSwitchSave) await this.saveSettings();
     applyQuickFormatStyles(this);
@@ -110,7 +113,10 @@ export default class SimplePlugin extends Plugin {
     this.register(() => {
       document.body.classList.remove("simple-limit-image-height");
       document.body.style.removeProperty("--simple-image-max-height");
-      this.readableLineWidthDocuments.forEach((doc) => doc.body.style.removeProperty("--file-line-width"));
+      this.readableLineWidthDocuments.forEach((doc) => {
+        doc.body.style.removeProperty("--file-line-width");
+        doc.body.classList.remove("simple-one-active", "simple-readable-custom-tags");
+      });
       this.readableLineWidthDocuments.clear();
     });
     this.registerEvent(this.app.workspace.on("layout-change", () => {
@@ -119,8 +125,10 @@ export default class SimplePlugin extends Plugin {
     }));
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.applyImageHeightLimit()));
     this.registerEvent(this.app.workspace.on("window-open", (win) => {
+      win.doc.body.classList.add("simple-one-active");
       applyQuickFormatStyles(this, win.doc);
       this.applyReadableLineWidth(win.doc);
+      this.applyReadableCustomTagStyles();
     }));
     this.register(() => document.body.classList.remove("simple-readable-custom-tags"));
 
@@ -134,7 +142,7 @@ export default class SimplePlugin extends Plugin {
         let input = "";
         try {
           input = (await navigator.clipboard.readText()).trim();
-        } catch {}
+        } catch { /* Clipboard permission may be unavailable. */ }
         await this.activateTemplateFill(input || undefined);
       });
       ribbon.setAttr("style", "order:999;");
@@ -152,6 +160,7 @@ export default class SimplePlugin extends Plugin {
     );
     this.registerRenderedPreviewObservers();
     this.registerMarkdownPostProcessor((el) => {
+      this.decorateCustomTags(el);
       refreshRenderedHtmlPreviews(el, this.settings.enableHtmlPreview, this.settings.htmlPreviewRules);
     });
 
@@ -175,6 +184,7 @@ export default class SimplePlugin extends Plugin {
     this.refreshReformatActions = registerCurrentNoteLinkConverter(this);
     this.refreshSearchFolderControls = registerSearchFolderFilter(this);
     this.refreshPopupWindowSizing = registerPopupWindowSizing(this);
+    registerWindowPositionOptimization(this);
 
     this.addSettingTab(new SimpleSettingTab(this.app, this));
   }
@@ -337,7 +347,17 @@ export default class SimplePlugin extends Plugin {
   }
 
   applyReadableCustomTagStyles(): void {
-    document.body.classList.toggle("simple-readable-custom-tags", this.settings.enableReadableCustomTags);
+    const docs = new Set<Document>([document]);
+    this.app.workspace.iterateAllLeaves((leaf) => docs.add(leaf.getContainer().doc));
+    for (const doc of docs) {
+      doc.body.classList.toggle("simple-readable-custom-tags", this.settings.enableReadableCustomTags);
+      this.decorateCustomTags(doc.body);
+    }
+  }
+
+  private decorateCustomTags(root: HTMLElement): void {
+    root.querySelectorAll<HTMLElement>("thinking,think,content,todo,seeds,events").forEach((element) =>
+      element.classList.add(`simple-custom-${element.tagName.toLowerCase()}`));
   }
 
   applyReadableLineWidth(doc: Document = document): void {
@@ -374,7 +394,7 @@ export default class SimplePlugin extends Plugin {
       leaf = workspace.getRightLeaf(false);
       if (leaf) await leaf.setViewState({ type: VIEW_TYPE, active: true });
     }
-    if (leaf) workspace.revealLeaf(leaf);
+    if (leaf) await workspace.revealLeaf(leaf);
     if (input && leaf?.view instanceof TemplateFillView) leaf.view.setInput(input);
   }
 

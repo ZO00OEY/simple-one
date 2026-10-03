@@ -4,7 +4,7 @@ export function readCalloutColor(type: string, context: HTMLElement = document.b
   const doc = context.ownerDocument;
   const win = doc.defaultView;
   if (!win) return "";
-  const probe = doc.createElement("div");
+  const probe = doc.win.createDiv();
   probe.className = "markdown-preview-view markdown-rendered";
   probe.setAttribute("aria-hidden", "true");
   probe.setCssStyles({
@@ -15,27 +15,27 @@ export function readCalloutColor(type: string, context: HTMLElement = document.b
     height: "0",
     overflow: "hidden",
   });
-  const callout = doc.createElement("div");
+  const callout = doc.win.createDiv();
   callout.className = "callout";
   callout.dataset.callout = type.trim().toLowerCase() || "note";
   callout.dataset.calloutFold = "";
   callout.dataset.calloutMetadata = "";
-  const title = doc.createElement("div");
+  const title = doc.win.createDiv();
   title.className = "callout-title";
-  const icon = doc.createElement("div");
+  const icon = doc.win.createDiv();
   icon.className = "callout-icon";
-  const svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+  const svg = doc.win.createSvg("svg");
   svg.classList.add("svg-icon");
   svg.setAttribute("stroke", "currentColor");
   svg.setAttribute("fill", "none");
   icon.append(svg);
-  const titleText = doc.createElement("div");
+  const titleText = doc.win.createDiv();
   titleText.className = "callout-title-inner";
   titleText.textContent = type;
   title.append(icon, titleText);
-  const content = doc.createElement("div");
+  const content = doc.win.createDiv();
   content.className = "callout-content";
-  content.append(doc.createElement("p"));
+  content.append(doc.win.createEl("p"));
   callout.append(title, content);
   probe.append(callout);
   (context.querySelector<HTMLElement>(".markdown-preview-sizer, .cm-sizer") ?? context).append(probe);
@@ -51,7 +51,7 @@ export function readCalloutColor(type: string, context: HTMLElement = document.b
 
 export function readCalloutColorHex(type: string, context: HTMLElement = document.body): string {
   const color = readCalloutColor(type, context);
-  const canvas = context.ownerDocument.createElement("canvas");
+  const canvas = context.ownerDocument.win.createEl("canvas");
   canvas.width = canvas.height = 1;
   const paint = canvas.getContext("2d");
   if (!paint || !color) return "";

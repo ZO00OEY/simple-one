@@ -1,5 +1,42 @@
 # Simple One
 
+Simple One brings note formatting, pasted-link processing, daily notes, calendars,
+webpage capture, attachment organization, and display tools into one Obsidian plugin.
+The settings interface is in Chinese. Desktop and mobile options are configurable separately.
+
+## Installation
+
+Open the [official plugin listing](https://community.obsidian.md/plugins/simple-one)
+and choose **Add to Obsidian**, or search for **Simple One** in community plugins.
+For manual installation, download `main.js`, `manifest.json`, and `styles.css` from
+[Releases](https://github.com/ZO00OEY/simple-one/releases), place them in the
+`simple-one` folder inside the `plugins` folder of your vault configuration directory,
+and enable Simple One in Obsidian. Do not overwrite your existing `data.json`.
+
+## Usage
+
+Open **Settings → Simple One** to enable the tools you need. Use the note-header
+actions for formatting and link copying, the diary view for daily notes and reminders,
+and the capture view to turn a URL into a note. Configure output folders and website
+rules before capturing content. Assign the two-column command shortcut yourself
+in Obsidian hotkey settings; the plugin does not assign a default shortcut.
+
+Attachment tools show a review list before applying changes and ask for confirmation.
+Deletion follows the trash preference selected in **Files and links**.
+The desktop window-position option keeps settings and community-plugin popout
+windows inside the usable monitor area.
+
+## Data and access
+
+- Settings are saved locally through the Obsidian plugin data API.
+- Attachment and diary tools enumerate and read vault files and may create or modify files.
+- Link and capture tools access the clipboard and the websites requested by the user.
+- The Notebook Navigator integration may read its selected-folder value from local storage.
+- Base64 decoding is used to extract inline images into attachment files.
+- No analytics service or plugin server receives vault contents.
+
+## 中文使用说明
+
 Simple One 将常用的笔记排版、链接处理、日历日记、网页采集与显示工具集中在一起。所有功能都可以在 **设置 → Simple One** 中按需配置，设置界面使用中文。
 
 ## 功能一览

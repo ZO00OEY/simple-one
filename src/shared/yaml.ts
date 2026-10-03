@@ -5,7 +5,7 @@ export function toYamlValue(value: string): string {
     return "|\n" + value.split("\n").map((line) => "  " + line).join("\n");
   }
 
-  if (/[:"'{}\[\],&#!|>%@`]/.test(value) || value.includes("---")) {
+  if (/[:"'{}[\],&#!|>%@`]/.test(value) || value.includes("---")) {
     return `"${value.replace(/"/g, '\\"')}"`;
   }
 

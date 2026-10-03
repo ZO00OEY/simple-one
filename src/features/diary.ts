@@ -1,3 +1,4 @@
+import { runAsync } from "../shared/async";
 import {
   App,
   ItemView,
@@ -152,13 +153,13 @@ export class DiaryView extends ItemView {
       text: "今天",
       attr: { title: "回到今天", "aria-label": "回到今天" },
     });
-    todayButton.addEventListener("click", async () => {
+    todayButton.addEventListener("click", runAsync(async () => {
       const today = startOfDay(new Date());
       this.selectedDate = today;
       this.visibleDate = startOfMonth(today);
       await openOrCreateDiaryNote(this.plugin, today);
       this.render();
-    });
+    }));
     const nextMonth = navigator.createEl("button", {
       cls: "simple-diary-month-nav-button",
       attr: { title: "下个月", "aria-label": "下个月" },
@@ -259,12 +260,12 @@ export class DiaryView extends ItemView {
         if (this.showRecurringPanel && hasActiveRecurringRuleOnDate(this.plugin.settings.diary.recurringRules, day)) {
           button.addClass("has-recurring-plan");
         }
-        button.addEventListener("click", async () => {
+        button.addEventListener("click", runAsync(async () => {
           this.selectedDate = startOfDay(day);
           this.visibleDate = startOfMonth(day);
           await openOrCreateDiaryNote(this.plugin, day);
           this.render();
-        });
+        }));
       }
     }
     if (this.showCalendarAnnotations) {
@@ -331,9 +332,9 @@ export class DiaryView extends ItemView {
       attr: { title: "待办追踪", "aria-label": "待办追踪" },
     });
     setIcon(refresh, "refresh-cw");
-    refresh.addEventListener("click", async () => {
+    refresh.addEventListener("click", runAsync(async () => {
       await carryUnfinishedToActiveDiary(this.plugin);
-    });
+    }));
 
     const recurring = toolbar.createEl("button", {
       cls: this.showRecurringPanel ? "simple-diary-icon-button is-active" : "simple-diary-icon-button",
@@ -733,14 +734,6 @@ function scheduleStatusKind(status: DayScheduleStatus): "假" | "调" | null {
   return null;
 }
 
-function compactStatusLabel(kind: "假" | "调"): string {
-  return kind;
-}
-
-function calendarStatusLabel(kind: "假" | "调"): string {
-  return kind === "假" ? "放假" : "调休";
-}
-
 function isDayOffStatus(status: DayScheduleStatus): boolean {
   return status === "day-off" || status === "company-day-off" || status === "half-day";
 }
@@ -828,14 +821,14 @@ class DiaryRecurringRuleModal extends Modal {
     cancel.addEventListener("click", () => this.close());
     const save = footer.createEl("button", { cls: "mod-cta" });
     save.setText("保存");
-    save.addEventListener("click", async () => {
+    save.addEventListener("click", runAsync(async () => {
       if (!this.draft.text.trim()) {
         new Notice("请先填写周期计划内容");
         return;
       }
       await this.onSave(cleanRecurringRule(this.draft));
       this.close();
-    });
+    }));
   }
 
   private renderScheduleControls(): void {
@@ -928,7 +921,7 @@ export async function openDiaryView(plugin: SimplePlugin): Promise<void> {
     leaf = workspace.getRightLeaf(false);
     if (leaf) await leaf.setViewState({ type: DIARY_VIEW_TYPE, active: true });
   }
-  if (leaf) workspace.revealLeaf(leaf);
+  if (leaf) await workspace.revealLeaf(leaf);
 }
 
 async function openOrCreateDiaryNote(plugin: SimplePlugin, date: Date): Promise<TFile | null> {
@@ -944,7 +937,7 @@ async function openOrCreateDiaryNote(plugin: SimplePlugin, date: Date): Promise<
   const automated = await applyDiaryAutomation(plugin, date, content);
   const file = await plugin.app.vault.create(path, automated.content);
   await plugin.app.workspace.getLeaf().openFile(file);
-  const notice = document.createDocumentFragment();
+  const notice = createFragment();
   notice.append(document.createTextNode(`已创建日记：${path}`));
   new Notice(notice);
   return file;
@@ -1985,10 +1978,6 @@ function getNthWeekdayInMonth(date: Date): number {
   return Math.floor((date.getDate() - 1) / 7) + 1;
 }
 
-function getQuarter(date: Date): number {
-  return Math.floor(date.getMonth() / 3) + 1;
-}
-
 function monthName(date: Date, appearance: CalendarAppearance): string {
   return makeMoment(date)
     .locale(appearance.locale)
@@ -1996,7 +1985,7 @@ function monthName(date: Date, appearance: CalendarAppearance): string {
 }
 
 function dateFromDiaryPath(path: string): Date | null {
-  const match = path.match(/(?:^|\/)(\d{4})\/(\d{2})\/(\d{2})(?: [^\/]+)?\.md$/);
+  const match = path.match(/(?:^|\/)(\d{4})\/(\d{2})\/(\d{2})(?: [^/]+)?\.md$/);
   if (!match) return null;
   return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
 }

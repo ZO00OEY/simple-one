@@ -5,6 +5,7 @@ export type SwitchStates = SimplePluginSettings["mobileSwitches"];
 const SHARED_DISPLAY_FEATURES = new Set([
   "enableNotionColumns",
   "enableImageZoom",
+  "enableWindowPositionOptimization",
   "enableMermaidEnhancer",
   "enableColorPreview",
   "enableHtmlPreview",
@@ -50,7 +51,7 @@ export function collectSwitchStates(settings: SimplePluginSettings): SwitchState
   const states: SwitchStates = {};
   visitSwitches(settings, (parent, key, path) => {
     const value = parent[key];
-    states[path] = Array.isArray(value) ? [...value] as string[] : value as boolean;
+    states[path] = Array.isArray(value) ? value.filter((item: unknown): item is string => typeof item === "string") : value as boolean;
   });
   return states;
 }

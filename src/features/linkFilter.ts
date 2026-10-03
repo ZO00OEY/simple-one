@@ -1,3 +1,4 @@
+import { reportError } from "../shared/async";
 // ============================================================
 // Feature: URL paste handling — link filter + title fetch
 // ============================================================
@@ -32,6 +33,7 @@ export function registerLinkFilter(plugin: SimplePlugin): void {
     plugin.app.workspace.on(
       "editor-paste",
       (evt: ClipboardEvent, editor: Editor) => {
+        if (evt.defaultPrevented) { plainTextPasteShortcutPressed = false; return; }
         const usedPlainTextPasteShortcut = plainTextPasteShortcutPressed;
         plainTextPasteShortcutPressed = false;
         const clipboardText = evt.clipboardData?.getData("text/plain") ?? "";
@@ -80,10 +82,10 @@ export function registerLinkFilter(plugin: SimplePlugin): void {
           evt.preventDefault();
           const cursor = editor.getCursor();
           new Notice("正在整理粘贴内容里的链接...");
-          convertTextLinks(plugin, text).then(({ text: converted, changed }) => {
+          void convertTextLinks(plugin, text).then(({ text: converted, changed }) => {
             editor.replaceRange(converted, cursor);
             new Notice(changed > 0 ? `已整理 ${changed} 个链接` : "没有发现需要整理的链接");
-          });
+          }).catch(reportError);
           return;
         }
         evt.preventDefault();
@@ -91,7 +93,7 @@ export function registerLinkFilter(plugin: SimplePlugin): void {
         const cursor = editor.getCursor();
         const placeholder = `[⏳ 获取标题中...](${url})`;
         editor.replaceRange(placeholder, cursor);
-        fetchPageTitle(url).then((title) => {
+        void fetchPageTitle(url).then((title) => {
           const filtered = applyRules(url, title ?? url, plugin.settings.filterRules);
           const result = `[${filtered}](${url})`;
           const line = editor.getLine(cursor.line);
@@ -104,7 +106,7 @@ export function registerLinkFilter(plugin: SimplePlugin): void {
             );
             editor.setCursor({ line: cursor.line, ch: index + result.length });
           }
-        });
+        }).catch(reportError);
       }
     )
   );
@@ -136,7 +138,7 @@ export function parseObsidianUri(uri: string): string {
       const filename = decoded.split("/").pop()?.replace(/\.md$/i, "") ?? decoded;
       return `[[${filename}]]`;
     }
-  } catch {}
+  } catch { /* Clipboard permission may be unavailable. */ }
   return uri;
 }
 
@@ -272,7 +274,7 @@ async function reformatPastedTextBeforeInsert(
 }
 
 function escapeMarkdownLinkText(text: string): string {
-  return text.replace(/[\[\]\\]/g, "\\$&").replace(/\n+/g, " ").trim();
+  return text.replace(/[[\]\\]/g, "\\$&").replace(/\n+/g, " ").trim();
 }
 
 async function insertFilteredLink(plugin: SimplePlugin, url: string): Promise<void> {

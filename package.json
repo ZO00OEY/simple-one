@@ -1,20 +1,32 @@
 {
   "name": "simple-one",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "A collection of practical Obsidian tools",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "lint": "eslint src --max-warnings 0 && node scripts/check-css.mjs",
+    "check": "npm run lint && npm run test && npm run build",
+    "test": "node scripts/smoke.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "esbuild": "^0.28.2",
-    "obsidian": "^1.4.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-obsidianmd": "^0.4.2",
+    "obsidian": "^1.13.1",
+    "postcss": "^8.5.28",
+    "postcss-selector-parser": "^7.1.6",
     "typescript": "^5.0.0"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",
+    "@codemirror/state": "6.5.0",
+    "@codemirror/view": "6.38.6",
     "lunar-javascript": "^1.7.7"
+  },
+  "overrides": {
+    "moment": "^2.31.0"
   }
 }

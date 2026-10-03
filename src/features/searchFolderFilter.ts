@@ -214,7 +214,7 @@ export function registerSearchFolderFilter(plugin: SimplePlugin): () => void {
     }
     if (!plugin.settings.searchFolders.enabled) return;
     for (const leaf of plugin.app.workspace.getLeavesOfType("search")) {
-      inject(leaf.view as unknown as SearchViewLike);
+      inject(leaf.view);
     }
     applyAll();
     syncAllUi();

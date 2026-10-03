@@ -131,7 +131,7 @@ function getNotebookNavigatorPluginFolderPath(plugin: SimplePlugin): string | nu
 function parseStoredString(value: string | null): string {
   if (!value) return "";
   try {
-    const parsed = JSON.parse(value);
+    const parsed: unknown = JSON.parse(value);
     return typeof parsed === "string" ? parsed : "";
   } catch {
     return value;

@@ -57,9 +57,8 @@ function replaceInsideUrlProtectedText(text: string, regex: RegExp, replacement:
     return token;
   });
   const replaced = protectedText.replace(regex, replacement);
-  return replaced.replace(/\u0000SIMPLE_URL_LINE_(\d+)\u0000/g, (_, index: string) => {
-    return protectedLines[Number(index)] ?? "";
-  });
+  return protectedLines.reduce((value, line, index) =>
+    value.split(`\u0000SIMPLE_URL_LINE_${index}\u0000`).join(line), replaced);
 }
 
 function isBlankLineCompressionRule(rule: TextReformatRule): boolean {

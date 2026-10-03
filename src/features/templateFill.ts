@@ -1,3 +1,4 @@
+import { runAsync } from "../shared/async";
 import {
   App,
   htmlToMarkdown,
@@ -69,7 +70,7 @@ export class TemplateFillView extends ItemView {
   private searchGroups: SearchGroup[] = [];
   private lastSearchQuery = "";
   private searchFilterKey = "all";
-  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private debounceTimer: number | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: SimplePlugin) {
     super(leaf);
@@ -102,14 +103,14 @@ export class TemplateFillView extends ItemView {
         void this.searchByTitle(input);
       }
     });
-    this.urlInput.addEventListener("contextmenu", async (event) => {
+    this.urlInput.addEventListener("contextmenu", runAsync(async (event) => {
       event.preventDefault();
       const text = await navigator.clipboard.readText();
       if (text) {
         this.urlInput.value = text;
         this.urlInput.dispatchEvent(new Event("input"));
       }
-    });
+    }));
 
     this.infoEl = container.createDiv({
       attr: { style: "margin-top:10px; padding:8px; background:var(--background-secondary); border-radius:6px; font-size:0.85em; line-height:1.6; flex-shrink:0;" },
@@ -124,7 +125,7 @@ export class TemplateFillView extends ItemView {
     this.createBtn.setText("新建文件");
     this.createBtn.addClass("mod-cta");
     this.createBtn.disabled = true;
-    this.createBtn.addEventListener("click", () => this.onCreateFile());
+    this.createBtn.addEventListener("click", runAsync(async () => this.onCreateFile()));
   }
 
   async onClose(): Promise<void> {}
@@ -137,7 +138,7 @@ export class TemplateFillView extends ItemView {
   }
 
   private onUrlChange(): void {
-    if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    if (this.debounceTimer) window.clearTimeout(this.debounceTimer);
 
     const input = this.urlInput.value.trim();
     const url = normalizeInputUrl(input);
@@ -181,7 +182,7 @@ export class TemplateFillView extends ItemView {
       this.infoEl.createDiv({ text: `输出：${result.cat.outputFolder || "当前库根目录"}` });
       this.infoEl.createDiv({ text: `匹配网站：${result.pattern}` });
 
-      this.debounceTimer = setTimeout(() => this.fetchPreview(url, result.siteRule), 500);
+      this.debounceTimer = window.setTimeout(runAsync(async () => this.fetchPreview(url, result.siteRule)), 500);
     } else {
       this.matchedCat = null;
       this.matchedFields = [];
@@ -209,7 +210,7 @@ export class TemplateFillView extends ItemView {
   }
 
   private async searchByTitle(query: string): Promise<void> {
-    if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    if (this.debounceTimer) window.clearTimeout(this.debounceTimer);
     this.matchedCat = null;
     this.matchedFields = [];
     this.matchedRule = null;
@@ -657,7 +658,7 @@ export class TemplateFillView extends ItemView {
     this.previewEl.querySelectorAll("[data-field]").forEach((element) => {
       const name = element.getAttribute("data-field");
       if (!name) return;
-      editedFields[name] = element instanceof HTMLTextAreaElement
+      editedFields[name] = element.instanceOf(HTMLTextAreaElement)
         ? element.value
         : (element as HTMLInputElement).value;
     });
@@ -796,7 +797,7 @@ function applyFieldRegex(raw: string, field: FieldExtraction): string {
       const match = raw.match(regex);
       if (match) {
         if (field.replaceWith) {
-          raw = field.replaceWith.replace(/\$(\d+)/g, (_, number) => match[parseInt(number)] || "");
+          raw = field.replaceWith.replace(/\$(\d+)/g, (_: string, number: string) => match[parseInt(number)] || "");
         } else {
           const groups = match.slice(1).filter((group) => group !== undefined);
           raw = groups.length > 0 ? groups.join("") : match[0];
@@ -1151,7 +1152,7 @@ async function searchFanqieRenderedPage(
 }
 
 function stringFromUnknown(value: unknown): string {
-  return typeof value === "string" ? value : value === undefined || value === null ? "" : String(value);
+  return typeof value === "string" ? value : typeof value === "number" || typeof value === "boolean" || typeof value === "bigint" ? String(value) : "";
 }
 
 function cleanFanqieSearchText(value: unknown): string {
@@ -1159,7 +1160,7 @@ function cleanFanqieSearchText(value: unknown): string {
     .replace(/<[^>]*>/g, "")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
-    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060\uFEFF\uFFFC\uFFFD]/g, "")
+    .replace(/\p{Cc}|[\u200B-\u200F\u202A-\u202E\u2060\uFEFF\uFFFC\uFFFD]/gu, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1213,7 +1214,7 @@ function selectSearchText(root: HTMLElement, selector: string): string {
 function selectSearchHref(root: HTMLElement, selector: string): string {
   const element = selectSearchElement(root, selector);
   if (!element) return "";
-  if (element instanceof HTMLAnchorElement) return element.getAttribute("href") || element.href || "";
+  if (element.instanceOf(HTMLAnchorElement)) return element.getAttribute("href") || element.href || "";
   return element.getAttribute("href") || element.querySelector<HTMLAnchorElement>("a")?.href || "";
 }
 
@@ -1281,7 +1282,7 @@ function resolvePageUrlFrom(
       const match = sourcePage.html.match(new RegExp(rule.regex));
       if (!match) return null;
       const nextUrl = rule.replaceWith
-        ? rule.replaceWith.replace(/\$(\d+)/g, (_, number) => match[parseInt(number)] || "")
+        ? rule.replaceWith.replace(/\$(\d+)/g, (_: string, number: string) => match[parseInt(number)] || "")
         : match[1] || match[0];
       return absolutizeUrl(nextUrl, sourcePage.url);
     } catch {
@@ -1632,7 +1633,8 @@ function readJsonString(html: string, key: string): string {
   const match = html.match(new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`));
   if (!match) return "";
   try {
-    return JSON.parse(`"${match[1]}"`).trim();
+    const value: unknown = JSON.parse(`"${match[1]}"`);
+    return typeof value === "string" ? value.trim() : "";
   } catch {
     return match[1].replace(/\\r\\n|\\n|\\r/g, "\n").trim();
   }

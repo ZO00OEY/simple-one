@@ -1,3 +1,4 @@
+import { confirmAction } from "../shared/confirm";
 import { Modal, Notice, TFile, TFolder, normalizePath } from "obsidian";
 import type SimplePlugin from "../main";
 import { applyModalScale, getMainAppWindow } from "../shared/popupSizing";
@@ -279,8 +280,8 @@ function isFixedFolderSource(
   if (isPathInside(source.path, location.folder)) return false;
   const templateFolder = plugin.getTemplateFolder();
   return (!templateFolder || !isPathInside(source.path, templateFolder))
-    && source.path !== ".obsidian"
-    && !source.path.startsWith(".obsidian/");
+    && source.path !== plugin.app.vault.configDir
+    && !source.path.startsWith(`${plugin.app.vault.configDir}/`);
 }
 
 function attachmentNameBaseForSource(plugin: SimplePlugin, source: TFile, ambiguousNameBases: Set<string>): string {
@@ -335,7 +336,7 @@ function topLevelForSource(plugin: SimplePlugin, source: TFile, location = readO
   if (templateFolder && isPathInside(source.path, templateFolder)) return null;
   const top = parts[0];
   const attachmentTop = location.mode === "fixed-folder" ? location.folder.split("/")[0] : "";
-  const excluded = new Set([attachmentTop, ".obsidian"]);
+  const excluded = new Set([attachmentTop, plugin.app.vault.configDir.split("/")[0]]);
   if (!top || excluded.has(top)) return null;
   return top;
 }
@@ -493,8 +494,8 @@ class UnusedAttachmentModal extends Modal {
     this.renderActions(async () => {
       const selected = this.items.filter((item) => item.checked);
       if (!selected.length) return;
-      if (!confirm(`删除选中的 ${selected.length} 个未引用附件？`)) return;
-      for (const item of selected) await this.plugin.app.vault.trash(item.file, false);
+      if (!await confirmAction(this.plugin.app, `删除选中的 ${selected.length} 个未引用附件？`)) return;
+      for (const item of selected) await this.plugin.app.fileManager.trashFile(item.file);
       new Notice(`已删除 ${selected.length} 个附件`);
       this.close();
     });
@@ -542,7 +543,7 @@ class RenamePlanModal extends Modal {
   private async applyPlans(): Promise<void> {
     const selected = this.plans.filter((plan) => plan.checked);
     if (!selected.length) return;
-    if (!confirm(`重命名/移动选中的 ${selected.length} 张图片？`)) return;
+    if (!await confirmAction(this.plugin.app, `重命名/移动选中的 ${selected.length} 张图片？`)) return;
     document.body.classList.add("simple-hide-notices");
     try {
       for (let index = 0; index < selected.length; index++) {
@@ -592,7 +593,7 @@ class AttachmentOrganizationModal extends Modal {
   private async applyPlans(): Promise<void> {
     const selected = this.plans.filter((plan) => plan.checked);
     if (!selected.length) return;
-    if (!confirm(`将选中的 ${selected.length} 个附件按笔记归位？`)) return;
+    if (!await confirmAction(this.plugin.app, `将选中的 ${selected.length} 个附件按笔记归位？`)) return;
     document.body.classList.add("simple-hide-notices");
     try {
       for (let index = 0; index < selected.length; index++) {
@@ -640,7 +641,7 @@ class InlineImagePlanModal extends Modal {
   private async applyPlans(): Promise<void> {
     const selected = this.plans.filter((plan) => plan.checked);
     if (!selected.length) return;
-    if (!confirm(`将选中的 ${selected.length} 张内嵌图片保存为附件？`)) return;
+    if (!await confirmAction(this.plugin.app, `将选中的 ${selected.length} 张内嵌图片保存为附件？`)) return;
 
     try {
       for (let index = 0; index < selected.length; index++) {

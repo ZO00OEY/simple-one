@@ -68,7 +68,7 @@ export function registerMermaidEnhancer(plugin: SimplePlugin): () => void {
     if (!mermaid.querySelector("svg")) return;
     if (!mermaid.closest(".markdown-reading-view, .markdown-preview-view, .markdown-rendered, .markdown-source-view.is-live-preview")) return;
 
-    const frame = mermaid.ownerDocument.createElement("div");
+    const frame = mermaid.ownerDocument.win.createDiv();
     frame.addClass(FRAME_CLASS);
     frame.dataset.mode = "fit";
     const viewport = frame.createDiv({ cls: "simple-mermaid-viewport" });
@@ -163,7 +163,7 @@ export function registerMermaidEnhancer(plugin: SimplePlugin): () => void {
   };
 
   const collectMermaids = (root: ParentNode) => {
-    if (root instanceof HTMLElement) {
+    if (root.instanceOf(HTMLElement)) {
       if (root.matches(".mermaid")) pendingMermaids.add(root);
       const owner = root.closest<HTMLElement>(".mermaid");
       if (owner) pendingMermaids.add(owner);
@@ -189,7 +189,7 @@ export function registerMermaidEnhancer(plugin: SimplePlugin): () => void {
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       mutation.addedNodes.forEach((node) => {
-        if (node instanceof HTMLElement) collectMermaids(node);
+        if (node.instanceOf(HTMLElement)) collectMermaids(node);
       });
     }
     if (pendingMermaids.size > 0) scheduleEnhance();

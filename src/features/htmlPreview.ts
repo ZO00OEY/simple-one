@@ -1,3 +1,6 @@
+import { runAsync } from "../shared/async";
+import { editorInfoField, Notice } from "obsidian";
+import { confirmAction } from "../shared/confirm";
 import { EditorState, StateEffect, StateField } from "@codemirror/state";
 import {
   Decoration,
@@ -42,14 +45,14 @@ class HtmlPreviewWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
-    const wrap = document.createElement("div");
+    const wrap = createDiv();
     wrap.className = "simple-html-preview-live-container";
     wrap.append(createHtmlPreview(this.html));
 
-    const actions = document.createElement("div");
+    const actions = createDiv();
     actions.className = "simple-html-preview-actions";
 
-    const button = document.createElement("button");
+    const button = createEl("button");
     button.className = "simple-html-preview-toggle";
     button.type = "button";
     button.textContent = this.expanded ? "\u6536\u8d77\u6e90\u7801" : "\u5c55\u5f00\u6e90\u7801";
@@ -95,20 +98,23 @@ class HtmlPreviewWidget extends WidgetType {
     });
     actions.append(cutButton);
 
-    const deleteButton = createActionButton("删除", (event) => {
+    const deleteButton = createActionButton("删除", runAsync(async (event) => {
       event.preventDefault();
       event.stopPropagation();
-      if (!confirm("删除整段 HTML 源码？")) return;
+      const doc = view.state.doc;
+      const info = view.state.field(editorInfoField, false);
+      if (!info || !await confirmAction(info.app, "删除整段 HTML 源码？")) return;
+      if (view.state.doc !== doc) { new Notice("笔记已变化，请重新选择要删除的内容。"); return; }
       view.dispatch({ changes: { from: this.from, to: this.to, insert: "" } });
-    });
+    }));
     actions.append(deleteButton);
 
     wrap.append(actions);
     if (this.expanded) {
-      const sourcePanel = document.createElement("pre");
+      const sourcePanel = createEl("pre");
       sourcePanel.className = "simple-html-preview-source-panel";
       sourcePanel.textContent = this.source;
-      const bottomActions = document.createElement("div");
+      const bottomActions = createDiv();
       bottomActions.className = "simple-html-preview-bottom-actions";
       bottomActions.append(createIconActionButton("eye-off", "\u6536\u8d77\u6e90\u7801", toggle));
       sourcePanel.append(bottomActions);
@@ -128,7 +134,7 @@ class HtmlPreviewWidget extends WidgetType {
 }
 
 function createActionButton(text: string, onPointerDown: (event: Event) => void): HTMLButtonElement {
-  const button = document.createElement("button");
+  const button = createEl("button");
   button.className = "simple-html-preview-toggle";
   button.type = "button";
   button.textContent = text;
@@ -145,7 +151,7 @@ function createIconActionButton(icon: string, label: string, onPointerDown: (eve
   button.classList.add("simple-html-preview-icon-toggle");
   button.setAttribute("aria-label", label);
   button.setAttribute("title", label);
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  const svg = createSvg("svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("width", "16");
   svg.setAttribute("height", "16");
@@ -212,7 +218,7 @@ export function observeRenderedHtmlPreviews(
   getRules: () => HtmlPreviewRule[] = () => []
 ): MutationObserver {
   const update = (node: Node) => {
-    if (!(node instanceof HTMLElement)) return;
+    if (!(node.instanceOf(HTMLElement))) return;
     if (isEnabled()) {
       decorateHtmlPreviews(node, getRules());
       decorateInlineHtmlEmbeds(node, getRules());
@@ -227,7 +233,7 @@ export function observeRenderedHtmlPreviews(
     for (const mutation of mutations) {
       for (const node of mutation.addedNodes) update(node);
       for (const node of mutation.removedNodes) {
-        if (node instanceof HTMLElement) clearPreviewStyles(node);
+        if (node.instanceOf(HTMLElement)) clearPreviewStyles(node);
       }
     }
   });
@@ -436,7 +442,7 @@ function findInlineHtmlEmbeds(root: HTMLElement): HTMLElement[] {
   const embeds = root.matches(selector)
     ? [root]
     : Array.from(root.querySelectorAll<HTMLElement>(selector));
-  return embeds.filter((embed): embed is HTMLElement => embed instanceof HTMLElement);
+  return embeds.filter((embed): embed is HTMLElement => embed.instanceOf(HTMLElement));
 }
 
 function findHtmlCodeBlocks(root: HTMLElement): HTMLPreElement[] {
@@ -451,7 +457,7 @@ function findHtmlCodeBlocks(root: HTMLElement): HTMLPreElement[] {
     : Array.from(root.querySelectorAll<HTMLElement>(selector));
 
   return blocks.filter((block): block is HTMLPreElement =>
-    block instanceof HTMLPreElement &&
+    block.instanceOf(HTMLPreElement) &&
     isHtmlCodeBlock(block) &&
     block.closest(".simple-html-preview, .simple-html-preview-live-container") === null
   );
@@ -471,8 +477,8 @@ function renderHtmlPreview(raw: string): DocumentFragment {
     .join("\n");
   sanitizeDocument(doc);
 
-  const fragment = document.createDocumentFragment();
-  const surface = document.createElement("div");
+  const fragment = createFragment();
+  const surface = createDiv();
   const scope = `simple-html-scope-${Math.random().toString(36).slice(2)}`;
   surface.className = `simple-html-preview-surface ${scope}`;
   for (const className of Array.from(doc.body.classList)) {
@@ -509,7 +515,7 @@ function clearPreviewStyles(root: HTMLElement): void {
 }
 
 function createHtmlPreview(raw: string): HTMLElement {
-  const preview = document.createElement("span");
+  const preview = createSpan();
   preview.className = "simple-html-preview";
   preview.append(renderHtmlPreview(raw));
   return preview;
@@ -633,11 +639,11 @@ function renderTxPackPanels(wrapper: HTMLElement): void {
       "";
     if (!content.trim()) return;
 
-    const tab = document.createElement("div");
+    const tab = createDiv();
     tab.className = `tx-pack-btn${isFirst ? " active" : ""}`;
     tab.textContent = tag.toUpperCase();
 
-    const panel = document.createElement("div");
+    const panel = createDiv();
     panel.className = `tx-pack-panel${isFirst ? " active" : ""}`;
     const panelDoc = new DOMParser().parseFromString(content.trim(), "text/html");
     sanitizeDocument(panelDoc);

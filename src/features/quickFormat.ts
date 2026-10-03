@@ -9,7 +9,7 @@ import { registerMarkdownAction } from "../shared/markdownAction";
 import { readCalloutColor } from "../shared/calloutColor";
 
 const ACTION_ATTR = "data-simple-quick-format";
-const STYLE_ID = "simple-quick-format-style";
+const quickFormatSheets = new WeakMap<Document, CSSStyleSheet>();
 export const QUICK_FORMAT_ICON = "heading";
 export const QUICK_FORMAT_NAME = "快速设置文本格式";
 
@@ -77,10 +77,19 @@ export function applyQuickFormatStyles(plugin: SimplePlugin, extraDoc?: Document
 
   const css = rules.join("\n");
   for (const doc of quickFormatDocuments(plugin, extraDoc)) {
-    const style = doc.getElementById(STYLE_ID) as HTMLStyleElement | null;
-    const target = style ?? doc.head.appendChild(doc.createElement("style"));
-    target.id = STYLE_ID;
-    target.textContent = css;
+    doc.getElementById("simple-quick-format-style")?.remove();
+    let sheet = quickFormatSheets.get(doc);
+    if (!sheet) {
+      sheet = new doc.win.CSSStyleSheet();
+      quickFormatSheets.set(doc, sheet);
+      doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, sheet];
+      const ownedSheet = sheet;
+      plugin.register(() => {
+        doc.adoptedStyleSheets = doc.adoptedStyleSheets.filter((item) => item !== ownedSheet);
+        quickFormatSheets.delete(doc);
+      });
+    }
+    sheet.replaceSync(css);
   }
 }
 
@@ -92,13 +101,13 @@ function quickFormatDocuments(plugin: SimplePlugin, extraDoc?: Document): Set<Do
 }
 
 function addCalloutColorRules(rules: string[], type: string, rgb: string): void {
-  const selector = `body .callout[data-callout="${cssEscape(type)}"]`;
-  rules.push(`${selector}{--callout-color:${rgb} !important;border-color:rgba(${rgb},0.35) !important;background-color:rgba(${rgb},0.08) !important;}`);
-  rules.push(`${selector}{border-inline-start-color:rgb(${rgb}) !important;}`);
-  rules.push(`${selector} .callout-title,${selector} .callout-icon{color:rgb(${rgb}) !important;}`);
-  rules.push(`${selector} .callout-icon svg{stroke:currentColor !important;}`);
-  rules.push(`body .markdown-source-view.mod-cm6 .HyperMD-callout[data-callout="${cssEscape(type)}"]{border-color:rgba(${rgb},0.18) !important;background-color:rgba(${rgb},0.08) !important;}`);
-  rules.push(`body .markdown-source-view.mod-cm6 .HyperMD-callout[data-callout="${cssEscape(type)}"] .callout-title{color:rgb(${rgb}) !important;}`);
+  const selector = `body.simple-one-active .callout[data-callout="${cssEscape(type)}"]`;
+  rules.push(`${selector}{--callout-color:${rgb};border-color:rgba(${rgb},0.35);background-color:rgba(${rgb},0.08);}`);
+  rules.push(`${selector}{border-inline-start-color:rgb(${rgb});}`);
+  rules.push(`${selector} .callout-title,${selector} .callout-icon{color:rgb(${rgb});}`);
+  rules.push(`${selector} .callout-icon svg{stroke:currentColor;}`);
+  rules.push(`body.simple-one-active .markdown-source-view.mod-cm6 .HyperMD-callout[data-callout="${cssEscape(type)}"]{border-color:rgba(${rgb},0.18);background-color:rgba(${rgb},0.08);}`);
+  rules.push(`body .markdown-source-view.mod-cm6 .HyperMD-callout[data-callout="${cssEscape(type)}"] .callout-title{color:rgb(${rgb});}`);
 }
 
 export function registerQuickFormat(plugin: SimplePlugin): () => void {
@@ -248,8 +257,8 @@ export function isHeadingMode(mode: QuickFormatMode): mode is QuickFormatHeading
 }
 
 function menuTitle(plugin: SimplePlugin, mode: QuickFormatMode, color: string): DocumentFragment {
-  const fragment = document.createDocumentFragment();
-  const label = document.createElement("span");
+  const fragment = createFragment();
+  const label = createSpan();
   label.textContent = modeLabel(plugin, mode);
 
   if (isHeadingMode(mode)) {

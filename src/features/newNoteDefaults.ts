@@ -52,7 +52,7 @@ export async function applyNewNoteDefaults(plugin: SimplePlugin, file: TFile): P
 export async function databaseProperties(plugin: SimplePlugin, databasePath: string): Promise<string[]> {
   const file = plugin.app.vault.getAbstractFileByPath(normalizePath(databasePath));
   if (!(file instanceof TFile) || file.extension !== "base") return [];
-  const yaml = parseYaml(await plugin.app.vault.read(file));
+  const yaml: unknown = parseYaml(await plugin.app.vault.read(file));
   return propertiesFromBaseModel(yaml);
 }
 
@@ -69,7 +69,7 @@ async function applyRule(plugin: SimplePlugin, file: TFile, rule: NewNoteDatabas
 
   await plugin.app.fileManager.processFrontMatter(file, (frontmatter) => {
     for (const property of properties) {
-      if (!(property in frontmatter)) frontmatter[property] = null;
+      if (!(property in frontmatter)) (frontmatter as Record<string, unknown>)[property] = null;
     }
   });
 }

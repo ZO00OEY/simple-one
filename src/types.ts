@@ -110,6 +110,7 @@ export interface SimplePluginSettings {
   enableColorPreview: boolean;
   readableLineWidth: string;
   popupWindowScale: string;
+  enableWindowPositionOptimization: boolean;
   mobileSwitches: Record<string, boolean | string[]>;
   mobileDisplay: {
     readableLineWidth: string;
@@ -670,6 +671,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   enableColorPreview: true,
   readableLineWidth: "900",
   popupWindowScale: "70",
+  enableWindowPositionOptimization: true,
   mobileSwitches: {},
   mobileDisplay: { readableLineWidth: "", imageMaxHeight: "", popupWindowScale: "0", headerButtonSize: "29", disableThemeHeaderButtons: true },
   enableMermaidEnhancer: true,

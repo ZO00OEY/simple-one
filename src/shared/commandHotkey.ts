@@ -1,7 +1,6 @@
 import { App, Platform, type Hotkey, type Modifier } from "obsidian";
 
 const COMMAND_ID = "simple-one:create-two-column-view";
-export const DEFAULT_COLUMNS_HOTKEY: Hotkey = { modifiers: ["Alt"], key: "C" };
 
 type HotkeyManager = {
   getHotkeys?: (id: string) => Hotkey[] | undefined;
@@ -34,15 +33,15 @@ export function parseCommandHotkey(value: string): Hotkey | null {
   if (modifiers.some((modifier) => !modifier) || new Set(modifiers).size !== modifiers.length) return null;
   const normalizedKey = /^arrow/i.test(key) ? `Arrow${key.slice(5, 6).toUpperCase()}${key.slice(6).toLowerCase()}`
     : key.length === 1 || /^f\d+$/i.test(key) ? key.toUpperCase() : key[0].toUpperCase() + key.slice(1).toLowerCase();
-  return { modifiers: modifiers as Modifier[], key: normalizedKey };
+  return { modifiers: modifiers, key: normalizedKey };
 }
 
 export function commandHotkeyLabel(hotkey: Hotkey): string {
   return [...hotkey.modifiers, hotkey.key].join(" + ");
 }
 
-export function currentColumnsHotkey(app: App): Hotkey {
-  return effectiveHotkeys(app, COMMAND_ID)[0] ?? DEFAULT_COLUMNS_HOTKEY;
+export function currentColumnsHotkey(app: App): Hotkey | null {
+  return effectiveHotkeys(app, COMMAND_ID)[0] ?? null;
 }
 
 function effectiveHotkeys(app: App, id: string): Hotkey[] {

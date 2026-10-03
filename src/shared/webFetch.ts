@@ -1,9 +1,5 @@
 import { requestUrl } from "obsidian";
 
-type WebviewElement = HTMLElement & {
-  executeJavaScript(script: string): Promise<string>;
-};
-
 const HTML_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
   Accept: "text/html",
@@ -105,10 +101,10 @@ function tryWebview(
 ): Promise<string | null> {
   return new Promise((resolve) => {
     try {
-      const wv = document.createElement("webview") as WebviewElement;
+      const wv = createEl("webview");
       wv.classList.add("simple-hidden-webview");
       const cleanup = (value: string | null) => {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         wv.remove();
         resolve(value);
       };

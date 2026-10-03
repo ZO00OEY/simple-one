@@ -38,7 +38,7 @@ export function observeRenderedColorPreviews(
   isEnabled: () => boolean
 ): MutationObserver {
   const update = (node: Node) => {
-    if (!(node instanceof HTMLElement)) return;
+    if (!(node.instanceOf(HTMLElement))) return;
     if (isEnabled()) {
       decorateRenderedTables(node);
     } else {
@@ -197,7 +197,7 @@ function decorateRenderedTables(root: HTMLElement): void {
 function findRenderedColorElement(wrapper: HTMLElement): HTMLElement | null {
   const directElements = Array.from(wrapper.children).filter(
     (element): element is HTMLElement =>
-      element instanceof HTMLElement &&
+      element.instanceOf(HTMLElement) &&
       !element.classList.contains("simple-color-swatch")
   );
 
@@ -224,7 +224,7 @@ function clearRenderedColorPreviews(root: HTMLElement): void {
 }
 
 function createColorSwatch(color: string, rendered = false): HTMLElement {
-  const swatch = document.createElement("span");
+  const swatch = createSpan();
   swatch.className = rendered
     ? "simple-color-swatch simple-rendered-color-swatch"
     : "simple-color-swatch";
