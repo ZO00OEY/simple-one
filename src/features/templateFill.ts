@@ -85,10 +85,10 @@ export class TemplateFillView extends ItemView {
     const container = this.containerEl.children[1];
     container.empty();
     container.addClass("simple-template-fill");
-    container.setAttr("style", "display:flex; flex-direction:column; height:100%; padding:12px 12px 60px 12px; min-width:0; overflow-x:hidden;");
 
     this.urlInput = container.createEl("textarea", {
-      attr: { style: "width:100%; height:80px; resize:none; box-sizing:border-box; flex-shrink:0;", placeholder: "直接粘贴网址，预览笔记；\n输入关键词后，Enter搜索，预览笔记" },
+      cls: "simple-template-input",
+      attr: { "aria-label": "网址或搜索关键词", placeholder: "直接粘贴网址，预览笔记\n输入关键词后，Enter 搜索并预览" },
     });
     this.urlInput.addEventListener("input", () => this.onUrlChange());
     this.urlInput.addEventListener("keydown", (event) => {
@@ -112,18 +112,15 @@ export class TemplateFillView extends ItemView {
       }
     }));
 
-    this.infoEl = container.createDiv({
-      attr: { style: "margin-top:10px; padding:8px; background:var(--background-secondary); border-radius:6px; font-size:0.85em; line-height:1.6; flex-shrink:0;" },
-    });
-    this.infoEl.setText("粘贴网址会生成笔记；输入书名后按 Enter 搜索候选。");
+    this.infoEl = container.createDiv({ cls: "simple-template-status", attr: { "aria-live": "polite" } });
 
     this.previewEl = container.createDiv({ cls: "simple-template-preview" });
 
     this.createBtn = container.createEl("button", {
-      attr: { style: "width:100%; margin-top:10px; flex-shrink:0;" },
+      cls: "simple-template-create",
     });
-    this.createBtn.setText("新建文件");
-    this.createBtn.addClass("mod-cta");
+    setIcon(this.createBtn.createSpan({ cls: "simple-template-create-icon", attr: { "aria-hidden": "true" } }), "file-plus-2");
+    this.createBtn.createSpan({ text: "新建文件" });
     this.createBtn.disabled = true;
     this.createBtn.addEventListener("click", runAsync(async () => this.onCreateFile()));
   }
@@ -143,7 +140,7 @@ export class TemplateFillView extends ItemView {
     const input = this.urlInput.value.trim();
     const url = normalizeInputUrl(input);
     if (!input) {
-      this.infoEl.setText("等待网址或书名...");
+      this.infoEl.empty();
       this.matchedCat = null;
       this.matchedFields = [];
       this.matchedRule = null;
@@ -157,7 +154,7 @@ export class TemplateFillView extends ItemView {
       this.matchedFields = [];
       this.matchedRule = null;
       this.createBtn.disabled = true;
-      this.infoEl.setText("检测到文字，按 Enter 在已配置的网站中搜索书名。");
+      this.infoEl.empty();
       this.previewEl.removeClass("is-active");
       return;
     }

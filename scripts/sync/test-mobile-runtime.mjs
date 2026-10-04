@@ -12,7 +12,7 @@ const folder = await mkdtemp(join(output, "mobile-runtime-test-"));
 try {
   const bundle = join(folder, "runtime.cjs");
   await esbuild.build({ stdin: {
-    contents: 'export { default as LinkPlugin } from "./src/features/sync/index"; export { MobileGithub } from "./src/features/sync/mobileGithub"; export { extractRepositoryArchive } from "./src/features/sync/repositoryArchive"; export { blobSha } from "./src/features/sync/linkDiff"; export { ZoeySyncConflictPreviewModal } from "./src/features/sync/conflictPreview"; export { textParts, resolveTextParts } from "./src/features/sync/textDiff";',
+    contents: 'export { default as LinkPlugin, SyncSettingsTab } from "./src/features/sync/index"; export { MobileGithub } from "./src/features/sync/mobileGithub"; export { extractRepositoryArchive } from "./src/features/sync/repositoryArchive"; export { blobSha } from "./src/features/sync/linkDiff"; export { ZoeySyncConflictPreviewModal } from "./src/features/sync/conflictPreview"; export { textParts, resolveTextParts } from "./src/features/sync/textDiff";',
     resolveDir: process.cwd()
   }, bundle: true, platform: "browser", format: "cjs", external: ["obsidian"],
     loader: { ".png": "dataurl" }, outfile: bundle });
@@ -37,11 +37,51 @@ try {
     vm.runInContext(source, context);
     assert.deepEqual(nodeLoads, [], `${platform}: plugin loads without Node modules`);
     const { LinkPlugin, MobileGithub, extractRepositoryArchive, blobSha, ZoeySyncConflictPreviewModal, textParts, resolveTextParts } = context.module.exports;
+    let sideLeaf, revealed = 0, refreshed = 0, created = 0;
+    const states = [];
+    const sidebar = { settings: { enabled: true }, app: { workspace: {
+      getLeavesOfType: () => sideLeaf ? [sideLeaf] : [],
+      getRightLeaf: separate => { assert.equal(separate, false); created++; return sideLeaf = { setViewState: async state => states.push(state) }; },
+      revealLeaf: async () => { revealed++; }
+    } }, refreshSyncView: async () => { refreshed++; } };
+    await LinkPlugin.prototype.openSyncView.call(sidebar, false, false);
+    assert.equal(states[0].active, false, `${platform}: startup adds the sidebar without opening it`);
+    await LinkPlugin.prototype.openSyncView.call(sidebar, false, false);
+    assert.equal(created, 1); assert.equal(revealed, 0);
+    await LinkPlugin.prototype.openSyncView.call(sidebar);
+    assert.equal(revealed, 1); assert.equal(refreshed, 1);
     const zip = zipSync({ 'vault/note.md': new TextEncoder().encode('mobile archive'),
       'vault/.obsidian/plugins/unselected/main.js': new TextEncoder().encode('excluded plugin') });
     const extracted = await extractRepositoryArchive(zip, { 'note.md': { sha: 'fixture', mode: '100644' } }, () => {});
     assert.equal(extracted.size, 1);
     assert.equal(new TextDecoder().decode(extracted.get('note.md')), 'mobile archive');
+    const oversizedZip = zipSync({
+      'vault/note.md': new TextEncoder().encode('selected from large archive'),
+      'vault/excluded.bin': new Uint8Array(65 * 1024 * 1024)
+    }, { level: 0 });
+    assert(oversizedZip.length > 64 * 1024 * 1024);
+    let oversizedConsumed = 0;
+    const oversizedResult = await extractRepositoryArchive(oversizedZip,
+      { 'note.md': { sha: 'fixture', mode: '100644' } }, () => {}, async (path, bytes) => {
+        assert.equal(path, 'note.md');
+        assert.equal(new TextDecoder().decode(bytes), 'selected from large archive');
+        oversizedConsumed++;
+      });
+    assert.equal(oversizedConsumed, 1, 'large archives still extract only the selected file');
+    assert.equal(oversizedResult.size, 0, 'large archive results are consumed rather than retained');
+    const payload = new Uint8Array(2 * 1024 * 1024);
+    const largeFiles = Object.fromEntries(Array.from({ length: 80 }, (_, index) => [`vault/${index}.bin`, payload]));
+    const selectedFiles = Object.fromEntries(Array.from({ length: 80 }, (_, index) => [`${index}.bin`, { sha: 'fixture', mode: '100644' }]));
+    let consumed = 0;
+    const retained = await extractRepositoryArchive(zipSync(largeFiles), selectedFiles, () => {}, async (_path, bytes) => {
+      assert.equal(bytes.length, payload.length);
+      consumed++;
+      await Promise.resolve();
+    });
+    assert.equal(consumed, 80, '160 MiB is handled in batches rather than retained cumulatively');
+    assert.equal(retained.size, 0, 'consumed archive results are not kept in the returned map');
+    await assert.rejects(extractRepositoryArchive(zipSync({ 'vault/note.md': payload }), { 'note.md': { sha: 'fixture', mode: '100644' } },
+      () => {}, async () => { throw new Error('staging disk failure'); }), /staging disk failure/);
     const unsafe = zipSync({ 'vault/../outside.md': new TextEncoder().encode('unsafe') });
     await assert.rejects(extractRepositoryArchive(unsafe, {}, () => {}), /路径/);
     assert.equal(typeof LinkPlugin, "function");
@@ -51,6 +91,27 @@ try {
       saveSettings: async () => {}, pruneErrorLogs: () => {} };
     await LinkPlugin.prototype.loadSettings.call(settingsPlugin);
     assert.deepEqual(Array.from(settingsPlugin.settings.ignorePatterns), stored.ignorePatterns, "explicit ignore choices are preserved");
+    const history = { step: 4, complete: true, repoUrl: "https://github.com/example/vault.git", branch: "main", login: "example" };
+    stored = { lightweightGuideProgress: history };
+    await LinkPlugin.prototype.loadSettings.call(settingsPlugin);
+    assert.equal(JSON.stringify(settingsPlugin.settings.lightweightGuideProgress), JSON.stringify(history), "guide history survives loading settings");
+    let savedProgress;
+    const guide = { plugin: { settings: { lightweightGuideProgress: history, desktopGitEnabled: true },
+      saveSettings: async () => { savedProgress = JSON.parse(JSON.stringify(guide.plugin.settings.lightweightGuideProgress)); } },
+      lightweightGuideDraft: { repoUrl: history.repoUrl, branch: history.branch, token: "not-in-progress" }, lightweightGuideLogin: "example" };
+    await context.module.exports.SyncSettingsTab.prototype.saveLightweightGuideProgress.call(guide, 3);
+    assert.equal(savedProgress.complete, true, "revisiting an earlier step preserves completion");
+    assert.equal(savedProgress.step, 4);
+    assert.equal(guide.plugin.settings.desktopGitEnabled, true, "recording guide progress does not switch sync modes");
+    assert(!JSON.stringify(savedProgress).includes("not-in-progress"), "progress contains no additional credential copy");
+    guide.lightweightGuideDraft.repoUrl = "https://github.com/example/new-vault.git";
+    await context.module.exports.SyncSettingsTab.prototype.saveLightweightGuideProgress.call(guide, 3);
+    assert.equal(savedProgress.complete, false, "a different repository does not inherit completion");
+    assert.equal(savedProgress.step, 3);
+    const beforeFailedSave = guide.plugin.settings.lightweightGuideProgress;
+    guide.plugin.saveSettings = async () => { throw new Error("disk unavailable"); };
+    await assert.rejects(context.module.exports.SyncSettingsTab.prototype.saveLightweightGuideProgress.call(guide, 4), /disk unavailable/);
+    assert.equal(guide.plugin.settings.lightweightGuideProgress, beforeFailedSave, "failed progress saves restore the previous state");
     stored = {};
     await LinkPlugin.prototype.loadSettings.call(settingsPlugin);
     assert(settingsPlugin.settings.ignorePatterns.includes(".custom/cache/"));

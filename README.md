@@ -1,6 +1,6 @@
 # Simple One
 
-English | [中文介绍](README.zh-CN.md) | [User guide](USAGE.md) | [中文使用说明](USAGE.zh-CN.md)
+English | [简体中文](README.zh-CN.md)
 
 Everyday tools for writing, organizing, syncing, and sharing in Obsidian.
 Simple One brings them together in one plugin, with features you can enable as needed.
@@ -12,11 +12,11 @@ Simple One brings them together in one plugin, with features you can enable as n
 - **Calendar and daily notes:** Write daily notes, carry forward unfinished tasks, and keep track of recurring reminders, anniversaries, and holidays.
 - **Reading and display:** Adjust text width and image size, use columns, enlarge images, and preview HTML, colors, and diagrams.
 - **Attachments and organization:** Find unused attachments, organize file names and locations, filter search folders, and fill properties for new notes.
-- **Vault sync:** Full Git sync for desktop backups and history, plus lightweight sync for phones and computers without installing Git.
-- **Public note sharing:** Publish selected notes from your existing vault to a GitHub Pages website, with stable links, a sharing sidebar, and customizable HTML templates.
+- **Vault sync:** Desktop Git backups and history, plus lightweight sync for phones and computers without Git. Review differences, resolve conflicts, choose how to combine both sides, and resume large downloads.
+- **Public note sharing:** Publish selected notes to GitHub Pages, with optional Tencent EdgeOne hosting. Keep stable links, organize public folders and names, choose what to copy, and customize the website with HTML templates. Publishing works on desktop and mobile.
 - **Desktop conveniences:** Copy note links or file paths and keep supported popout windows within the screen.
 
-Desktop and mobile display options can be configured separately. The settings interface is currently in Chinese. Publishing shared notes requires desktop; the website can be read on any device.
+Desktop and mobile display options can be configured separately. The settings interface is currently in Chinese. Token-based sharing and EdgeOne authorization require Obsidian 1.11.4 or later; the website can be read on any device.
 
 ## Get Simple One
 

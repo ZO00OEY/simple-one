@@ -3,6 +3,13 @@ import { settingsSection } from "../../shared/settingsLayout";
 import { MobileOptions, sameContent } from "./linkDiff";
 import { ConflictChoice, MobileConflict, MobileGithub, MobilePlan } from "./mobileGithub";
 import { LiveReview, PreviewFile, ZoeySyncConflictPreviewModal } from "./conflictPreview";
+import { downloadSummary, mirrorPlan, strategyChoices, type SyncStrategy } from "./syncPlan";
+
+export interface MobileSyncFlow {
+  strategy(plan: MobilePlan): Promise<SyncStrategy | null>;
+  confirm(plan: MobilePlan): Promise<boolean>;
+  transfer(): Promise<void>;
+}
 
 export interface MobileHost {
   active(): boolean;
@@ -13,6 +20,7 @@ export interface MobileHost {
   restart(): void;
   sync(): Promise<void>;
   calibrate(): Promise<void>;
+  reimport(): Promise<void>;
 }
 
 export function mobileConflictFile(c: MobileConflict): PreviewFile {
@@ -39,13 +47,25 @@ export class MobileSyncModal {
   private choices: Record<string, ConflictChoice> = {};
   constructor(private app: App, private engine: MobileGithub, private plan: MobilePlan,
     private auto = false,
-    private review?: (live: LiveReview) => Promise<Record<string, ConflictChoice> | null>) {}
+    private review?: (live: LiveReview) => Promise<Record<string, ConflictChoice> | null>,
+    private flow?: MobileSyncFlow) {}
 
   async wait(): Promise<boolean> {
+    if (this.flow && (!this.engine.state.baseCommitSha || this.plan.conflicts.length)) {
+      const strategy = await this.flow.strategy(this.plan);
+      if (!strategy) return false;
+      if (strategy === "local" || strategy === "remote") this.plan = mirrorPlan(this.plan, strategy);
+      else if (strategy === "merge") {
+        const next = await this.engine.preview(strategyChoices(this.plan, strategy));
+        this.assertUnchanged(next);
+        this.plan = next;
+      }
+    }
     if (this.plan.conflicts.length && !await this.reviewDifferences()) return false;
-    // The difference dialog's confirm button is the execution confirmation.
-    // execute still validates the head, scope, revision and live files.
-    await this.engine.execute(this.plan);
+    if (this.flow && !await this.flow.confirm(this.plan)) return false;
+    const deferred = !!this.flow && this.engine.initialSync && downloadSummary(this.plan.downloads.length, Object.keys(this.plan.desired).length).recommend;
+    await this.engine.execute(this.plan, deferred);
+    if (this.engine.downloadTask) { await this.flow?.transfer(); return false; }
     if (this.engine.requiresPluginReload(this.plan)) new Notice("同步与分享 程序文件已更新，请重新加载插件或重启 Obsidian 使新代码生效。", 12000);
     return true;
   }
@@ -67,12 +87,14 @@ export class MobileSyncModal {
     if (!selected) return false;
     this.choices = { ...this.plan.pendingChoices, ...selected };
     const next = await this.engine.preview(this.choices);
-    if (next.remote.commit !== this.plan.remote.commit || next.revision !== this.plan.revision ||
-        JSON.stringify(next.local) !== JSON.stringify(this.plan.local)) {
-      throw new Error("选择期间两端状态发生变化，请重新同步并选择。");
-    }
+    this.assertUnchanged(next);
     if (next.conflicts.length) throw new Error("仍有未处理的差异，请重新同步并完成选择。");
     this.plan = next; return true;
+  }
+
+  private assertUnchanged(next: MobilePlan): void {
+    if (next.remote.commit !== this.plan.remote.commit || next.revision !== this.plan.revision || next.scope !== this.plan.scope ||
+        JSON.stringify(next.local) !== JSON.stringify(this.plan.local)) throw new Error("选择期间两端状态发生变化，请重新同步并选择。");
   }
 
 }
@@ -82,13 +104,18 @@ export function mobileCheckbox(root: HTMLElement, name: string, description: str
   const setting = new Setting(root).setName(name).setDesc(description);
   const input = setting.controlEl.createEl("input", { cls: "simple-one-sync-mobile-checkbox", attr: { type: "checkbox", "aria-label": name } });
   input.checked = checked;
+  setting.settingEl.addClass("simple-one-sync-checkbox-row");
+  setting.settingEl.insertBefore(setting.controlEl, setting.infoEl);
+  input.id = `simple-one-sync-plugin-${crypto.randomUUID()}`;
+  setting.nameEl.empty();
+  setting.nameEl.createEl("label", { text: name, attr: { for: input.id } });
   if (leading) {
     setting.settingEl.addClass("simple-one-sync-cloud-plugin-row");
-    setting.settingEl.insertBefore(setting.controlEl, setting.infoEl);
-    input.id = `simple-one-sync-plugin-${crypto.randomUUID()}`;
-    setting.nameEl.empty();
-    setting.nameEl.createEl("label", { text: name, attr: { for: input.id } });
   }
+  setting.settingEl.addEventListener("click", event => {
+    if (input.disabled || (event.target as Element).closest("input,label,button,a,select,textarea")) return;
+    input.click();
+  });
   input.addEventListener("change", () => {
     input.disabled = true;
     void Promise.resolve().then(() => change(input.checked)).catch((error) => {
@@ -223,4 +250,26 @@ export function renderMobileSettings(root: HTMLElement, host: MobileHost, guide 
       options.ignorePatterns = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean); await persist();
     }));
   if (guide) root.createEl("h3", { text: "3 · link diff 缓存与路径" });
+  if (!guide) {
+    const troubleshooting = settingsSection(root, "故障排查");
+    const confirmation = troubleshooting.createDiv();
+    confirmation.hidden = true;
+    new Setting(troubleshooting).setName("清除所有基准 base 并重新执行全库导入")
+      .setDesc("若变更内容过多，可通过此方式全库导入云端库内容；或将云端内容打包下载后执行导入，以更节省时间。")
+      .addButton(button => button.setButtonText("重新执行全库导入").setDisabled(!host.active() || !options.bound)
+        .onClick(() => { confirmation.hidden = false; }));
+    troubleshooting.appendChild(confirmation);
+    confirmation.createEl("p", { text: "将清除全部同步基准、缓存与未完成进度，保留本机和云端实际文件、仓库绑定及同步规则。随后重新检查全库，确认同步范围和处理方式后才写入文件。" });
+    const feedback = confirmation.createEl("p", { attr: { role: "status", "aria-live": "polite" } });
+    const cancel = confirmation.createEl("button", { text: "取消", attr: { type: "button" } });
+    cancel.addEventListener("click", () => { confirmation.hidden = true; });
+    const confirm = confirmation.createEl("button", { text: "确认清除基准并重新导入", attr: { type: "button" } });
+    confirm.addEventListener("click", () => {
+      confirm.disabled = true; cancel.disabled = true;
+      feedback.setText("正在清除基准并检查全库…");
+      void host.reimport().then(() => { confirmation.hidden = true; rerender?.(); })
+        .catch((error: unknown) => { feedback.setText(error instanceof Error ? error.message : String(error)); })
+        .finally(() => { confirm.disabled = false; cancel.disabled = false; });
+    });
+  }
 }

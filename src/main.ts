@@ -196,6 +196,19 @@ export default class SimplePlugin extends Plugin {
     this.share = this.addChild(new ShareFeature(this));
     await this.share.initialize().catch(reportError);
     this.addSettingTab(new SimpleSettingTab(this.app, this));
+    let sidebarTimer: number | undefined, unloaded = false;
+    this.register(() => { unloaded = true; if (sidebarTimer !== undefined) window.clearTimeout(sidebarTimer); });
+    this.app.workspace.onLayoutReady(() => {
+      if (unloaded) return;
+      // Let Obsidian restore registered plugin views after onload finishes before adding missing tabs.
+      sidebarTimer = window.setTimeout(() => {
+        void (async () => {
+          if (unloaded) return;
+          if (this.sync.settings.enabled) await this.sync.openSyncView(false);
+          if (!unloaded && this.share.manifest.enabled) await this.share.open();
+        })().catch(reportError);
+      }, 0);
+    });
   }
 
   applyMobileHeaderButtons(): void {

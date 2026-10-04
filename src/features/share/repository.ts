@@ -1,180 +1,126 @@
-import { gunzipSync, strFromU8 } from "fflate";
-import { desktopProcess, base64Bytes, type NodeFs, type NodePath } from "../../shared/desktopNode";
-import { FileSystemAdapter, Platform } from "obsidian";
 import type SimplePlugin from "../../main";
-import { managedPath, parsePublishState, SHARE_FOLDER, type ShareManifest, type PublishState } from "./model";
-import { readerArchive } from "./readerPayload";
-import { DEFAULT_SHARE_TEMPLATE } from "./template";
-export interface PublishJob { base: string; commit?: string; manifest?: string; templateHash?: string; expected: Record<string, string | null> }
+import { base64Bytes } from "../../shared/desktopNode";
+import { blobSha } from "../sync/linkDiff";
+import { managedPath, parsePublishState, type ShareManifest, type PublishState } from "./model";
+import { readerAssets } from "./template";
+
+export interface PublishJob { base: string; commit?: string; expected: Record<string, string | null> }
+interface TreeEntry { path: string; mode: string; type: string; sha: string }
+interface Head { sha: string; tree: string }
+
+/** Publish generated files directly, without a clone or persistent sync baseline. */
 export class ShareRepository {
-  constructor(private host: SimplePlugin, private site: ShareManifest["site"]) {}
-  get root(): string {
-    const adapter = this.host.app.vault.adapter;
-    if (Platform.isMobile || !(adapter instanceof FileSystemAdapter)) throw new Error("创建与发布分享仅支持桌面端。");
-    return adapter.getBasePath().replace(/\\/g, "/") + "/" + SHARE_FOLDER;
-  }
-  git(args: string[], trim = true): Promise<string> { return this.host.sync.exec("git", ["-C", this.root, ...args], true, trim); }
+  private head?: Head;
+  private entries = new Map<string, TreeEntry>();
+  private generated = new Map<string, Uint8Array>();
+  private published: PublishState = { version: 1, notes: {}, files: [] };
+  constructor(protected host: SimplePlugin, protected site: ShareManifest["site"]) {}
   api(args: string[], input?: string): Promise<string> { return this.host.sync.exec("gh", ["api", ...args], false, true, 120000, undefined, input); }
+  private get prefix(): string { return "repos/" + this.site.owner + "/" + this.site.repo; }
+  private async request<T>(path: string, method = "GET", body?: unknown): Promise<T> {
+    return JSON.parse(await this.api([path, "--method", method, ...(body === undefined ? [] : ["--input", "-"])], body === undefined ? undefined : JSON.stringify(body))) as T;
+  }
   async verify(): Promise<void> {
     const { owner, repo, branch } = this.site;
-    if (!/^[A-Za-z0-9-]+$/.test(owner) || !/^[A-Za-z0-9._-]{1,100}$/.test(repo) || [".", ".."].includes(repo)) throw new Error("分享仓库名称不正确。");
-    await this.host.sync.exec("git", ["check-ref-format", "--branch", branch]);
-    const value = JSON.parse(await this.api([`repos/${owner}/${repo}`])) as { private: boolean; permissions?: { push?: boolean }; archived?: boolean };
-    if (value.private || !value.permissions?.push || value.archived) throw new Error("分享仓库必须公开、未归档，并具有写入权限。");
+    if (!/^[A-Za-z0-9-]+$/.test(owner) || !/^[A-Za-z0-9._-]{1,100}$/.test(repo) || [".", ".."].includes(repo) ||
+        !branch || /[\s~^:?*[\\]|\.\.|@\{|^\/|\/$|\/\//.test(branch) || branch.split("/").some(part => part.startsWith(".") || part.endsWith(".") || part.endsWith(".lock"))) throw new Error("分享仓库或分支配置不正确。");
+    const value = await this.request<{ private: boolean; permissions?: { push?: boolean }; archived?: boolean; disabled?: boolean }>(this.prefix);
+    if (value.private || value.permissions?.push !== true || value.archived || value.disabled) throw new Error("分享仓库必须公开、未归档，并具有写入权限。");
   }
-  async exclude(): Promise<void> {
-    const adapter = this.host.app.vault.adapter;
-    const content = await adapter.exists(".gitignore") ? await adapter.read(".gitignore") : "";
-    if (!content.split(/\r?\n/).some(line => line.trim() === `/${SHARE_FOLDER}/`)) await adapter.write(".gitignore", content + (content.endsWith("\n") || !content ? "" : "\n") + `\n# Simple One 分享发布缓存\n/${SHARE_FOLDER}/\n`);
-    // Existing index entries must be handled deliberately, never removed silently.
-    const tracked = await this.host.sync.exec("git", ["ls-files", "--", SHARE_FOLDER]);
-    if (tracked) throw new Error("主库已跟踪 .gitshare，请先在主库解除该目录的 Git 跟踪（保留本机文件）再继续。");
-    await this.host.sync.exec("git", ["check-ignore", "--quiet", `${SHARE_FOLDER}/index.html`]);
+  private async readRef(): Promise<string> {
+    const ref = await this.request<{ object: { sha: string } }>(this.prefix + "/git/ref/heads/" + encodeURIComponent(this.site.branch));
+    if (!/^[a-f0-9]{40}$/.test(ref.object.sha)) throw new Error("GitHub 提交格式不正确。");
+    return ref.object.sha;
   }
-  async ensure(): Promise<void> {
-    await this.verify(); await this.exclude();
-    const adapter = this.host.app.vault.adapter;
-    await this.safePath(".git");
-    if (!await adapter.exists(`${SHARE_FOLDER}/.git`)) {
-      if (await adapter.exists(SHARE_FOLDER)) {
-        const listing = await adapter.list(SHARE_FOLDER);
-        if (listing.files.length || listing.folders.length) throw new Error(".gitshare 目录已有非仓库文件；请先检查，插件不会覆盖。");
-      }
-      await this.host.sync.exec("git", ["clone", "--", `https://github.com/${this.site.owner}/${this.site.repo}.git`, this.root], true);
+  private async readHead(): Promise<Head> {
+    const sha = await this.readRef();
+    const commit = await this.request<{ tree: { sha: string } }>(this.prefix + "/git/commits/" + sha);
+    if (!/^[a-f0-9]{40}$/.test(commit.tree.sha)) throw new Error("GitHub 文件树格式不正确。");
+    return { sha, tree: commit.tree.sha };
+  }
+  async refresh(): Promise<void> {
+    try { this.head = await this.readHead(); }
+    catch (error) {
+      if (!/\b(?:404|409)\b/.test(String(error))) throw error;
+      const branches = await this.request<unknown[]>(this.prefix + "/branches?per_page=1");
+      if (branches.length) throw error;
+      this.head = undefined; this.entries.clear();
+      this.published = { version: 1, notes: {}, files: [] }; return;
     }
-    const root = (await this.git(["rev-parse", "--show-toplevel"])).replace(/\\/g, "/");
-    if (await this.canonical(root) !== await this.canonical(this.root)) throw new Error("公开仓库根目录不匹配，停止操作。");
-    const remote = await this.git(["config", "--get", "remote.origin.url"]);
-    if (remote.toLowerCase().replace(/\.git$/, "") !== `https://github.com/${this.site.owner}/${this.site.repo}`.toLowerCase()) throw new Error("GitShare 远端与分享清单不匹配。");
-    const branch = await this.git(["symbolic-ref", "--short", "HEAD"]);
-    if (branch !== this.site.branch) {
-      const head = await this.git(["rev-parse", "--verify", "HEAD"]).catch(() => "");
-      if (head) throw new Error(`分享工作目录分支为 ${branch}，预期 ${this.site.branch}；请先检查。`);
-      await this.git(["symbolic-ref", "HEAD", `refs/heads/${this.site.branch}`]);
-    }
-    for (const marker of ["MERGE_HEAD", "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD"]) {
-      if (await adapter.exists(`${SHARE_FOLDER}/.git/${marker}`)) throw new Error("分享仓库有未完成的 Git 操作。");
+    const tree = await this.request<{ tree: TreeEntry[]; truncated?: boolean }>(this.prefix + "/git/trees/" + this.head.tree + "?recursive=1");
+    if (tree.truncated) throw new Error("云端文件清单被截断，停止发布和删除。");
+    this.entries = new Map(tree.tree.map(entry => [entry.path, entry]));
+    const state = this.entries.get("publish-state.json");
+    if (state) this.published = parsePublishState(new TextDecoder().decode(await this.readBlob(state)));
+    else {
+      if ([...this.entries.keys()].some(managedPath)) throw new Error("远端已有分享文件但没有发布清单，停止覆盖。");
+      this.published = { version: 1, notes: {}, files: [] };
     }
   }
-  private async safePath(relative: string): Promise<void> {
-    const requireNode = (window as unknown as { require: (name: string) => unknown }).require;
-    const fs = (requireNode("fs") as NodeFs).promises;
-    const path = requireNode("path") as NodePath;
-    const absolute = path.resolve(this.root, relative);
-    if (!absolute.startsWith(path.resolve(this.root) + path.sep)) throw new Error("发布路径越过分享目录边界。");
-    let current = this.root;
-    for (const part of ["", ...relative.split("/")]) {
-      if (part) current = path.join(current, part);
-      try { if ((await fs.lstat(current)).isSymbolicLink()) throw new Error("分享缓存存在符号链接，停止文件操作。"); }
-      catch (error) { if ((error as { code?: string }).code !== "ENOENT") throw error; }
+  private async readBlob(entry: TreeEntry): Promise<Uint8Array> {
+    if (entry.type !== "blob" || !["100644", "100755"].includes(entry.mode)) throw new Error("分享文件不能是符号链接或其他特殊文件。");
+    const blob = await this.request<{ content: string; encoding: string }>(this.prefix + "/git/blobs/" + entry.sha);
+    if (blob.encoding !== "base64") throw new Error("GitHub 文件编码不正确。");
+    const bytes = base64Bytes(blob.content.replace(/\s/g, ""));
+    if (await blobSha(bytes) !== entry.sha) throw new Error("云端发布清单下载校验失败。");
+    return bytes;
+  }
+  async state(): Promise<PublishState> { return this.published; }
+  async writeFiles(files: Map<string, string | ArrayBuffer>, previous: PublishState): Promise<PublishJob> {
+    const next = files.get("publish-state.json");
+    if (typeof next !== "string") throw new Error("缺少目标发布清单。");
+    const target = parsePublishState(next);
+    // Git database endpoints require a first commit. Bootstrap only metadata, never note content.
+    if (!this.head) {
+      const content = JSON.stringify({ version: 1, notes: {}, files: ["publish-state.json"] });
+      await this.request(this.prefix + "/contents/publish-state.json", "PUT", { message: "Initialize shared notes", branch: this.site.branch, content: btoa(content) });
+      await this.refresh(); previous = this.published;
+      if (!this.head) throw new Error("分享仓库初始化未完成，请重新发布。");
     }
-  }
-  private async canonical(value: string): Promise<string> {
-    const requireNode = (window as unknown as { require: (name: string) => unknown }).require;
-    const fs = (requireNode("fs") as NodeFs).promises;
-    const canonical = (await fs.realpath(value)).replace(/\\/g, "/");
-    return desktopProcess?.platform === "win32" ? canonical.toLowerCase() : canonical;
-  }
-  async checkPrivateFreshness(): Promise<void> {
-    const run = (args: string[]) => this.host.sync.exec("git", args, true);
-    const adapter = this.host.app.vault.adapter as FileSystemAdapter;
-    const root = (await run(["rev-parse", "--show-toplevel"])).replace(/\\/g, "/");
-    if (await this.canonical(root) !== await this.canonical(adapter.getBasePath())) throw new Error("私人主库 Git 根目录不正确。");
-    if (await run(["diff", "--name-only", "--diff-filter=U"])) throw new Error("主库存在冲突，请先完成私人同步。");
-    const upstream = await run(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]).catch(() => "");
-    if (!upstream) throw new Error("主库未设置上游，无法核验多设备分享清单；请先完成主库同步接入。");
-    const remote = upstream.slice(0, upstream.indexOf("/"));
-    await run(["fetch", remote]);
-    const counts = (await run(["rev-list", "--left-right", "--count", `HEAD...${upstream}`])).split(/\s+/).map(Number);
-    if (counts[1] > 0) throw new Error("主库落后于远端或存在分叉；请先同步主库，再发布分享。");
-  }
-  async refresh(job?: PublishJob): Promise<void> {
-    await this.git(["fetch", "origin"]);
-    const status = await this.git(["status", "--porcelain", "--untracked-files=all", "-z"], false);
-    if (status && !job) throw new Error("分享工作目录存在未提交改动，请检查后重试。");
-    const head = await this.git(["rev-parse", "--verify", "HEAD"]).catch(() => "");
-    const remote = await this.git(["rev-parse", "--verify", `refs/remotes/origin/${this.site.branch}`]).catch(() => "");
-    if (job) {
-      if (head !== (job.commit || job.base)) throw new Error("上次发布后 GitShare 提交发生变化，请检查后恢复。");
-      const paths = status.split("\0").filter(Boolean).map(line => line.slice(3));
-      if (paths.some(path => !(path in job.expected))) throw new Error("发布缓存包含额外改动，停止恢复。");
-      for (const [path, hash] of Object.entries(job.expected)) {
-        const current = await this.fileHash(path);
-        if (current !== hash) throw new Error("上次发布文件被修改或写入不完整，停止覆盖，请检查缓存。");
-      }
-      if (remote && remote !== job.base && remote !== job.commit) throw new Error("另一台设备已更新分享仓库，请检查后重新生成发布计划。");
-      return;
-    }
-    if (!remote || head === remote) return;
-    if (!head) throw new Error("远端已有提交，请重新检查本地分享分支。");
-    const counts = (await this.git(["rev-list", "--left-right", "--count", `HEAD...origin/${this.site.branch}`])).split(/\s+/).map(Number);
-    if (counts[0]) throw new Error("分享仓库有未登记的本地提交或分叉，不会强制覆盖。");
-    await this.git(["merge", "--ff-only", `origin/${this.site.branch}`]);
-  }
-  async state(): Promise<PublishState> {
-    const adapter = this.host.app.vault.adapter;
-    if (await adapter.exists(`${SHARE_FOLDER}/publish-state.json`)) {
-      const state = parsePublishState(await adapter.read(`${SHARE_FOLDER}/publish-state.json`));
-      if (!Platform.isMobile) for (const file of state.files) await this.safePath(file);
-      return state;
-    }
-    const files = await this.git(["ls-files", "-z"], false);
-    if (files.split("\0").filter(Boolean).some(path => managedPath(path))) throw new Error("现有仓库包含同名文件但没有发布记录，停止覆盖。");
-    return { version: 1, notes: {}, files: [] };
-  }
-  async fileHash(path: string): Promise<string | null> {
-    const { sha256 } = await import("./model");
-    const adapter = this.host.app.vault.adapter;
-    return await adapter.exists(`${SHARE_FOLDER}/${path}`) ? sha256(await adapter.readBinary(`${SHARE_FOLDER}/${path}`)) : null;
-  }
-  async writeFiles(files: Map<string, string | ArrayBuffer>, previous: PublishState, persist: (job: PublishJob) => Promise<void>): Promise<PublishJob> {
-    const adapter = this.host.app.vault.adapter;
-    const base = await this.git(["rev-parse", "--verify", "HEAD"]).catch(() => "");
+    const retained = new Set(target.files);
+    this.generated.clear();
     const expected: Record<string, string | null> = {};
-    const { sha256 } = await import("./model");
-    for (const [path, value] of files) {
-      if (!managedPath(path)) throw new Error("非法发布路径。");
-      await this.safePath(path);
-      if (!previous.files.includes(path) && await adapter.exists(`${SHARE_FOLDER}/${path}`)) throw new Error(`发现未受管的同名文件：${path}`);
-      expected[path] = await sha256(value);
+    for (const [path, content] of files) {
+      if (!managedPath(path) || !retained.has(path)) throw new Error("非法发布路径或文件未登记。");
+      const existing = this.entries.get(path);
+      if (existing && !previous.files.includes(path)) throw new Error("发现未受管的同名文件：" + path);
+      if (existing && (existing.type !== "blob" || !["100644", "100755"].includes(existing.mode))) throw new Error("分享文件不能是符号链接或其他特殊文件。");
+      const bytes = typeof content === "string" ? new TextEncoder().encode(content) : new Uint8Array(content).slice();
+      const hash = await blobSha(bytes);
+      if (existing?.sha === hash) continue;
+      this.generated.set(path, bytes); expected[path] = hash;
     }
-    for (const path of previous.files) if (!files.has(path)) { await this.safePath(path); expected[path] = null; }
-    const job = { base, expected };
-    const backups = new Map<string, ArrayBuffer | null>();
-    for (const path of Object.keys(expected)) backups.set(path, await adapter.exists(`${SHARE_FOLDER}/${path}`) ? await adapter.readBinary(`${SHARE_FOLDER}/${path}`) : null);
-    try {
-      for (const [path, value] of files) {
-        const target = `${SHARE_FOLDER}/${path}`;
-        const parent = target.slice(0, target.lastIndexOf("/"));
-        if (!await adapter.exists(parent)) await adapter.mkdir(parent);
-        if (typeof value === "string") await adapter.write(target, value); else await adapter.writeBinary(target, value);
-      }
-      for (const path of previous.files) if (!files.has(path) && await adapter.exists(`${SHARE_FOLDER}/${path}`)) await adapter.remove(`${SHARE_FOLDER}/${path}`);
-      await persist(job); return job;
-    } catch (error) {
-      let rollbackFailed = false;
-      for (const [path, value] of backups) {
-        try { const target = `${SHARE_FOLDER}/${path}`; if (value) await adapter.writeBinary(target, value); else if (await adapter.exists(target)) await adapter.remove(target); }
-        catch { rollbackFailed = true; }
-      }
-      if (rollbackFailed) throw new Error("生成失败且缓存恢复不完整；线上文件未推送，请检查分享缓存后重试。");
-      throw error;
-    }
+    for (const path of target.files) if (!files.has(path) && (!previous.files.includes(path) || !this.entries.has(path))) throw new Error("目标文件缺失：" + path);
+    for (const path of previous.files) if (!retained.has(path) && this.entries.has(path)) expected[path] = null;
+    return { base: this.head.sha, expected };
   }
-  async push(job: PublishJob, persist: (job: PublishJob) => Promise<void>): Promise<string> {
+  async push(job: PublishJob, persist: (job: PublishJob) => Promise<void> = async () => {}): Promise<string> {
+    const current = { sha: await this.readRef(), tree: this.head?.tree ?? "" };
+    if (job.commit && current.sha === job.commit) return job.commit;
+    if (current.sha !== job.base) throw new Error("云端在生成期间发生变化，请重新发布；不会强制覆盖。");
+    if (!Object.keys(job.expected).length) return current.sha;
     if (!job.commit) {
-      const paths = Object.keys(job.expected);
-      for (let i = 0; i < paths.length; i += 50) await this.git(["add", "-A", "--", ...paths.slice(i, i + 50)]);
-      const status = await this.git(["diff", "--cached", "--name-only"]);
-      if (status) {
-        const account = JSON.parse(await this.api(["user"])) as { login: string; id: number };
-        await this.git(["-c", `user.name=${account.login}`, "-c", `user.email=${account.id}+${account.login}@users.noreply.github.com`, "commit", "-m", "Update shared notes"]);
+      const entries: { path: string; mode: string; type: string; sha: string | null }[] = [];
+      for (const [path, hash] of Object.entries(job.expected)) {
+        if (!managedPath(path)) throw new Error("发布计划越出公开文件范围。");
+        if (hash === null) { entries.push({ path, mode: "100644", type: "blob", sha: null }); continue; }
+        const bytes = this.generated.get(path);
+        if (!bytes || await blobSha(bytes) !== hash) throw new Error("目标文件变化，请重新生成。");
+        let binary = "";
+        for (let start = 0; start < bytes.length; start += 32768) binary += String.fromCharCode(...bytes.subarray(start, start + 32768));
+        const blob = await this.request<{ sha: string }>(this.prefix + "/git/blobs", "POST", { content: btoa(binary), encoding: "base64" });
+        if (blob.sha !== hash) throw new Error("文件上传哈希校验失败。");
+        entries.push({ path, mode: "100644", type: "blob", sha: hash });
       }
-      job.commit = await this.git(["rev-parse", "HEAD"]); await persist(job);
+      let tree = current.tree;
+      for (let offset = 0; offset < entries.length; offset += 500) tree = (await this.request<{ sha: string }>(this.prefix + "/git/trees", "POST", { base_tree: tree, tree: entries.slice(offset, offset + 500) })).sha;
+      job.commit = (await this.request<{ sha: string }>(this.prefix + "/git/commits", "POST", { message: "Update shared notes", tree, parents: [job.base] })).sha;
+      if (!/^[a-f0-9]{40}$/.test(job.commit)) throw new Error("GitHub 提交格式不正确。");
+      await persist(job);
     }
-    await this.git(["push", "origin", `HEAD:refs/heads/${this.site.branch}`]);
-    await this.git(["fetch", "origin"]);
-    if (await this.git(["rev-parse", `origin/${this.site.branch}`]) !== job.commit) throw new Error("远端提交校验未通过，请重新检查。");
+    if (await this.readRef() !== job.base) throw new Error("推送前云端出现新提交，请重新发布。");
+    await this.request(this.prefix + "/git/refs/heads/" + encodeURIComponent(this.site.branch), "PATCH", { sha: job.commit, force: false });
+    if (await this.readRef() !== job.commit) throw new Error("推送结果尚未确认；重新发布会按云端实际内容对比。");
     return job.commit;
   }
   async configurePages(): Promise<string> {
@@ -194,17 +140,15 @@ export class ShareRepository {
     return build.commit === commit && build.status === "built" ? "网站已更新" : "已推送，网站部署中";
   }
 }
-export function websiteFiles(template = DEFAULT_SHARE_TEMPLATE): Map<string, string | ArrayBuffer> {
+export function websiteFiles(template: string, defaultTemplate: string, licenses = ""): Map<string, string | ArrayBuffer> {
   const files = new Map<string, string | ArrayBuffer>();
   files.set(".nojekyll", "");
   files.set("index.html", template);
   files.set("reader/appearance.css", "");
-  let readerFiles: Record<string, string> = {};
-  if (readerArchive) {
-    readerFiles = JSON.parse(strFromU8(gunzipSync(base64Bytes(readerArchive)))) as Record<string, string>;
+  // Standalone custom HTML owns its assets; legacy templates still need reader/app.*.
+  if (!/<script data-simple-reader>/.test(template)) {
+    for (const [path, value] of Object.entries(readerAssets(defaultTemplate))) files.set(path, value);
   }
-  for (const [path, value] of Object.entries(readerFiles)) {
-    const bytes = Uint8Array.from(atob(value), char => char.charCodeAt(0)); files.set(path, bytes.buffer);
-  }
+  files.set("reader/licenses.txt", licenses);
   return files;
 }

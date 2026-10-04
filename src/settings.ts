@@ -178,7 +178,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     };
     return [
       { type: "group", heading: "功能拓展", cls: "simple-settings simple-native-overview", items: [
-        entry("同步与分享", "sync-sharing", ["GitHub", "Git Ignore", "同步", "仓库", "手机", "服务器", "Token"], "绑定仓库、配置电脑与轻量同步，管理需要共享和自动屏蔽的文件。"),
+        entry("同步", "sync-sharing", ["GitHub", "Git Ignore", "同步", "仓库", "手机", "服务器", "Token"], "绑定仓库、配置电脑与轻量同步，管理需要共享和自动屏蔽的文件。"),
       ] },
       { type: "group", heading: "显示与排版", cls: "simple-settings simple-native-overview", items: [
         entry("显示增强", "display-enhancements", ["正文宽度", "图片高度", "窗口缩放", "窗口定位", "双列", "HTML 预览", "Mermaid", "颜色代码", "手机按钮"], "调整正文宽度、图片显示与内容预览。"),
@@ -220,7 +220,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     this.renderPlatformHint(containerEl);
 
     if (this.page.type === "sync-sharing") {
-      const titleEl = this.renderPageHeader(containerEl, "同步与分享", () => {
+      const titleEl = this.renderPageHeader(containerEl, "同步", () => {
         if (!this.syncTab.backToOverview()) this.openPage({ type: "overview" });
       });
       this.syncTab.renderInto(containerEl.createDiv({ cls: "simple-one-sync-feature" }), title => titleEl.setText(title));

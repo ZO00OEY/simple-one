@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>分享笔记</title>
+<style data-simple-reader-style>
+:root{color-scheme:light dark;--share-bg:#faf9f6;--share-text:#242832;--share-muted:#687080;--share-accent:var(--color-accent,#7c3aed);--share-line:#deded7;--share-font:system-ui,sans-serif;--share-size:16px;--share-line-height:1.6;--share-width:820px}
+@media(prefers-color-scheme:dark){:root{--share-bg:#202320;--share-text:#e4e6df;--share-muted:#a6afa6;--share-accent:var(--color-accent,#b69aff);--share-line:#3c433b}}
+*{box-sizing:border-box}body{margin:0;background:var(--share-bg);color:var(--share-text);font-family:var(--share-font);font-size:var(--share-size);line-height:var(--share-line-height)}header{padding:18px 28px;border-bottom:1px solid var(--share-line)}a{color:var(--share-accent);text-underline-offset:3px}header a{text-decoration:none;font-weight:650}.layout{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:calc(100vh - 70px)}aside{padding:24px;border-right:1px solid var(--share-line)}aside input{width:100%;padding:10px;border:1px solid var(--share-line);border-radius:8px;background:transparent;color:inherit;margin-bottom:20px}aside summary{cursor:pointer;color:var(--share-muted);margin-top:14px}aside a{display:block;text-decoration:none;padding:6px 0}main{width:100%;max-width:var(--share-width);margin:0 auto;padding:32px}h1,h2,h3{line-height:1.35}h1{font-size:1.8em;margin-top:0}h2,h3{margin-top:1.6em}img,video,svg{max-width:100%;height:auto}pre{overflow:auto;padding:16px;background:color-mix(in srgb,var(--share-text) 6%,transparent);border-radius:8px}code{font-size:.88em}table{border-collapse:collapse;display:block;overflow:auto}td,th{border:1px solid var(--share-line);padding:8px 12px}blockquote{margin-left:0;padding:8px 18px;border-left:3px solid var(--share-accent);background:color-mix(in srgb,var(--share-accent) 6%,transparent)}.simple-columns{display:grid;grid-template-columns:var(--columns);gap:22px;margin:18px 0}.simple-column{min-width:0}.callout>strong{display:block}.callout summary{cursor:pointer;font-weight:bold}.katex-display{overflow:auto}.mermaid{background:transparent}mark{background:#f1d990;color:#242832}hr{border:0;border-top:1px solid var(--share-line)}
+header{display:flex;align-items:center;justify-content:space-between}header span{font-size:12px;letter-spacing:.08em;color:var(--share-muted)}aside label{display:block;font-size:12px;letter-spacing:.1em;color:var(--share-muted);margin-bottom:12px}a:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--share-accent);outline-offset:4px}
+@media(max-width:740px){.layout{grid-template-columns:1fr}aside{border-right:0;border-bottom:1px solid var(--share-line);max-height:35vh;overflow:auto;padding:16px}main{padding:24px 18px}.simple-columns{grid-template-columns:1fr}}
+.heading-body[hidden]{display:none}.heading-section> :is(h1,h2,h3,h4,h5,h6){position:relative;padding-left:40px}.heading-toggle{position:absolute;left:0;top:calc((1.45em - 36px)/2);display:grid;place-items:center;width:36px;height:36px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--share-muted);font:inherit;cursor:pointer}.heading-toggle>span{font-size:20px;line-height:1}.heading-toggle:hover{color:var(--share-accent);background:color-mix(in srgb,var(--share-accent) 10%,transparent)}.heading-toggle:focus-visible{outline:2px solid var(--share-accent);outline-offset:2px}.heading-section{min-width:0}
+#note-list .folder-children{padding-left:12px;border-left:1px solid var(--share-line);margin-left:5px}#note-list summary{margin-top:4px;padding:5px 0;overflow-wrap:anywhere}#note-list a{overflow-wrap:anywhere}
+
+/* Reader typography stays independent of exported Obsidian appearance settings. */
+body {
+  font-family:"Microsoft YaHei","微软雅黑","PingFang SC","Noto Sans CJK SC",sans-serif;
+}
+input,button { font:inherit }
+main {
+  max-width:760px;
+  font-size:16px;
+  line-height:1.6;
+  letter-spacing:.01em;
+  overflow-wrap:anywhere;
+  line-break:strict;
+}
+main p { margin:.65em 0 }
+main ul,main ol { margin:.65em 0; padding-left:1.65em }
+main li + li { margin-top:.15em }
+main li > p { margin:.25em 0 }
+main h1,main h2,main h3,main h4,main h5,main h6 {
+  line-height:1.45;
+  font-weight:700;
+  letter-spacing:0;
+  margin-bottom:.65em;
+}
+main h1 { font-size:1.75em }
+main h2 { font-size:1.4em }
+main h3 { font-size:1.2em }
+main h4,main h5,main h6 { font-size:1em; margin-top:1.4em }
+main code,main pre {
+  font-family:Consolas,"Cascadia Mono",monospace;
+  letter-spacing:0;
+  overflow-wrap:normal;
+}
+main pre { line-height:1.6 }
+.simple-column > :first-child,.heading-body > :first-child { margin-top:0 }
+.simple-column > :last-child,.heading-body > :last-child { margin-bottom:0 }
+main.has-columns { max-width:1000px }
+#content :is(p,ul,ol,blockquote) { max-width:696px }
+.simple-columns :is(p,ul,ol,blockquote) { max-width:none }
+main h1,main h2,main h3,main h4,main h5,main h6 { color:var(--share-text) }
+main h5 { font-size:.95em }
+main h6 { font-size:.9em }
+main img:not([width]) { max-height:var(--share-image-max-height,none); width:auto; object-fit:contain }
+main img[width][height] { height:auto; object-fit:contain }
+.callout {
+  --callout-color:#527da8;
+  margin:1.25em 0;
+  padding:14px 18px;
+  border:1px solid color-mix(in srgb,var(--callout-color) 30%,transparent);
+  border-left:3px solid var(--callout-color);
+  border-radius:8px;
+  background:color-mix(in srgb,var(--callout-color) 7%,var(--share-bg));
+}
+.callout[data-callout="tip"],.callout[data-callout="success"] { --callout-color:#41836c }
+.callout[data-callout="warning"],.callout[data-callout="caution"] { --callout-color:#b57b25 }
+.callout[data-callout="danger"],.callout[data-callout="failure"] { --callout-color:#b15b60 }
+.callout > strong,.callout summary { color:var(--callout-color) }
+.callout summary strong { display:inline }
+.callout p:last-child { margin-bottom:0 }
+.share-special-block { border:1px solid var(--share-line); border-radius:8px; padding:12px 16px; margin:1.2em 0 }
+.share-special-block > summary { cursor:pointer; font-weight:700 }
+.share-special-block > div { margin-top:12px; white-space:pre-wrap }
+.share-html-preview { width:100%; min-height:300px; border:1px solid var(--share-line); border-radius:8px; background:white }
+main a { color:var(--share-accent); text-decoration:underline; text-decoration-thickness:1px; font-weight:500 }
+main a:hover { text-decoration-thickness:2px }
+.share-tag { display:inline; padding:.1em .5em; border-radius:999px; font-size:.9em; color:var(--share-accent); background:color-mix(in srgb,var(--share-accent) 13%,transparent); box-decoration-break:clone; -webkit-box-decoration-break:clone }
+.accent-picker { position:relative; color:var(--share-muted) }
+.accent-picker summary { display:flex; align-items:center; gap:8px; min-height:36px; padding:6px 9px; border:1px solid var(--share-line); border-radius:6px; cursor:pointer; list-style:none }
+.accent-picker summary::-webkit-details-marker { display:none }
+.accent-picker summary::after { content:""; width:6px; height:6px; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; transform:rotate(45deg); margin-top:-3px }
+.accent-swatch { display:block; width:22px; height:22px; border-radius:4px; background:var(--swatch); border:1px solid rgb(0 0 0 / 10%) }
+.accent-options { position:absolute; top:calc(100% + 6px); right:0; display:flex; gap:6px; padding:8px; border:1px solid var(--share-line); border-radius:8px; background:var(--share-bg); box-shadow:0 4px 16px rgb(0 0 0 / 10%); z-index:10 }
+.accent-options button { display:grid; place-items:center; width:36px; height:36px; padding:5px; background:transparent; border:1px solid transparent; border-radius:6px; cursor:pointer }
+.accent-options button[aria-pressed="true"] { border-color:var(--share-text) }
+.accent-options button:hover { background:color-mix(in srgb,var(--share-text) 8%,transparent) }
+.accent-options button:focus-visible { outline:2px solid var(--share-text); outline-offset:2px }
+header { flex-wrap:wrap; gap:12px }
+@media(max-width:740px){header{padding:12px 18px}header>span{display:none}}
+
+/* Reading rules adapted from the local Things theme; retain the reader palette. */
+:root { --share-sidebar-width:260px; --share-accent:#fb7299 }
+html { font-size:15px }
+body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Ubuntu,"Microsoft YaHei",sans-serif }
+header a { color:var(--share-text); font-size:15px }
+.layout { grid-template-columns:var(--share-sidebar-width) minmax(0,1fr) }
+aside { position:relative; min-width:0; font-size:13px; line-height:1.5; padding:20px 16px }
+aside input { font-size:13px; padding:8px; margin-bottom:14px }
+#note-list a { color:var(--share-text); padding:4px 0; font-size:13px }
+#note-list a:hover { color:var(--share-accent); text-decoration:underline }
+#note-list summary { color:var(--share-muted); font-size:13px; padding:4px 0 }
+#note-list .folder-children { padding-left:12px }
+.sidebar-resizer { position:absolute; top:0; bottom:0; right:-5px; width:10px; cursor:col-resize; touch-action:none; z-index:3 }
+.sidebar-resizer:hover,.sidebar-resizer:focus-visible { background:color-mix(in srgb,var(--share-muted) 20%,transparent) }
+body.resizing-sidebar { cursor:col-resize; user-select:none }
+main { font-family:inherit; font-size:15px; line-height:1.5; letter-spacing:0; max-width:860px }
+#content :is(p,ul,ol,blockquote) { max-width:none }
+main p { margin:.7em 0 }
+main ul,main ol { margin:.6em 0; padding-left:1.65em }
+main li+li { margin-top:0 }
+main li>p { margin:.2em 0 }
+main li::marker { color:var(--share-muted) }
+main h1 { font-size:1.7rem }
+main h2 { font-size:1.5rem; border-bottom:2px solid var(--share-line); padding-bottom:2px; margin:1.6em 0 8px }
+main h3 { font-size:1.2rem; color:#2e80f2; margin-top:1.5em }
+main h4 { font-size:1.1rem; color:#e5b567 }
+main h5 { font-size:1rem; color:#e83e3e }
+main h6 { font-size:.9rem; color:var(--share-muted) }
+main strong { color:inherit; font-weight:700 }
+main mark { background:rgb(255 213 0 / 20%); color:#242832; padding:0 .1em; border-radius:2px }
+main mark :is(strong,em),main strong mark { color:#242832 }
+.heading-section> :is(h1,h2,h3,h4,h5,h6) { padding-left:0 }
+.heading-toggle { left:-32px; width:30px; height:36px }
+.share-tag { background:#bde1d3; color:#1d694b }
+main code:not(pre code) { background:color-mix(in srgb,var(--share-text) 6%,transparent); border-radius:4px; padding:2px 4px }
+.simple-mermaid-frame { position:relative; margin:1.25rem 0; padding:12px 14px 14px; border:1px solid var(--share-line); border-radius:8px; background:var(--share-bg); box-shadow:0 8px 24px rgb(0 0 0 / 5%) }
+.simple-mermaid-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-bottom:12px; color:var(--share-muted); font-size:12px }
+.simple-mermaid-toolbar strong { margin-right:auto }
+.simple-mermaid-toolbar button { border:1px solid var(--share-line); border-radius:4px; background:var(--share-bg); color:var(--share-text); padding:4px 8px; cursor:pointer; font-size:12px; min-height:30px }
+.simple-mermaid-viewport { overflow:auto; max-height:70vh }
+main .simple-mermaid-frame .mermaid { margin:0; padding:0; background:transparent; overflow:visible }
+.simple-mermaid-frame svg { display:block; width:100%; max-width:none; height:auto; margin:auto }
+.simple-mermaid-frame.is-fullscreen { position:fixed; inset:16px; z-index:1000; margin:0; display:flex; flex-direction:column }
+.simple-mermaid-frame.is-fullscreen .simple-mermaid-viewport { flex:1; max-height:none }
+@media(prefers-color-scheme:dark){.share-tag{background:#1d694b;color:#fff}main h3{color:#80b4ff}}
+@media(max-width:740px){.layout{grid-template-columns:1fr}.sidebar-resizer{display:none}main{padding-inline:28px 18px}.heading-toggle{left:-28px;width:26px}.simple-mermaid-frame.is-fullscreen{inset:8px}}
+
+</style>
+  <style data-simple-appearance></style>
+  <!-- 独立网站阅读器；构建时内嵌依赖、样式与字体，不在 Obsidian 中执行。 -->
+</head>
+<body>
+  <header><a href="#/">分享笔记 · 目录</a><span>阅读与留存</span></header>
+  <div class="layout">
+    <aside>
+      <label for="search">笔记目录</label>
+      <input id="search" type="search" placeholder="搜索标题或分类">
+      <nav id="note-list"></nav>
+    </aside>
+    <main><h1 id="note-title">分享笔记</h1><article id="content"></article></main>
+  </div>
+<script type="module" data-simple-reader>
+import MarkdownIt from "markdown-it";
+import footnote from "markdown-it-footnote";
+import mark from "markdown-it-mark";
+import DOMPurify from "dompurify";
+import katex from "katex";
+import mermaid from "mermaid";
+import { parseColumns } from "../../../shared/columns";
+import "katex/dist/katex.min.css";
+
+let catalog = [];
+let request = 0;
+const content = document.getElementById("content");
+const title = document.getElementById("note-title");
+const list = document.getElementById("note-list");
+const search = document.getElementById("search");
+const sidebar = document.querySelector("aside");
+if (sidebar) {
+  const handle = document.createElement("div");
+  handle.className = "sidebar-resizer";
+  handle.tabIndex = 0;
+  handle.setAttribute("role", "separator");
+  handle.setAttribute("aria-label", "调整目录宽度，左右方向键也可调整");
+  handle.setAttribute("aria-orientation", "vertical");
+  handle.setAttribute("aria-valuemin", "180");
+  let width = 260;
+  const setWidth = value => {
+    const max = Math.max(180, Math.min(520, window.innerWidth - 380));
+    width = Math.round(Math.max(180, Math.min(max, value)));
+    document.documentElement.style.setProperty("--share-sidebar-width", `${width}px`);
+    handle.setAttribute("aria-valuenow", String(width));
+    handle.setAttribute("aria-valuemax", String(max));
+  };
+  const saveWidth = () => { try { window.localStorage.setItem("simple-reader-sidebar-width", String(width)); } catch {} };
+  try { const saved = Number(window.localStorage.getItem("simple-reader-sidebar-width")); if (saved >= 180) width = saved; } catch {}
+  setWidth(width);
+  let drag = null;
+  handle.addEventListener("pointerdown", event => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    drag = { x:event.clientX, width };
+    handle.setPointerCapture(event.pointerId);
+    document.body.classList.add("resizing-sidebar");
+  });
+  handle.addEventListener("pointermove", event => { if (drag) setWidth(drag.width + event.clientX - drag.x); });
+  const endDrag = () => { drag = null; document.body.classList.remove("resizing-sidebar"); saveWidth(); };
+  handle.addEventListener("pointerup", endDrag);
+  handle.addEventListener("pointercancel", endDrag);
+  handle.addEventListener("lostpointercapture", endDrag);
+  handle.addEventListener("keydown", event => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault(); setWidth(width + (event.key === "ArrowLeft" ? -16 : 16)); saveWidth();
+  });
+  window.addEventListener("resize", () => setWidth(width));
+  sidebar.append(handle);
+}
+// Keep the controls in the embedded reader so saved HTML shells also receive them.
+const header = document.querySelector("header");
+if (header) {
+  const picker = document.createElement("details");
+  picker.className = "accent-picker";
+  const summary = document.createElement("summary");
+  summary.setAttribute("aria-label", "选择主题色");
+  summary.title = "主题色";
+  const swatch = document.createElement("span");
+  swatch.className = "accent-swatch";
+  swatch.setAttribute("aria-hidden", "true");
+  summary.append(swatch);
+  const options = document.createElement("div");
+  options.className = "accent-options";
+  options.setAttribute("role", "group");
+  options.setAttribute("aria-label", "主题色");
+  const colors = { pink: "#fb7299", blue: "#2563eb", purple: "#7c3aed" };
+  const darkColors = { blue: "#80b4ff", purple: "#b69aff", pink: "#fb7299" };
+  const names = { pink:"B 站粉", blue:"蓝色", purple:"紫色" };
+  let selected = "pink";
+  try {
+    const saved = window.localStorage.getItem("simple-reader-theme-color");
+    if (Object.prototype.hasOwnProperty.call(colors, saved)) selected = saved;
+  } catch { /* Reading still works when browser storage is unavailable. */ }
+  const dark = window.matchMedia?.("(prefers-color-scheme: dark)");
+  const applyColor = () => {
+    const palette = dark?.matches ? darkColors : colors;
+    document.documentElement.style.setProperty("--share-accent", palette[selected]);
+    swatch.style.setProperty("--swatch", palette[selected]);
+    summary.setAttribute("aria-label", `主题色：${names[selected]}，点击选择`);
+    options.querySelectorAll("button").forEach(button => {
+      button.style.setProperty("--swatch", palette[button.dataset.color]);
+      button.setAttribute("aria-pressed", String(button.dataset.color === selected));
+    });
+  };
+  for (const [value, name] of Object.entries(names)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.color = value;
+    button.title = name;
+    button.setAttribute("aria-label", name);
+    const chip = document.createElement("span");
+    chip.className = "accent-swatch";
+    chip.setAttribute("aria-hidden", "true");
+    button.append(chip);
+    button.addEventListener("click", () => {
+      selected = value; applyColor(); picker.open = false; summary.focus();
+      try { window.localStorage.setItem("simple-reader-theme-color", value); } catch { /* Optional preference. */ }
+    });
+    options.append(button);
+  }
+  picker.addEventListener("keydown", event => {
+    if (event.key === "Escape") { picker.open = false; summary.focus(); }
+  });
+  document.addEventListener("click", event => { if (!picker.contains(event.target)) picker.open = false; });
+  dark?.addEventListener?.("change", applyColor);
+  applyColor();
+  picker.append(summary, options);
+  header.querySelector(":scope > span")?.remove();
+  header.append(picker);
+}
+const md = new MarkdownIt({ html: true, linkify: true, breaks: false }).use(footnote).use(mark);
+const escape = md.utils.escapeHtml;
+const normalFence = md.renderer.rules.fence;
+md.renderer.rules.fence = (tokens, index, options, env, self) => {
+  const token = tokens[index];
+  if (token.info.trim() === "simple-columns") {
+    const columns = parseColumns(token.content.replace(/\n$/, ""));
+    if (columns) return `<div class="simple-columns" style="--columns:${columns.widths.map((value) => `minmax(0,${value}fr)`).join(" ")}">${columns.content.map((source) => `<div class="simple-column">${md.render(source, env)}</div>`).join("")}</div>`;
+  }
+  if (token.info.trim() === "mermaid") return `<pre class="mermaid">${escape(token.content)}</pre>`;
+  if (token.info.trim().toLowerCase() === "html") return `<pre class="share-html-source"><code>${escape(token.content)}</code></pre>`;
+  return normalFence(tokens, index, options, env, self);
+};
+md.inline.ruler.before("escape", "math", (state, silent) => {
+  if (state.src[state.pos] !== "$" || state.src[state.pos + 1] === "$") return false;
+  const end = state.src.indexOf("$", state.pos + 1);
+  if (end < 0 || state.src.slice(state.pos + 1, end).includes("\n")) return false;
+  if (!silent) {
+    const token = state.push("math", "", 0);
+    token.content = state.src.slice(state.pos + 1, end);
+  }
+  state.pos = end + 1;
+  return true;
+});
+md.renderer.rules.math = (tokens, index) => katex.renderToString(tokens[index].content, { throwOnError: false, trust: false });
+md.block.ruler.before("fence", "math-block", (state, start, end, silent) => {
+  const line = state.src.slice(state.bMarks[start] + state.tShift[start], state.eMarks[start]);
+  if (line.trim() !== "$$") return false;
+  let next = start + 1;
+  while (next < end && state.src.slice(state.bMarks[next], state.eMarks[next]).trim() !== "$$") next++;
+  if (next === end) return false;
+  if (!silent) {
+    const token = state.push("math_block", "", 0);
+    token.content = state.getLines(start + 1, next, 0, false);
+    token.block = true;
+  }
+  state.line = next + 1;
+  return true;
+});
+md.renderer.rules.math_block = (tokens, index) => katex.renderToString(tokens[index].content, { displayMode: true, throwOnError: false, trust: false });
+md.core.ruler.push("heading-ids", (state) => {
+  const used = /* @__PURE__ */ new Map();
+  state.tokens.forEach((token, index) => {
+    if (token.type !== "heading_open") return;
+    const text = state.tokens[index + 1]?.content || "";
+    const base = text.trim().toLowerCase().replace(/\s+/g, "-");
+    const count = used.get(base) || 0;
+    used.set(base, count + 1);
+    token.attrSet("id", count ? `${base}-${count}` : base);
+  });
+  state.tokens.forEach((token, index) => {
+    if (token.type !== "inline" || state.tokens[index - 1]?.type !== "paragraph_open") return;
+    const tail = token.children?.[token.children.length - 1];
+    const match = /(?:^|\s)\^([A-Za-z0-9-]+)\s*$/.exec(tail?.content || "");
+    if (!match || tail?.type !== "text") return;
+    state.tokens[index - 1].attrSet("id", `^${match[1]}`);
+    tail.content = tail.content.slice(0, match.index);
+  });
+});
+function revealTarget(target) {
+  if (!target) return;
+  for (let parent = target.parentElement; parent; parent = parent.parentElement) {
+    if (parent.classList.contains("heading-body") && parent.hidden) {
+      parent.hidden = false;
+      const button = parent.previousElementSibling?.querySelector(".heading-toggle");
+      if (button) {
+        button.setAttribute("aria-expanded", "true");
+        button.setAttribute("aria-label", `\u6298\u53E0 ${button.dataset.heading}`);
+        button.firstElementChild.textContent = "\u25BE";
+      }
+    }
+    if (parent.tagName === "DETAILS") parent.open = true;
+  }
+  target.scrollIntoView();
+}
+function foldHeadings(root) {
+  const parents = new Set(Array.from(root.querySelectorAll("h1,h2,h3,h4,h5,h6"), (heading) => heading.parentElement));
+  for (const parent of parents) {
+    const stack = [];
+    for (const node of Array.from(parent.childNodes)) {
+      const tag = node.nodeType === Node.ELEMENT_NODE ? node.tagName : "";
+      const level = /^H[1-6]$/.test(tag) ? Number(tag[1]) : 0;
+      if (!level) {
+        stack[stack.length - 1]?.body.append(node);
+        continue;
+      }
+      while (stack.length && stack[stack.length - 1].level >= level) stack.pop();
+      const heading = node;
+      const section = document.createElement("section");
+      section.className = "heading-section";
+      if (stack.length) stack[stack.length - 1].body.append(section);
+      else parent.insertBefore(section, heading);
+      const body = document.createElement("div");
+      body.className = "heading-body";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "heading-toggle";
+      button.dataset.heading = heading.textContent || "\u6807\u9898";
+      const arrow = document.createElement("span");
+      arrow.textContent = "\u25BE";
+      arrow.setAttribute("aria-hidden", "true");
+      button.append(arrow);
+      button.setAttribute("aria-expanded", "true");
+      button.setAttribute("aria-label", `\u6298\u53E0 ${button.dataset.heading}`);
+      button.addEventListener("click", () => {
+        body.hidden = !body.hidden;
+        button.setAttribute("aria-expanded", String(!body.hidden));
+        button.setAttribute("aria-label", `${body.hidden ? "\u5C55\u5F00" : "\u6298\u53E0"} ${button.dataset.heading}`);
+        arrow.textContent = body.hidden ? "\u25B8" : "\u25BE";
+      });
+      heading.prepend(button);
+      section.append(heading, body);
+      stack.push({ level, body });
+    }
+  }
+}
+function enhanceDiagram(node) {
+  if (!node.querySelector("svg") || node.closest(".simple-mermaid-frame")) return;
+  const frame = document.createElement("section");
+  frame.className = "simple-mermaid-frame";
+  const toolbar = document.createElement("div");
+  toolbar.className = "simple-mermaid-toolbar";
+  const label = document.createElement("strong");
+  label.textContent = "流程图";
+  toolbar.append(label);
+  const viewport = document.createElement("div");
+  viewport.className = "simple-mermaid-viewport";
+  let scale = 1;
+  const resize = value => { scale = Math.max(.5, Math.min(4, value)); node.style.width = `${scale * 100}%`; };
+  const button = (text, action) => {
+    const control = document.createElement("button");
+    control.type = "button"; control.textContent = text;
+    control.addEventListener("click", action); toolbar.append(control); return control;
+  };
+  button("适应宽度", () => resize(1));
+  button("缩小", () => resize(scale - .25));
+  button("放大", () => resize(scale + .25));
+  const fullscreen = button("全屏", () => {
+    const open = frame.classList.toggle("is-fullscreen");
+    fullscreen.textContent = open ? "退出全屏" : "全屏";
+    fullscreen.setAttribute("aria-expanded", String(open));
+    if (open) fullscreen.focus();
+  });
+  frame.addEventListener("keydown", event => {
+    if (event.key === "Escape" && frame.classList.contains("is-fullscreen")) fullscreen.click();
+  });
+  node.before(frame); viewport.append(node); frame.append(toolbar, viewport);
+}
+function renderTags(root) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (!node.parentElement?.closest("a,pre,code,script,style,textarea,.katex,.mermaid,.share-tag")) nodes.push(node);
+  }
+  for (const node of nodes) {
+    const text = node.textContent || "";
+    const fragment = document.createDocumentFragment();
+    let offset = 0;
+    for (const match of text.matchAll(/(^|[\s（(，,；;：:])#([\p{L}\p{N}_-]+(?:\/[\p{L}\p{N}_-]+)*)/gu)) {
+      // Numeric fragments such as #123 are not Obsidian tags.
+      if (!/[\p{L}_-]/u.test(match[2])) continue;
+      const start = match.index + match[1].length;
+      fragment.append(document.createTextNode(text.slice(offset, start)));
+      const tag = document.createElement("span");
+      tag.className = "share-tag";
+      tag.textContent = `#${match[2]}`;
+      fragment.append(tag);
+      offset = match.index + match[0].length;
+    }
+    if (offset) {
+      fragment.append(document.createTextNode(text.slice(offset)));
+      node.replaceWith(fragment);
+    }
+  }
+}
+function decorate(root) {
+  renderTags(root);
+  root.querySelectorAll("img[width][height]").forEach((image) => {
+    const width = Number(image.getAttribute("width")), height = Number(image.getAttribute("height"));
+    if (width > 0 && height > 0 && width <= 4096 && height <= 4096) image.style.aspectRatio = `${width} / ${height}`;
+  });
+  root.querySelectorAll("pre.share-html-source").forEach((source) => {
+    const raw = source.textContent || "";
+    const frame = document.createElement("iframe");
+    frame.className = "share-html-preview";
+    frame.title = "HTML \u9759\u6001\u9884\u89C8";
+    frame.setAttribute("sandbox", "");
+    frame.referrerPolicy = "no-referrer";
+    const safe = DOMPurify.sanitize(raw, { WHOLE_DOCUMENT: true, ADD_TAGS: ["style"], FORBID_TAGS: ["script", "iframe", "object", "embed", "form", "link", "meta", "base"], FORBID_ATTR: ["srcdoc"] });
+    const preview = new DOMParser().parseFromString(safe, "text/html");
+    const policy = preview.createElement("meta");
+    policy.httpEquiv = "Content-Security-Policy";
+    policy.content = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' https: data:; font-src 'none'; script-src 'none'; form-action 'none'; base-uri 'none'";
+    preview.head.prepend(policy);
+    const style = preview.createElement("style");
+    style.textContent = 'body{font-family:"Microsoft YaHei",sans-serif;font-size:16px;line-height:1.8;margin:16px}img{max-width:100%;height:auto}';
+    preview.head.prepend(style);
+    frame.srcdoc = "<!doctype html>" + preview.documentElement.outerHTML;
+    const details = document.createElement("details"), summary = document.createElement("summary");
+    summary.textContent = "\u67E5\u770B HTML \u6E90\u7801";
+    source.before(frame, details);
+    details.append(summary, source);
+  });
+  root.querySelectorAll("think,thinking,think_nya\\~,snapshot,abstract,todo,seeds,events").forEach((node) => {
+    const details = document.createElement("details");
+    details.className = "share-special-block";
+    const summary = document.createElement("summary");
+    const labels = { think: "\u601D\u8003\u8FC7\u7A0B", thinking: "\u601D\u8003\u8FC7\u7A0B", "think_nya~": "\u601D\u8003\u8FC7\u7A0B", snapshot: "Snapshot", abstract: "\u6458\u8981", todo: "\u5F85\u529E", seeds: "Seeds", events: "\u4E8B\u4EF6" };
+    summary.textContent = labels[node.tagName.toLowerCase()] || node.tagName;
+    const body = document.createElement("div");
+    body.append(...Array.from(node.childNodes));
+    details.append(summary, body);
+    node.replaceWith(details);
+  });
+  root.querySelectorAll("blockquote").forEach((block) => {
+    const first = block.querySelector("p");
+    const match = /^\[!([\w-]+)\]([+-]?)([^\n]*)\n?/.exec(first?.textContent || "");
+    if (!first || !match) return;
+    block.classList.add("callout");
+    block.dataset.callout = match[1].toLowerCase();
+    const heading = document.createElement("strong");
+    heading.textContent = match[3].trim() || match[1];
+    let remaining = match[0].length;
+    const walker = document.createTreeWalker(first, NodeFilter.SHOW_TEXT);
+    while (remaining > 0) {
+      const node = walker.nextNode();
+      if (!node) break;
+      const value = node.textContent || "";
+      node.textContent = value.slice(remaining);
+      remaining -= value.length;
+    }
+    if (match[2]) {
+      const details = document.createElement("details");
+      details.open = match[2] !== "-";
+      const summary = document.createElement("summary");
+      summary.append(heading);
+      details.append(summary);
+      while (block.firstChild) details.append(block.firstChild);
+      block.append(details);
+    } else block.prepend(heading);
+  });
+  root.querySelectorAll("li > p, li").forEach((item) => {
+    const node = item.firstChild;
+    const match = /^\[([ xX])\]\s/.exec(node?.textContent || "");
+    if (!node || node.nodeType !== Node.TEXT_NODE || !match) return;
+    node.textContent = (node.textContent || "").slice(match[0].length);
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.disabled = true;
+    check.checked = match[1] !== " ";
+    item.prepend(check);
+  });
+  root.querySelectorAll("a").forEach((link) => {
+    if (/^https?:/.test(link.getAttribute("href") || "")) {
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    } else if (link.getAttribute("href")?.startsWith("#") && !link.getAttribute("href")?.startsWith("#/")) {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        revealTarget(root.querySelector(`[id="${CSS.escape(decodeURIComponent(link.hash.slice(1)))}"]`));
+      });
+    }
+  });
+}
+function renderList() {
+  list.replaceChildren();
+  const query = search.value.toLowerCase();
+  const root = { folders: new Map(), notes: [] };
+  catalog.filter((note) => `${note.title} ${note.category}`.toLowerCase().includes(query)).forEach((note) => {
+    // Categories are public folder paths; never expose the private source path.
+    const parts = (note.category || "").split(/[\\/]+/).filter(Boolean);
+    let folder = root;
+    for (const part of parts) {
+      if (!folder.folders.has(part)) folder.folders.set(part, { folders: new Map(), notes: [] });
+      folder = folder.folders.get(part);
+    }
+    folder.notes.push(note);
+  });
+  function appendFolder(parent, folder) {
+    for (const [name, child] of folder.folders) {
+      const details = document.createElement("details");
+      details.open = true;
+      const summary = document.createElement("summary");
+      summary.textContent = name;
+      const children = document.createElement("div");
+      children.className = "folder-children";
+      appendFolder(children, child);
+      details.append(summary, children);
+      parent.append(details);
+    }
+    for (const note of folder.notes) {
+      const link = document.createElement("a");
+      link.href = `#/notes/${note.id}`;
+      link.textContent = note.title;
+      parent.append(link);
+    }
+  }
+  appendFolder(list, root);
+}
+async function route() {
+  const current = ++request;
+  const match = /^#\/notes\/([a-z0-9]{12})(?:\/(.*))?$/.exec(location.hash);
+  content.replaceChildren();
+  content.closest("main")?.classList.remove("has-columns");
+  if (!match) {
+    title.textContent = "\u5206\u4EAB\u7B14\u8BB0";
+    content.textContent = `\u5171 ${catalog.length} \u7BC7\u7B14\u8BB0\uFF0C\u8BF7\u4ECE\u76EE\u5F55\u9009\u62E9\u3002`;
+    return;
+  }
+  const note = catalog.find((item) => item.id === match[1]);
+  title.textContent = note?.title || "\u7B14\u8BB0\u4E0D\u5B58\u5728\u6216\u5DF2\u5220\u9664";
+  if (!note) return;
+  content.textContent = "\u6B63\u5728\u8BFB\u53D6\u2026";
+  try {
+    const path = note.path || `notes/${note.id}.md`;
+    if (!path.startsWith("notes/") || !path.endsWith(`/${note.id}.md`) || path.split("/").some(part => !part || part.startsWith(".") || /[\\\x00-\x1f]/.test(part))) throw new Error("Invalid note path");
+    const response = await fetch(path.split("/").map(encodeURIComponent).join("/"), { cache: "no-cache" });
+    if (!response.ok) throw new Error("\u7B14\u8BB0\u6587\u4EF6\u5C1A\u672A\u90E8\u7F72\u6216\u5DF2\u5220\u9664");
+    const source = await response.text();
+    if (current !== request) return;
+    content.replaceChildren(DOMPurify.sanitize(md.render(source), { RETURN_DOM_FRAGMENT: true, ADD_TAGS: ["math", "annotation", "think", "thinking", "think_nya~", "snapshot", "abstract", "todo", "seeds", "events"], FORBID_TAGS: ["iframe", "object", "embed", "form", "style", "link", "meta"], FORBID_ATTR: ["srcdoc"] }));
+    content.closest("main")?.classList.toggle("has-columns", Boolean(content.querySelector(".simple-columns")));
+    decorate(content);
+    foldHeadings(content);
+    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default" });
+    for (const node of Array.from(content.querySelectorAll(".mermaid"))) {
+      try {
+        await mermaid.run({ nodes: [node], suppressErrors: true });
+        if (current === request) enhanceDiagram(node);
+      } catch {
+        node.classList.remove("mermaid");
+      }
+    }
+    if (current === request && match[2]) revealTarget(content.querySelector(`[id="${CSS.escape(decodeURIComponent(match[2]))}"]`));
+  } catch (error) {
+    if (current === request) content.textContent = error instanceof Error ? error.message : "\u8BFB\u53D6\u5931\u8D25";
+  }
+}
+search.addEventListener("input", renderList);
+window.addEventListener("hashchange", () => {
+  void route();
+});
+void fetch("catalog.json", { cache: "no-cache" }).then((response) => {
+  if (!response.ok) throw new Error("\u76EE\u5F55\u5C1A\u672A\u90E8\u7F72");
+  return response.json();
+}).then((value) => {
+  catalog = value.notes.filter((note) => /^[a-z0-9]{12}$/.test(note.id));
+  renderList();
+  return route();
+}).catch(() => {
+  title.textContent = "\u76EE\u5F55\u8BFB\u53D6\u5931\u8D25";
+  content.textContent = "\u8BF7\u7A0D\u540E\u5237\u65B0\uFF0C\u6216\u68C0\u67E5\u7F51\u7AD9\u90E8\u7F72\u72B6\u6001\u3002";
+});
+</script>
+</body>
+</html>

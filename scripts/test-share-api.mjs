@@ -1,0 +1,84 @@
+import assert from 'node:assert/strict';
+import { webcrypto } from 'node:crypto';
+import vm from 'node:vm';
+import esbuild from 'esbuild';
+import { shareRemoteFixture } from './share-remote-fixture.mjs';
+
+const initialState = { version: 1, notes: {}, files: ['index.html', 'publish-state.json'] };
+const remote = shareRemoteFixture({ 'index.html': 'old reader', 'publish-state.json': JSON.stringify(initialState), 'README.md': 'keep', 'private-note.md': 'never downloaded' });
+const requestUrl = async args => {
+  assert.equal(args.headers.Authorization, 'Bearer fixture-token');
+  return { status: 200, json: await remote.request(new URL(args.url).pathname, args.method, args.body ? JSON.parse(args.body) : undefined), headers: {} };
+};
+const obsidian = { requestUrl };
+const bundle = await esbuild.build({ entryPoints: ['src/features/share/apiRepository.ts'], bundle: true, write: false, platform: 'node', format: 'cjs', external: ['obsidian'] });
+const context = vm.createContext({ module: { exports: {} }, require: () => obsidian, crypto: webcrypto, TextEncoder, TextDecoder, Uint8Array, ArrayBuffer, atob, btoa, setTimeout, clearTimeout, console }); context.window = context;
+vm.runInContext(bundle.outputFiles[0].text, context);
+const { ApiShareRepository } = context.module.exports;
+// No vault adapter, CLI, main sync engine, or prior baseline is needed.
+const create = () => new ApiShareRepository({}, { owner: 'test', repo: 'public', branch: 'main' }, 'fixture-token');
+let repo = create(); await repo.verify(); await repo.refresh();
+assert.equal(remote.calls.filter(c => c.path.includes('/git/blobs/') && c.method === 'GET').length, 1, 'only the cloud publishing manifest is downloaded');
+const target = { ...initialState, files: ['index.html', 'publish-state.json', '.nojekyll'] };
+const files = new Map([['index.html', 'new reader'], ['publish-state.json', JSON.stringify(target)], ['.nojekyll', '']]);
+const originalHead = remote.head;
+const job = await repo.writeFiles(files, await repo.state()); assert.equal(job.base, originalHead);
+await repo.push(job); assert.equal(remote.files.get('index.html').toString(), 'new reader');
+assert(remote.files.has('README.md') && remote.files.has('private-note.md'));
+repo = create(); await repo.refresh();
+const unchanged = await repo.writeFiles(files, await repo.state());
+assert.equal(Object.keys(unchanged.expected).length, 0);
+const count = remote.calls.filter(c => c.method !== 'GET').length;
+await repo.push(unchanged);
+assert.equal(remote.calls.filter(c => c.method !== 'GET').length, count, 'identical files create no blob/tree/commit/update requests');
+const changed = new Map(files); changed.set('index.html', 'changed again');
+const delta = await repo.writeFiles(changed, await repo.state()); assert.deepEqual(Object.keys(delta.expected), ['index.html']);
+await repo.push(delta);
+repo = create(); await repo.refresh();
+const removed = new Map([['index.html', 'changed again'], ['publish-state.json', JSON.stringify(initialState)]]);
+const removal = await repo.writeFiles(removed, await repo.state()); assert.equal(removal.expected['.nojekyll'], null);
+await repo.push(removal); assert(!remote.files.has('.nojekyll')); assert(remote.files.has('README.md'));
+repo = create(); await repo.refresh();
+const race = await repo.writeFiles(files, await repo.state()); remote.advance();
+await assert.rejects(() => repo.push(race), /生成期间发生变化/);
+repo = create(); await repo.refresh();
+const uncertain = await repo.writeFiles(files, await repo.state()); remote.loseResponse = true;
+await assert.rejects(() => repo.push(uncertain), /lost response/);
+// A new publisher after restart regenerates the same target and discovers the completed push.
+repo = create(); await repo.refresh();
+const recovered = await repo.writeFiles(files, await repo.state()); assert.equal(Object.keys(recovered.expected).length, 0);
+await repo.push(recovered);
+remote.truncated = true; await assert.rejects(() => create().refresh(), /截断/); remote.truncated = false;
+remote.mode = '120000'; await assert.rejects(() => create().refresh(), /符号链接/); remote.mode = '100644';
+await repo.refresh();
+const invalid = new Map(files); invalid.set('.obsidian/data.json', 'private');
+await assert.rejects(() => repo.writeFiles(invalid, target), /非法/);
+const unrelated = new Map(files); unrelated.set('reader/unmanaged.css','new');
+const unmanagedRemote = shareRemoteFixture({ 'reader/unmanaged.css':'existing' });
+const isolated = create(); isolated.api = async args => JSON.stringify(await unmanagedRemote.request(args[0], 'GET'));
+await assert.rejects(() => isolated.refresh(), /没有发布清单/);
+// Inspecting an empty repository is read-only; publication initializes only its ownership metadata.
+let empty = true, initialized;
+const emptyCalls = [];
+const emptyRepo = create();
+emptyRepo.api = async (args, input) => {
+  const method = args[args.indexOf('--method') + 1], body = input ? JSON.parse(input) : undefined;
+  emptyCalls.push({ path: args[0], method });
+  if (empty && args[0].includes('/git/ref/')) throw Error('HTTP 409 empty');
+  if (empty && args[0].includes('/branches?')) return '[]';
+  if (empty && args[0].endsWith('/contents/publish-state.json')) {
+    assert.equal(method, 'PUT'); assert.equal(body.branch, 'main');
+    initialized = shareRemoteFixture({ 'publish-state.json': Buffer.from(body.content, 'base64') });
+    empty = false; return '{}';
+  }
+  return JSON.stringify(await initialized.request(args[0], method, body));
+};
+await emptyRepo.refresh();
+assert(emptyCalls.every(call => call.method === 'GET'));
+const first = await emptyRepo.writeFiles(files, await emptyRepo.state());
+await emptyRepo.push(first);
+assert.equal(initialized.files.get('index.html').toString(), 'new reader');
+assert(!initialized.files.has('.git'));
+const noAccess = create(); noAccess.api = async () => { throw Error('HTTP 403 denied'); };
+await assert.rejects(() => noAccess.refresh(), /403 denied/);
+console.log('Direct API publishing passed: no CLI/clone/sync baseline or disk cache, metadata-only reads, blob-hash deltas, unchanged no-op, scoped deletion, races and restart recovery.');
