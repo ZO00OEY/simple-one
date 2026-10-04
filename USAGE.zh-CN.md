@@ -10,7 +10,7 @@ Simple One 是一个 Obsidian 插件，提供笔记排版、网页采集、日�
 2. 启用插件，打开 **设置 → Simple One**。
 3. 选择需要的功能，开启并调整对应设置。
 
-手动安装时，从 [Releases](https://github.com/ZO00OEY/simple-one/releases) 的同一版本下载 `main.js`、`manifest.json` 和 `styles.css`，放入笔记库的 `.obsidian/plugins/simple-one/` 文件夹。升级时保留已有的 `data.json` 与自定义模板。插件会从内置副本自动生成缺失的 `default.html` 和 `reader-licenses.txt`，无需额外下载；这两个文件也随同一 Release 提供。
+手动安装时，从 [Releases](https://github.com/ZO00OEY/simple-one/releases) 的同一版本下载 `main.js`、`manifest.json` 和 `styles.css`，放入笔记库的 `.obsidian/plugins/simple-one/` 文件夹。升级时保留已有的 `data.json` 与自定义模板。插件会从内置副本自动生成缺失的 `default.html` 和 `reader-licenses.txt`，无需额外下载。
 
 ## 同步笔记库
 

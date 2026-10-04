@@ -10,7 +10,7 @@ Simple One is an Obsidian plugin for formatting notes, capturing webpages, manag
 2. Enable the plugin, then open **Settings → Simple One**.
 3. Turn on the features you want and configure their options.
 
-For manual installation, download `main.js`, `manifest.json`, and `styles.css` from the same version in [Releases](https://github.com/ZO00OEY/simple-one/releases) and place them in your vault's `.obsidian/plugins/simple-one/` folder. Keep your existing `data.json` and custom templates when upgrading. The plugin restores missing `default.html` and `reader-licenses.txt` from its bundled copy without a separate download; these files are also provided in the same Release.
+For manual installation, download `main.js`, `manifest.json`, and `styles.css` from the same version in [Releases](https://github.com/ZO00OEY/simple-one/releases) and place them in your vault's `.obsidian/plugins/simple-one/` folder. Keep your existing `data.json` and custom templates when upgrading. The plugin restores missing `default.html` and `reader-licenses.txt` from its bundled copy without a separate download.
 
 ## Sync your vault
 
