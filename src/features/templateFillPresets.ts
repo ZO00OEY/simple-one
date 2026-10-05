@@ -14,16 +14,6 @@ export function jjwxcFields(): FieldExtraction[] {
   ];
 }
 
-export function shukuFields(): FieldExtraction[] {
-  return [
-    { id: nextId(), fieldName: "书名", source: "h1", regex: "^(?:\\[[^\\]]+\\]\\s*)?(.+?)(?:》作者[：:\\-]|_[^_【]+(?:【|$))", replaceWith: "$1" },
-    { id: nextId(), fieldName: "作者", source: "h1", regex: "(?:作者[：:\\-]|_)\\s*([^【\\s_]+)", replaceWith: "$1" },
-    { id: nextId(), fieldName: "特殊标签", page: "read", source: ".article-content", regex: "(?:^|\\n)\\s*(?:标签|内容标签)[：:]\\s*([^\\n]+)", replaceWith: "$1" },
-    { id: nextId(), fieldName: "文案", page: "read", source: ".article-content", regex: "[\\s\\S]*?(?:^|\\n)\\s*(?:【?(?:小说|本书|内容|作品|书籍)?简介】?|【?文案(?:[一二三四1234])?】?)[：:]?\\s*([\\s\\S]*?)(?:\\n\\s*(?:标签|内容标签|主角|主角视角|其它|一句话简介|立意)[：:]|\\n\\s*第\\s*(?:1|一)\\s*章|\\n\\s*第[一二三四五六七八九十百千0-9]+\\s*章|$)", replaceWith: "$1" },
-    { id: nextId(), fieldName: "我的评分", source: "", regex: "", replaceWith: "" },
-  ];
-}
-
 export function skillsFields(): FieldExtraction[] {
   return [
     { id: nextId(), fieldName: "技能名称", source: "title", regex: "^(.*?)\\s*—", replaceWith: "$1" },
@@ -64,45 +54,6 @@ export function defaultTemplateCategories(): TemplateCategory[] {
       noteFormat: "",
       siteRules: [
         { id: nextId(), name: "晋江", shortName: "晋江", urlPattern: "jjwxc\\.net", fields: jjwxcFields() },
-        {
-          id: nextId(),
-          name: "52书库",
-          shortName: "52书库",
-          urlPattern: "52shuku\\.net",
-          search: {
-            enabled: true,
-            searchUrl: "https://www.52shuku.net/so/search.php?q={{queryEncoded}}",
-            resultLimit: 10,
-            resultList: ".content article.excerpt",
-            resultTitle: "header h4",
-            resultUrl: "header a",
-            resultIntro: ".note",
-            nextPage: {
-              type: "selectorHref",
-              page: "main",
-              selector: ".pagination2 b + a",
-            },
-          },
-          input: {
-            baseUrl: {
-              type: "urlReplace",
-              regex: "_\\d+\\.html$",
-              replaceWith: ".html",
-            },
-          },
-          pages: [
-            { id: "main", url: "{{baseUrl}}" },
-            {
-              id: "read",
-              urlFrom: {
-                type: "urlReplace",
-                regex: "\\.html$",
-                replaceWith: "_2.html",
-              },
-            },
-          ],
-          fields: shukuFields(),
-        },
         {
           id: nextId(),
           name: "番茄小说",

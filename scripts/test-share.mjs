@@ -193,7 +193,7 @@ try {
     };
     setting.addSearch = setting.addText;
     setting.addButton = configure => {
-      const buttonEl = setting.settingEl.createEl("button");
+      const buttonEl = setting.controlEl.createEl("button");
       const control = { buttonEl, setButtonText(text) { buttonEl.textContent = text; return this; }, setIcon(value) { buttonEl.dataset.icon = value; return this; }, setTooltip(value) { buttonEl.title = value; return this; }, setDisabled(value) { buttonEl.disabled = value; return this; }, setCta() { return this; }, onClick(callback) { buttonEl.addEventListener("click", callback); return this; } };
       configure(control); return setting;
     };
@@ -315,13 +315,17 @@ try {
     panel.manifest.site = { owner: 'fixture', repo: 'share', branch: 'main' };
     const view = new combined.ShareView({ app: panel.host.app, contentEl: rootEl }, panel);
     view.render();
-    assert.equal(rootEl.querySelector('.simple-share-header button').textContent, '推送新分享', 'new-share action is first in the top toolbar');
-    assert(rootEl.querySelector('.simple-share-header button').classList.contains('simple-share-new'));
-    assert(rootEl.querySelector('.simple-share-header button .simple-share-new-icon'));
+    assert(rootEl.querySelector('.simple-share-header button').classList.contains('simple-share-edit'), 'tools start at the left of the top toolbar');
+    assert.equal(rootEl.querySelector('.simple-share-header button:last-child').textContent, '切换同步', 'sync switch ends the toolbar');
+    assert.equal(rootEl.querySelector('.simple-share-header').nextElementSibling.className, 'setting-item simple-share-publish-row');
+    assert.equal(rootEl.querySelector('.simple-share-publish-row').nextElementSibling.className, 'setting-item simple-share-search');
+    assert.equal(rootEl.querySelector('.simple-share-publish-row button').textContent, '推送新分享');
+    assert(rootEl.querySelector('.simple-share-publish-row button').classList.contains('simple-share-new'));
+    assert(rootEl.querySelector('.simple-share-publish-row button .simple-share-new-icon'));
     assert.equal(rootEl.querySelectorAll('.simple-share-quick-actions button').length, 0, 'mode entry buttons are removed');
     let sidebarPushes = 0;
     panel.publish = async () => { sidebarPushes++; };
-    rootEl.querySelector('.simple-share-header button').click();
+    rootEl.querySelector('.simple-share-publish-row button').click();
     assert.equal(sidebarPushes, 1, 'top push button publishes all pending sharing changes');
     assert(rootEl.querySelector('.simple-share-search').nextElementSibling.classList.contains('simple-share-selection-bar'));
     assert.equal(rootEl.querySelector('.simple-share-actions > button'), null, 'new-share action no longer occupies the search footer');
@@ -444,9 +448,9 @@ try {
       configure(item);copyMenuItems.push(item);
     } };
     ui.addCopyContentMenu(copyMenu);
-    assert.deepEqual(copyMenuItems.map(item => item.title), ['复制内容', '笔记标题', 'GitHub 链接', 'Page One 链接']);
-    assert.equal(copyMenuItems[3].icon, 'check-square', 'sidebar menu reflects the settings page');
-    copyMenuItems[1].click();
+    assert.deepEqual(copyMenuItems.map(item => item.title), ['笔记标题', 'GitHub 链接', 'Page One 链接']);
+    assert.equal(copyMenuItems[2].icon, 'check-square', 'sidebar menu reflects the settings page');
+    copyMenuItems[0].click();
     ui.renderSettings(rootEl, false, false);
     assert(!rootEl.querySelector('.simple-share-settings-dependent input[aria-label="笔记标题"]').checked, 'menu changes reflect in the settings page');
     ui.updateCopyContent = originalCopyChange;

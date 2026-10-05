@@ -161,6 +161,21 @@ for (const path of [".custom/cache/x", ".custom/plugins/simple-link/data.json", 
 assert.equal(link.included(".custom/plugins/simple-link/sync-settings.json", customOptions, ".custom", "simple-link"), true);
 assert.equal(link.included("notes/keep.md", customOptions, ".custom", "simple-link"), true);
 
+const aiOptions = { ...link.DEFAULT_MOBILE_OPTIONS, syncPlugins: true, plugins: ["simple-ai"], ignorePatterns: ["!**"] };
+for (const file of ["index.json", "memory.json", "work.json.previous", "sessions/chat.json", "images/attachment.txt"]) {
+  const path = `.custom/plugins/simple-ai/private/${file}`;
+  assert(raw.shouldIgnore(path, ["!**"], ".custom"));
+  assert.equal(link.included(path, aiOptions, ".custom", "simple-one"), false);
+  assert.throws(() => raw.assertNoPrivateSyncFiles([path], ".custom"), /私人配置/);
+}
+for (const file of ["data.json", "main.js", "styles.css", "manifest.json"]) {
+  const path = `.custom/plugins/simple-ai/${file}`;
+  assert.equal(link.included(path, aiOptions, ".custom", "simple-one"), true);
+  raw.assertNoPrivateSyncFiles([path], ".custom");
+}
+assert.equal(link.included(".custom/plugins/simple-ai/data.json", { ...aiOptions, plugins: [] }, ".custom", "simple-one"), false);
+assert.equal(link.included(".custom/plugins/other/data.json", { ...aiOptions, plugins: ["other"] }, ".custom", "simple-one"), false);
+
 const oneOptions = { ...link.DEFAULT_MOBILE_OPTIONS, syncPlugins: true, plugins: ["simple-one", "simple-link"], ignorePatterns: ["!.custom/plugins/simple-one/**", "!.custom/plugins/simple-link/**"] };
 for (const plugin of ["simple-one", "simple-link"]) {
   for (const file of ["data.json", "sync-local.json", "link-state.json", "link-state.json.recovery", "data.json.bak", "sync-local.json_copy", "mobile-ignore.json"]) {

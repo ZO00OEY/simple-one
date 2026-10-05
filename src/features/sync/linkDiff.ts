@@ -118,7 +118,7 @@ export function included(path: string, options: MobileOptions, configDir: string
     const id = path.slice(`${configDir}/plugins/`.length).split("/")[0];
     if (!options.syncPlugins || (id !== "__link_scan__" && !options.plugins.includes(id))) return false;
     // Device credentials and runtime plugin state never travel through API sync.
-    if (/\/(?:data|sync-settings)\.json$/i.test(path)) return false;
+    if (/\/(?:data|sync-settings)\.json$/i.test(path) && path !== `${configDir}/plugins/simple-ai/data.json`) return false;
   }
   else if (path === configDir || path.startsWith(`${configDir}/`)) return false;
   if (!options.syncImages && IMAGE_EXTENSIONS.includes(path.split(".").pop()!.toLowerCase())) return false;

@@ -101,4 +101,24 @@ try {
   assert.equal(errors.length, 1);
   assert.ok(globalThis.__simpleTest.notices[0].includes("check failure"));
 } finally { console.error = originalConsoleError; delete globalThis.__simpleTest; }
-console.log("Smoke checks passed: formatting, window hooks, platform settings, confirmation, async errors.");
+const { addAttachmentFolderToSearchExclusions } = await load("src/features/searchFolderFilter.ts", `
+  export class Modal {} export class Setting {} export class TFile {} export class TFolder {}
+  export class Notice {} export function setIcon() {}
+  export function normalizePath(path) { return path.replace(/\\\\/g, '/').replace(/\\/+/g, '/').replace(/^\\/|\\/$/g, ''); }
+`);
+const searchConfig = { enabled: false, includeFolders: ["Notes"], excludeFolders: ["Private"] };
+let attachmentFolder = "Attachments";
+const searchPlugin = { settings: { searchFolders: searchConfig }, app: { vault: { getConfig: () => attachmentFolder } } };
+assert.equal(addAttachmentFolderToSearchExclusions(searchPlugin), true);
+assert.deepEqual(searchConfig.excludeFolders, ["Private", "Attachments"]);
+assert.equal(addAttachmentFolderToSearchExclusions(searchPlugin), false, "attachment folder must not be duplicated");
+assert.deepEqual(searchConfig.includeFolders, ["Notes"]);
+assert.equal(searchConfig.enabled, false, "automatic exclusion must not enable search filtering");
+for (const location of ["/", ".", "./", "./images", "", undefined]) {
+  attachmentFolder = location;
+  assert.equal(addAttachmentFolderToSearchExclusions(searchPlugin), false, "non-fixed attachment locations must be ignored");
+}
+attachmentFolder = "New Attachments";
+assert.equal(addAttachmentFolderToSearchExclusions(searchPlugin), true);
+assert.deepEqual(searchConfig.excludeFolders, ["Private", "Attachments", "New Attachments"]);
+console.log("Smoke checks passed: formatting, window hooks, platform settings, confirmation, async errors, attachment search exclusions.");

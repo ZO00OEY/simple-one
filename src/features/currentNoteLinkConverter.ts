@@ -5,7 +5,7 @@ import { reformatCurrentNote } from "./noteReformat";
 
 const ACTION_ATTR = "data-simple-current-note-link-converter";
 export const REFORMAT_ICON = "simple-reformat";
-export const REFORMAT_NAME = "快速排版";
+export const REFORMAT_NAME = "自动排版";
 const CHECKBOX_CHECKED_ICON = "simple-square-check-contained";
 
 addIcon(
@@ -61,7 +61,7 @@ function createLinkConverterMenu(plugin: SimplePlugin, syncAllActions: () => voi
     });
     menu.addItem((item) => {
       item
-        .setTitle("重排版当前笔记")
+        .setTitle("对当前笔记自动排版")
         .setIcon(REFORMAT_ICON)
         .onClick(async () => {
           await reformatCurrentNote(plugin);
@@ -72,7 +72,7 @@ function createLinkConverterMenu(plugin: SimplePlugin, syncAllActions: () => voi
 
   menu.addItem((item) => {
     item
-      .setTitle("URL 粘贴设置")
+      .setTitle("粘贴时的 URL 处理")
       .setIcon("folder")
       .setDisabled(true);
   });
@@ -107,13 +107,13 @@ function createLinkConverterMenu(plugin: SimplePlugin, syncAllActions: () => voi
   menu.addSeparator();
   menu.addItem((item) => {
     item
-      .setTitle("重排版设置")
+      .setTitle("自动排版设置")
       .setIcon("settings-2")
       .setDisabled(true);
   });
   menu.addItem((item) => {
     item
-      .setTitle("重排版时链接格式化")
+      .setTitle("自动排版时格式化链接")
       .setIcon(checkboxIcon(reformat.runLinkConversion))
       .onClick(async () => {
         reformat.runLinkConversion = !reformat.runLinkConversion;
@@ -121,12 +121,12 @@ function createLinkConverterMenu(plugin: SimplePlugin, syncAllActions: () => voi
         keepOpenAfterClick();
         await plugin.saveSettings();
         syncAllActions();
-        new Notice(reformat.runLinkConversion ? "已开启重排版时链接格式化" : "已关闭重排版时链接格式化");
+        new Notice(reformat.runLinkConversion ? "已开启自动排版时格式化链接" : "已关闭自动排版时格式化链接");
       });
   });
   menu.addItem((item) => {
     item
-      .setTitle("粘贴文本时自动触发重排版")
+      .setTitle("粘贴文本时触发自动排版")
       .setIcon(checkboxIcon(reformat.autoReformatAfterPaste))
       .onClick(async () => {
         reformat.autoReformatAfterPaste = !reformat.autoReformatAfterPaste;
@@ -134,7 +134,7 @@ function createLinkConverterMenu(plugin: SimplePlugin, syncAllActions: () => voi
         keepOpenAfterClick();
         await plugin.saveSettings();
         syncAllActions();
-        new Notice(reformat.autoReformatAfterPaste ? "已开启粘贴文本时自动触发重排版" : "已关闭粘贴文本时自动触发重排版");
+        new Notice(reformat.autoReformatAfterPaste ? "已开启粘贴文本时触发自动排版" : "已关闭粘贴文本时触发自动排版");
       });
   });
   return menu;
@@ -164,8 +164,8 @@ function actionTitle(plugin: SimplePlugin): string {
     reformat.runLinkConversion ? "链接格式化" : "",
   ].filter(Boolean);
   return [
-    `点击重排版当前笔记${enabledSteps.length ? `：${enabledSteps.join(" → ")}` : ""}`,
-    "右键：打开排版设置",
+    `点击对当前笔记自动排版${enabledSteps.length ? `：${enabledSteps.join(" → ")}` : ""}`,
+    "右键：打开自动排版设置",
   ].join("\n");
 }
 

@@ -1,4 +1,4 @@
-import { Menu, Notice, setIcon, setTooltip, type Editor } from "obsidian";
+import { Menu, Notice, setIcon, setTooltip, type Editor, type MenuItem } from "obsidian";
 import type SimplePlugin from "../main";
 import {
   QUICK_FORMAT_CALLOUTS,
@@ -11,7 +11,7 @@ import { readCalloutColor } from "../shared/calloutColor";
 const ACTION_ATTR = "data-simple-quick-format";
 const quickFormatSheets = new WeakMap<Document, CSSStyleSheet>();
 export const QUICK_FORMAT_ICON = "heading";
-export const QUICK_FORMAT_NAME = "快速设置文本格式";
+export const QUICK_FORMAT_NAME = "格式调整快捷键";
 
 type ColumnFormatTarget = { apply: (mode: QuickFormatMode) => boolean; hold: (value: boolean) => void };
 let activeColumnFormatTarget: ColumnFormatTarget | null = null;
@@ -57,16 +57,6 @@ export function applyQuickFormatStyles(plugin: SimplePlugin, extraDoc?: Document
     }
   }
 
-  for (const definition of QUICK_FORMAT_CALLOUTS) {
-    const { type } = definition;
-    const color = quickFormat.calloutColors[type];
-    if (!isHexColor(color)) continue;
-    const rgb = hexToRgbTriplet(color);
-    for (const alias of [type, ...definition.aliases]) {
-      rules.push(`body{--callout-${alias}:${rgb};}`);
-      addCalloutColorRules(rules, alias, rgb);
-    }
-  }
   for (const callout of quickFormat.customCallouts) {
     if (!isHexColor(callout.color) || !callout.type.trim()) continue;
     const type = callout.type.trim().toLowerCase();
@@ -112,6 +102,48 @@ function addCalloutColorRules(rules: string[], type: string, rgb: string): void 
 
 export function registerQuickFormat(plugin: SimplePlugin): () => void {
   let openMenu: Menu | null = null;
+  plugin.addCommand({
+    id: "apply-quick-format",
+    name: "执行格式编辑预设",
+    checkCallback: (checking) => {
+      if (!plugin.settings.enhancements.quickFormat.enabled || (!activeColumnFormatTarget && !plugin.app.workspace.activeEditor?.editor)) return false;
+      if (!checking) applyQuickFormat(plugin);
+      return true;
+    },
+  });
+  type SubmenuItem = MenuItem & { setSubmenu(): Menu; dom: HTMLElement };
+  type NativeMenu = Menu & { items: (MenuItem & { dom: HTMLElement; section?: string; submenu?: NativeMenu })[] };
+  plugin.registerEvent(plugin.app.workspace.on("editor-menu", (menu, editor) => {
+    const settings = plugin.settings.enhancements.quickFormat;
+    if (!settings.enabled || !settings.showCalloutsInParagraphMenu) return;
+    menu.addItem(parent => {
+      parent.setTitle("段落设置（Callout 块）").setIcon("message-square").setSection("");
+      const paragraph = (parent as SubmenuItem).setSubmenu();
+      // Native paragraph settings are appended after editor-menu listeners finish.
+      queueMicrotask(() => {
+        const items = (menu as NativeMenu).items;
+        const nativeParagraph = items.find(item => item.submenu?.items.some(child => child.section === "paragraph.block"));
+        const index = items.indexOf(parent as SubmenuItem);
+        if (!nativeParagraph || index < 0) return;
+        const [entry] = items.splice(index, 1);
+        items.splice(items.indexOf(nativeParagraph) + 1, 0, entry);
+        nativeParagraph.dom.after(entry.dom);
+      });
+      for (const mode of visibleModes(plugin).filter(mode => mode.startsWith("callout-") || mode.startsWith("custom-callout:"))) {
+        const color = calloutColor(plugin, calloutTypeFromMode(plugin, mode));
+        paragraph.addItem(item => {
+          item.setTitle(menuTitle(plugin, mode, color)).setIcon(modeIcon(mode)).setSection("paragraph.block")
+            .onClick(() => {
+              if (!settings.enabled || !settings.showCalloutsInParagraphMenu) return;
+              const selection = editor.getSelection();
+              if (!selection) { new Notice("请先选中要转换的内容"); return; }
+              editor.replaceSelection(formatSelection(plugin, selection, mode));
+            });
+          if (color) setMenuItemIconColor(item, color);
+        });
+      }
+    });
+  }));
 
   const syncAllActions = registerMarkdownAction(
     plugin,
@@ -122,7 +154,7 @@ export function registerQuickFormat(plugin: SimplePlugin): () => void {
     },
     (view) => {
       const action = view.addAction(QUICK_FORMAT_ICON, actionTitle(plugin), () => applyQuickFormat(plugin));
-      action.addEventListener("pointerdown", (event) => { if (activeColumnFormatTarget) event.preventDefault(); });
+      action.addEventListener("pointerdown", (event) => { if (event.button === 0 || activeColumnFormatTarget) event.preventDefault(); });
       action.addEventListener("contextmenu", (evt) => {
         evt.preventDefault();
         evt.stopPropagation();
@@ -147,7 +179,11 @@ function createQuickFormatMenu(plugin: SimplePlugin, syncAllActions: () => void)
   const modes = visibleModes(plugin);
   const headingModes = modes.filter(isHeadingMode);
   if (headingModes.length) {
-    menu.addItem((item) => item.setTitle("当前行").setIcon("heading").setDisabled(true));
+    const heading = isHeadingMode(current) ? current : headingModes[0];
+    menu.addItem((item) => {
+      item.setTitle("改变光标行格式").setIcon("heading").setDisabled(true);
+      setMenuItemIconColor(item, getCssVar(`--${heading}-color`, "--text-normal"));
+    });
     for (const mode of headingModes) addQuickFormatMenuItem(menu, plugin, syncAllActions, current, mode);
   }
 
@@ -169,7 +205,8 @@ function addQuickFormatMenuItem(
 ): void {
   menu.addItem((item) => {
     const isCallout = mode.startsWith("callout-") || mode.startsWith("custom-callout:");
-    const color = isCallout ? calloutColor(plugin, calloutTypeFromMode(plugin, mode)) : "";
+    const color = isHeadingMode(mode) ? getCssVar(`--${mode}-color`, "--text-normal")
+      : isCallout ? calloutColor(plugin, calloutTypeFromMode(plugin, mode)) : "";
     const menuItem = item
       .setTitle(menuTitle(plugin, mode, color))
       .setIcon(modeIcon(mode))
@@ -177,7 +214,6 @@ function addQuickFormatMenuItem(
     if (color) setMenuItemIconColor(menuItem, color);
     menuItem.onClick(async () => {
       plugin.settings.enhancements.quickFormat.lastMode = mode;
-      applyQuickFormat(plugin);
       await plugin.saveSettings();
       syncAllActions();
     });
@@ -243,7 +279,7 @@ function formatCallout(text: string, type: string): string {
   return `> [!${type}]\n${body}`;
 }
 
-function modeIcon(mode: QuickFormatMode): string {
+export function modeIcon(mode: QuickFormatMode): string {
   if (mode.startsWith("h")) return "heading";
   if (mode === "quote") return "quote";
   if (mode.startsWith("callout-")) {
@@ -307,9 +343,17 @@ function actionTitle(_plugin: SimplePlugin): string {
 }
 
 function syncActionButton(plugin: SimplePlugin, action: HTMLElement): void {
-  setIcon(action, QUICK_FORMAT_ICON);
+  const mode = plugin.settings.enhancements.quickFormat.lastMode;
+  setIcon(action, modeIcon(mode));
+  action.style.color = quickFormatIconColor(plugin);
   action.addClass("simple-quick-format-action");
-  setTooltip(action, QUICK_FORMAT_NAME);
+  setTooltip(action, `当前预设：${modeLabel(plugin, plugin.settings.enhancements.quickFormat.lastMode)}；左键执行，右键选择预设`);
+}
+
+export function quickFormatIconColor(plugin: SimplePlugin): string {
+  const mode = plugin.settings.enhancements.quickFormat.lastMode;
+  return isHeadingMode(mode) ? getCssVar(`--${mode}-color`, "--text-normal")
+    : mode.startsWith("callout-") || mode.startsWith("custom-callout:") ? calloutColor(plugin, calloutTypeFromMode(plugin, mode)) : "";
 }
 
 export function visibleModes(plugin: SimplePlugin): QuickFormatMode[] {

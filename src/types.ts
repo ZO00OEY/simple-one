@@ -85,6 +85,7 @@ export interface SiteRule {
   input?: InputUrlConfig;
   pages?: PageRequest[];
   search?: SearchRule;
+  bodySuffix?: string;
   fields: FieldExtraction[];
 }
 
@@ -94,6 +95,7 @@ export interface TemplateCategory {
   icon?: string;
   outputFolder: string;
   filenameField: string;
+  propertyFields?: string[];
   noteFormat?: string;
   siteRules: SiteRule[];
 }
@@ -126,6 +128,8 @@ export interface SimplePluginSettings {
   enableHtmlPreview: boolean;
   enableReadableCustomTags: boolean;
   enableNotionColumns: boolean;
+  enableNotionColumnsMouseGesture: boolean;
+  enableNotionColumnsContextMenu: boolean;
   htmlPreviewRules: HtmlPreviewRule[];
   enhancements: EnhancementSettings;
   diary: DiarySettings;
@@ -242,6 +246,7 @@ export interface QuickFormatSettings {
   enabled: boolean;
   showDesktopEntry: boolean;
   showMobileEntry: boolean;
+  showCalloutsInParagraphMenu: boolean;
   lastMode: QuickFormatMode;
   visibleModes: QuickFormatMode[];
   headingColors: Record<QuickFormatHeadingLevel, string>;
@@ -681,6 +686,8 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   enableHtmlPreview: true,
   enableReadableCustomTags: true,
   enableNotionColumns: true,
+  enableNotionColumnsMouseGesture: true,
+  enableNotionColumnsContextMenu: true,
   htmlPreviewRules: [],
   enhancements: {
     quickCopyLink: {
@@ -691,6 +698,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
       enabled: true,
       showDesktopEntry: true,
       showMobileEntry: true,
+      showCalloutsInParagraphMenu: true,
       lastMode: "h3",
       visibleModes: ["h3", "h4", "h5", "quote", "callout-note", "callout-important", "callout-tip", "callout-question", "callout-warning", "callout-example", "custom-callout:simple-default-tips"],
       headingColors: {
@@ -794,7 +802,6 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   },
   filterRules: [
     { id: nextId(), enabled: true, urlPattern: "jjwxc\\.net", titleRegex: "《([^》]+)》", replaceWith: "" },
-    { id: nextId(), enabled: true, urlPattern: "52shuku\\.net", titleRegex: "^(.*?)_.*", replaceWith: "$1" },
   ],
   templateCategories: [],
 };

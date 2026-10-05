@@ -27,6 +27,7 @@ export function recommendedIgnoreRules(configDir: string): string[] {
   `${configDir}/plugins/simple-one/link-state.json*`,
   `${configDir}/plugins/simple-one/link-state.json.recovery`,
   `${configDir}/plugins/simple-one/mobile-ignore.json*`,
+  `${configDir}/plugins/simple-ai/private/`,
   "conflict-files-obsidian-git.md",
   "# AI 工具的本机临时产物与会话",
   ".codex/output/",
@@ -159,6 +160,8 @@ export function coalesceDirty(entries: DirtyEntry[], next: DirtyEntry): DirtyEnt
 
 export function isPrivateSyncPath(path: string, configDir: string): boolean {
   if (path === ".gitshare" || path.startsWith(".gitshare/")) return true;
+  const aiStorage = `${configDir}/plugins/simple-ai/private`;
+  if (path === aiStorage || path.startsWith(`${aiStorage}/`)) return true;
   for (const id of ["simple-one", "simple-link"]) {
     const prefix = `${configDir}/plugins/${id}/`;
     if (path.startsWith(prefix) && /^(?:data\.json|sync-local\.json|share-local\.json|link-state\.json|mobile-ignore\.json)(?:$|[.~_-])/i.test(path.slice(prefix.length))) return true;

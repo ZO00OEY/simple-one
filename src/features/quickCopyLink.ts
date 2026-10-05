@@ -144,7 +144,7 @@ function actionTitle(plugin: SimplePlugin): string {
   return `点击复制当前笔记${MODE_LABELS[mode]}`;
 }
 
-function modeIcon(mode: QuickCopyLinkMode): string {
+export function modeIcon(mode: QuickCopyLinkMode): string {
   return MODE_ICONS[mode];
 }
 

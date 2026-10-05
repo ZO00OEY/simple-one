@@ -37,6 +37,47 @@ try {
     vm.runInContext(source, context);
     assert.deepEqual(nodeLoads, [], `${platform}: plugin loads without Node modules`);
     const { LinkPlugin, MobileGithub, extractRepositoryArchive, blobSha, ZoeySyncConflictPreviewModal, textParts, resolveTextParts } = context.module.exports;
+    // Completing (or leaving) the guide must redraw the sidebar after releasing
+    // the busy flag, even when no later vault event triggers another render.
+    for (const outcome of ["success", "cancel", "error"]) {
+      const finalViews = [];
+      const engine = {
+        state: {}, load: async () => {}, verifyAccess: async () => ({ branch: "main" }),
+        bind: async remote => remote,
+        preview: async () => {
+          if (outcome === "error") throw new Error("fixture preview failure");
+          return { conflicts: [], downloads: [], desired: {} };
+        },
+        execute: async () => {
+          engine.state.baseCommitSha = "confirmed";
+          guide.syncActivity = { tone: "checking", text: "新基准已确认" };
+        },
+        requiresPluginReload: () => false
+      };
+      const guide = {
+        host: {}, app: {}, manifest: { id: "simple-one" },
+        settings: { mobile: {}, enabled: true },
+        syncing: false, switchingSyncMode: false,
+        syncActivity: { tone: "checking", text: "正在同步" },
+        getMobileGithub: () => engine,
+        deactivateFeature: () => {}, activateFeature: () => {},
+        saveSettings: async () => {}, mobileHost: () => ({ save: async () => {} }),
+        setStatus: () => {}, recordSuccess: async () => {},
+        lightweightFlow: () => ({ strategy: async () => "custom", confirm: async () => outcome !== "cancel" }),
+        clearSyncActivity: LinkPlugin.prototype.clearSyncActivity,
+        refreshSyncView: async () => finalViews.push({
+          syncing: guide.syncing, switching: guide.switchingSyncMode, activity: guide.syncActivity
+        })
+      };
+      const completion = LinkPlugin.prototype.completeLightweightGuide.call(guide,
+        { plugins: [], ignorePatterns: [], repoUrl: "https://github.com/example/vault" });
+      if (outcome === "success") {
+        await completion;
+        assert.equal(engine.state.baseCommitSha, "confirmed");
+      } else await assert.rejects(completion, outcome === "cancel" ? /同步已取消/ : /fixture preview failure/);
+      assert.deepEqual(finalViews, [{ syncing: false, switching: false, activity: undefined }],
+        `${platform}: guide ${outcome} clears activity and redraws an idle sidebar`);
+    }
     let sideLeaf, revealed = 0, refreshed = 0, created = 0;
     const states = [];
     const sidebar = { settings: { enabled: true }, app: { workspace: {

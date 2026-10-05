@@ -86,20 +86,10 @@ class SyncDeferredError extends Error {}
 const DEFAULT_GIT_AUTHOR_NAME = "default";
 const DEFAULT_GIT_AUTHOR_EMAIL = "default@default.com";
 const CHECKBOX_CHECKED_ICON = "simple-one-sync-square-check-contained";
-const LAYOUT_SWITCH_ICON = "simple-one-sync-layout-panels";
-const REFRESH_CHANGES_ICON = "simple-one-sync-refresh-changes";
 
 addIcon(
   CHECKBOX_CHECKED_ICON,
   '<g fill="none" stroke="currentColor" stroke-width="8.333" stroke-linecap="round" stroke-linejoin="round"><rect x="12.5" y="12.5" width="75" height="75" rx="8.333"/><path d="m29.167 50.417 13.333 13.333 29.167-30"/></g>'
-);
-addIcon(
-  LAYOUT_SWITCH_ICON,
-  '<g fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="15" width="76" height="70" rx="8"/><path d="M42 15v70M42 43h46"/></g>'
-);
-addIcon(
-  REFRESH_CHANGES_ICON,
-  '<g fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><path d="M40 86H20a6 6 0 0 1-6-6V16a6 6 0 0 1 6-6h32l20 20v10M52 10v20h20M27 40h25M27 54h17M27 68h9"/><path d="M53 66a18 18 0 0 1 31-8M84 47v11H73M87 74a18 18 0 0 1-31 8M56 93V82h11"/></g>'
 );
 
 interface ServerAction {
@@ -296,7 +286,7 @@ export default class SyncFeature extends Component {
   constructor(readonly host: SimplePlugin) { super(); }
   get app(): App { return this.host.app; }
   get manifest() { return this.host.manifest; }
-  openSettings?: () => void;
+  openSettings?: (share?: boolean) => void;
   private loadData(): Promise<unknown> { return readLocalSyncSettings(this.app.vault.adapter, this.app.vault.configDir, this.manifest.id); }
   private saveData(value: unknown): Promise<void> { return writeLocalSyncSettings(this.app.vault.adapter, this.app.vault.configDir, this.manifest.id, value); }
 
@@ -306,7 +296,6 @@ export default class SyncFeature extends Component {
   private featureActive = false;
   private suppressPaths = new Set<string>();
   private statusEl?: HTMLElement;
-  private ribbonEl?: HTMLElement;
   private featureEvents: EventRef[] = [];
   private featureIntervals: number[] = [];
   private viewRefreshTimer?: number;
@@ -521,7 +510,9 @@ export default class SyncFeature extends Component {
     } finally {
       this.syncing = false;
       this.switchingSyncMode = false;
+      this.clearSyncActivity();
       if (this.settings.enabled) this.activateFeature();
+      await this.refreshSyncView();
     }
   }
 
@@ -582,7 +573,6 @@ export default class SyncFeature extends Component {
     if (this.featureActive) return;
     this.featureActive = true;
     if (this.statusEl) this.statusEl.removeClass("simple-one-sync-hidden");
-    this.ribbonEl = this.host.addRibbonIcon("refresh-cw", "同步", () => void this.openSyncView());
     this.registerViewRefreshEvents();
     if (this.useLightweightSync()) {
       this.registerMobileEvents();
@@ -606,8 +596,6 @@ export default class SyncFeature extends Component {
     for (const interval of this.featureIntervals) window.clearInterval(interval);
     this.featureIntervals = [];
     this.clearDesktopTimeouts();
-    this.ribbonEl?.remove();
-    this.ribbonEl = undefined;
     if (this.statusEl) this.statusEl.addClass("simple-one-sync-hidden");
     this.app.workspace.detachLeavesOfType(ZoeySyncView.type);
     this.app.workspace.detachLeavesOfType(ZoeySyncConflictView.type);
@@ -1279,7 +1267,7 @@ export default class SyncFeature extends Component {
     let leaf: WorkspaceLeaf | null = this.app.workspace.getLeavesOfType(ZoeySyncView.type)[0] ?? null;
     const existing = !!leaf;
     if (!leaf) {
-      leaf = this.app.workspace.getRightLeaf(false);
+      leaf = this.app.workspace.getLeavesOfType("simple-one-share")[0] ?? this.app.workspace.getRightLeaf(false);
       if (!leaf) return;
       await leaf.setViewState({ type: ZoeySyncView.type, active: reveal });
     }
@@ -1356,7 +1344,7 @@ export default class SyncFeature extends Component {
     await this.refreshSyncView(true);
   }
 
-  openPluginSettings(): void {
+  openPluginSettings(share = false): void {
     const appWithSettings = this.app as App & {
       setting: {
         open(): void;
@@ -1365,7 +1353,7 @@ export default class SyncFeature extends Component {
     };
     appWithSettings.setting.open();
     appWithSettings.setting.openTabById(this.manifest.id);
-    this.openSettings?.();
+    this.openSettings?.(share);
   }
 
   needsLightweightBaseline(): boolean {
@@ -2850,6 +2838,7 @@ class ZoeySyncView extends ItemView {
   static readonly type = "simple-one-sync-view";
   private renderGeneration = 0;
   private lightweightPage = 0;
+  private showLastPull = false;
   private review?: ZoeySyncConflictPreviewModal;
   private closed = false;
   private changesSnapshot?: ChangeItem[];
@@ -3010,16 +2999,17 @@ class ZoeySyncView extends ItemView {
     const layoutButton = actions.createDiv({ cls: "clickable-icon nav-action-button" });
     layoutButton.setAttr("role", "button");
     layoutButton.setAttr("tabindex", "0");
-    layoutButton.setAttr("aria-label", "更改布局");
-    setTooltip(layoutButton, `当前布局：${this.plugin.settings.viewLayout === "tree" ? "按文件夹" : "文件列表"}；点击切换`);
-    setIcon(layoutButton, LAYOUT_SWITCH_ICON);
+    setTooltip(layoutButton, "切换文件视图");
+    layoutButton.setAttr("aria-label", "切换文件视图");
+    setIcon(layoutButton, this.plugin.settings.viewLayout === "tree" ? "folder-tree" : "list");
     layoutButton.addEventListener("click", asyncAction(() => this.plugin.toggleViewLayout()));
     const refreshButton = actions.createDiv({ cls: "clickable-icon nav-action-button" });
+    actions.prepend(refreshButton);
     refreshButton.setAttr("role", "button");
     refreshButton.setAttr("tabindex", "0");
     refreshButton.setAttr("aria-label", "刷新更改区");
-    setIcon(refreshButton, REFRESH_CHANGES_ICON);
-    setTooltip(refreshButton, "重新读取本机待同步文件，不执行同步");
+    setIcon(refreshButton, "refresh-cw");
+    setTooltip(refreshButton, "刷新本地文件列表");
     refreshButton.addEventListener("click", asyncAction(async () => {
       if (refreshButton.getAttr("aria-busy") === "true") return;
       refreshButton.setAttr("aria-busy", "true");
@@ -3043,10 +3033,10 @@ class ZoeySyncView extends ItemView {
     const settingsButton = actions.createDiv({ cls: "clickable-icon nav-action-button" });
     settingsButton.setAttr("role", "button");
     settingsButton.setAttr("tabindex", "0");
-    settingsButton.setAttr("aria-label", "同步面板设置");
     setIcon(settingsButton, "settings");
-    setTooltip(settingsButton, "同步面板设置");
-    settingsButton.addEventListener("click", (event) => this.openViewSettingsMenu(event));
+    setTooltip(settingsButton, "打开同步设置");
+    settingsButton.setAttr("aria-label", "打开同步设置");
+    settingsButton.addEventListener("click", () => this.plugin.openPluginSettings());
     const downloadEngine = this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github" ? this.plugin.getMobileGithub() : undefined;
     if (downloadEngine?.downloadTask) {
       const reminder = actions.createEl("button", { cls: "clickable-icon nav-action-button simple-one-sync-download-alert",
@@ -3055,11 +3045,35 @@ class ZoeySyncView extends ItemView {
       reminder.addEventListener("click", () => void this.showDownloadTask());
     }
 
+    const shareButton = header.createEl("button", { cls: "simple-one-panel-switch",
+      attr: { type: "button", "aria-label": "切换到分享" } });
+    setIcon(shareButton.createSpan({ cls: "simple-one-panel-switch__icon", attr: { "aria-hidden": "true" } }), "arrow-right-left");
+    shareButton.createSpan({ text: "切换分享" });
+    shareButton.addEventListener("click", runAsync(() => this.plugin.host.share.open()));
+
     const status = container.createDiv({ cls: "simple-one-sync-view__status" });
     status.addClass(`is-${statusState.tone}`);
     status.createSpan({ cls: "simple-one-sync-view__status-dot" });
     const statusCopy = status.createDiv({ cls: "simple-one-sync-view__status-copy" });
-    statusCopy.createSpan({ text: statusState.text, cls: "simple-one-sync-view__status-text" });
+    const statusText = statusCopy.createSpan({ text: statusState.text, cls: "simple-one-sync-view__status-text" });
+    if (this.plugin.nativeGitEnabled()) {
+      statusText.setAttr("role", "button");
+      statusText.setAttr("tabindex", "0");
+      const hint = this.showLastPull ? "点击查看上次上传时间" : "点击查看上次获取云端更新时间";
+      statusText.setAttr("aria-label", hint);
+      setTooltip(statusText, hint);
+      const toggleTime = asyncAction(async () => {
+        this.showLastPull = !this.showLastPull;
+        await this.render();
+      });
+      statusText.addEventListener("click", toggleTime);
+      statusText.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          toggleTime();
+        }
+      });
+    }
     if (this.lastRefreshAt) statusCopy.createSpan({ text: `列表已刷新 · ${formatRelativeTime(this.lastRefreshAt)}`, cls: "simple-one-sync-view__refresh-time" });
     if (this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github") {
       statusCopy.createSpan({ cls: "simple-one-sync-view__quota" });
@@ -3173,14 +3187,6 @@ class ZoeySyncView extends ItemView {
     }
   }
 
-  private openViewSettingsMenu(event: MouseEvent): void {
-    const menu = new Menu();
-    menu.addItem((item) =>
-      item.setTitle("打开高级设置").setIcon("settings").onClick(() => this.plugin.openPluginSettings())
-    );
-    menu.showAtMouseEvent(event);
-  }
-
   private async getStatusState(
     changes: ChangeItem[],
     changesError: unknown
@@ -3202,10 +3208,11 @@ class ZoeySyncView extends ItemView {
     const lightweightPending = this.plugin.getLightweightPendingStatus();
     if (lightweightPending) return lightweightPending;
 
-    const { lastSyncAt } = this.plugin.settings;
-    const lastSyncText = lastSyncAt
-      ? `上次同步 ${formatRelativeTime(lastSyncAt)}`
-      : "尚未同步";
+    const { lastSyncAt, lastPullAt } = this.plugin.settings;
+    const showPull = this.plugin.nativeGitEnabled() && this.showLastPull;
+    const lastSyncText = showPull
+      ? lastPullAt ? `上次获取云端更新 ${formatRelativeTime(lastPullAt)}` : "尚未获取云端更新"
+      : lastSyncAt ? `上次同步 ${formatRelativeTime(lastSyncAt)}` : "尚未同步";
     const activeError = this.plugin.getActiveSyncError();
     if (activeError) {
       const detail = `${activeError.context}：${formatStatusError(activeError.message)}`;
@@ -3220,9 +3227,7 @@ class ZoeySyncView extends ItemView {
         ? lastSyncAt
           ? `本机无候选变化 · 上次同步 ${formatRelativeTime(lastSyncAt)}`
           : "本机无候选变化 · 尚无同步记录"
-        : lastSyncAt
-          ? `本机无待同步文件 · 上次同步 ${formatRelativeTime(lastSyncAt)}`
-          : "本机无待同步文件 · 尚无同步记录"
+        : `本机无待同步文件 · ${lastSyncText}`
     };
   }
 
@@ -3350,6 +3355,10 @@ export class SyncSettingsTab extends PluginSettingTab {
     this.desktopPage = "root";
   }
 
+  openShareSettings(): void {
+    this.navigateTo("server");
+  }
+
   private navigateTo(page: SyncSettingsPage): void {
     if (page !== this.desktopPage) {
       if (this.desktopPage === "setup") this.stopSetupBrowserAuthorization();
@@ -3397,9 +3406,11 @@ export class SyncSettingsTab extends PluginSettingTab {
     if (!Platform.isMobile && this.desktopPage === "setup") { this.displaySetup(containerEl); return; }
     if (!Platform.isMobile && this.desktopPage === "desktop-settings") { this.displayDesktopSettings(containerEl); return; }
 
-    this.addEnableSetting(containerEl);
-    this.addDefaultRepoSetting(containerEl);
     this.displayBeginner(containerEl);
+    const overview = containerEl.createDiv({ cls: "simple-one-sync-repository-overview" });
+    this.addEnableSetting(overview);
+    this.addDefaultRepoSetting(overview);
+    this.addShareRepoSetting(overview);
     this.displayDesktop(containerEl);
   }
 
@@ -3410,6 +3421,17 @@ export class SyncSettingsTab extends PluginSettingTab {
           this.plugin.settings.boundRepoUrl = value.trim();
           await this.plugin.saveSettings();
         }));
+    row.settingEl.addClass("simple-one-sync-stacked-setting");
+  }
+
+  private addShareRepoSetting(parent: HTMLElement): void {
+    const site = this.plugin.host?.share?.manifest.site;
+    const url = site?.owner && site.repo ? `https://github.com/${site.owner}/${site.repo}` : "";
+    const row = new Setting(parent).setName("当前分享用仓库")
+      .addText(input => {
+        input.setPlaceholder("尚未绑定分享仓库").setValue(url);
+        input.inputEl.readOnly = true;
+      });
     row.settingEl.addClass("simple-one-sync-stacked-setting");
   }
 
@@ -3533,7 +3555,6 @@ export class SyncSettingsTab extends PluginSettingTab {
 
   private displayBeginner(containerEl: HTMLElement): void {
     new Setting(containerEl).setName("入门小助手").setHeading();
-    containerEl.createEl("p", { text: "从创建仓库开始，按设备查看接入步骤。", cls: "simple-one-sync-section-desc" });
     const links = containerEl.createDiv({ cls: "simple-one-sync-beginner-links" });
     this.addBeginnerLink(links, "电脑端同步引导", "monitor", Platform.isMobile ? "beginner-desktop" : "setup");
     this.addBeginnerLink(links, "轻量同步引导", "smartphone", "beginner-mobile");
@@ -3888,11 +3909,10 @@ export class SyncSettingsTab extends PluginSettingTab {
   private displayDesktop(containerEl: HTMLElement): void {
     const currentDevice = this.currentDevice();
     new Setting(containerEl).setName("同步设置").setHeading();
-    containerEl.createEl("p", { text: "按当前平台自动推荐同步方式；绿色标记表示实际启用的方式。电脑端也可使用轻量同步。", cls: "simple-one-sync-section-desc" });
     this.addSetupEntry(containerEl, currentDevice === "git");
     const entries = [
       { page: "mobile", title: "轻量 Git 同步", desc: "适用于安卓、iOS，也适用于电脑", icon: "smartphone" },
-      { page: "server", title: "笔记分享设置", desc: "公开仓库 · GitHub Pages · 分享管理", icon: "share-2" }
+      { page: "server", title: "笔记分享设置", desc: "公开仓库 · GitHub Pages · EdgeOne Pages · 分享管理", icon: "share-2" }
     ] as const;
     for (const entry of entries) {
       const isCurrent = currentDevice === entry.page;
@@ -4481,23 +4501,44 @@ export class SyncSettingsTab extends PluginSettingTab {
       next.addEventListener("click", () => this.confirmSetupIgnoreBase());
     } else if (this.setupReviewStage === 2) {
       new Setting(module).setName("2 · 建议规则与文件追踪").setHeading();
-      module.createEl("p", { text: `以${preview.customIgnore !== undefined ? "合并编辑后的" : ignoreChoice === "remote" ? "远端" : "本机"}规则为基准，补充 ${preview.missingIgnoreRules.length} 条建议规则，保护缓存、凭据、本机状态及内嵌仓库的 .git 元数据。原有用户规则保留。` });
-      this.renderSetupRuleCards(module, "查看建议规则", setupIgnoreRuleGroups(preview, this.plugin.app.vault.configDir));
+      module.createEl("p", { text: `规则基准：${preview.customIgnore !== undefined ? "合并结果" : ignoreChoice === "remote" ? "远端" : "本机"} · 新增规则：${preview.missingIgnoreRules.length} 条 · 建议停止追踪：本机 ${preview.trackedExcludedLocal.length} / 远端 ${preview.trackedExcludedRemote.length}` });
+      const ruleViews = module.createDiv({ cls: "simple-one-sync-setup-rule-views" });
+      const ruleOptions = ruleViews.createDiv({ cls: "simple-one-sync-setup-options" });
+      const ruleContent = ruleViews.createDiv({ cls: "simple-one-sync-setup-rule-content" });
       const customTitle = preview.customIgnore !== undefined ? "合并后的自有规则" : ignoreChoice === "remote" ? "远端自有规则" : "本机自有规则";
-      this.renderSetupRuleCards(module, "查看最终 .gitignore", setupFinalIgnoreRuleGroups(preview, this.plugin.app.vault.configDir, customTitle));
-      const original = module.createEl("details", { cls: "simple-one-sync-setup-files" });
-      original.createEl("summary", { text: "查看完整文件（含注释与原始顺序）" });
-      original.createEl("pre", { text: preview.optimizedIgnore || "（空）" });
+      let selectedRuleView: HTMLButtonElement | null = null;
+      for (const [view, title] of [["suggested", "查看建议规则"], ["final", "查看最终 .gitignore"], ["full", "查看完整文件"]] as const) {
+        const button = ruleOptions.createEl("button", { text: title, cls: "simple-one-sync-setup-option", attr: { type: "button", "aria-pressed": "false" } });
+        button.addEventListener("click", () => {
+          const collapse = selectedRuleView === button;
+          selectedRuleView?.removeClass("is-selected");
+          selectedRuleView?.setAttribute("aria-pressed", "false");
+          selectedRuleView = collapse ? null : button;
+          ruleContent.empty();
+          if (collapse) return;
+          button.addClass("is-selected");
+          button.setAttribute("aria-pressed", "true");
+          if (view === "full") {
+            ruleContent.createEl("p", { text: "含注释与原始顺序", cls: "simple-one-sync-section-desc" });
+            ruleContent.createEl("pre", { text: preview.optimizedIgnore || "（空）" });
+          } else {
+            if (view === "suggested") ruleContent.createEl("p", { text: "建议规则保护缓存、凭据、本机状态及内嵌仓库的 .git 元数据，原有用户规则保留。", cls: "simple-one-sync-section-desc" });
+            this.renderSetupRuleCards(ruleContent, title, view === "suggested"
+              ? setupIgnoreRuleGroups(preview, this.plugin.app.vault.configDir)
+              : setupFinalIgnoreRuleGroups(preview, this.plugin.app.vault.configDir, customTitle));
+            ruleContent.querySelector("details")?.setAttribute("open", "");
+          }
+        });
+      }
       const excluded = preview.trackedExcludedLocal.length + preview.trackedExcludedRemote.length;
-      module.createEl("p", { text: `本机 ${preview.trackedExcludedLocal.length} 个、远端 ${preview.trackedExcludedRemote.length} 个文件已被追踪，但符合忽略规则。` });
       this.setupFileList(module, "本机建议停止追踪", preview.trackedExcludedLocal);
       this.setupFileList(module, "远端建议停止追踪", preview.trackedExcludedRemote);
-      module.createEl("p", { text: "重建追踪会保留本机文件；第四步提交并推送后，这些文件将从远端当前版本退出。仅添加忽略规则不会停止追踪已有文件。" });
       const actions = footer();
       if (excluded && !this.plugin.settings.setupComplete) {
         actions.createEl("p", { text: "确认应用建议规则，并选择如何处理已有追踪：" });
         for (const choice of ["rebuild", "keep"] as const) {
           const button = actions.createEl("button", { text: choice === "rebuild" ? "应用建议并重建追踪，下一步" : "应用建议但保留追踪，下一步", cls: choice === "rebuild" ? "mod-cta" : "", attr: { type: "button" } });
+          button.title = choice === "rebuild" ? "本机文件保留；第四步推送后，远端将停止追踪这些文件。" : "仅添加忽略规则，已有文件仍保持追踪。";
           button.disabled = this.setupBusy;
           button.addEventListener("click", () => this.confirmSetupRules(choice));
         }

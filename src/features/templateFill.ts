@@ -567,8 +567,7 @@ export class TemplateFillView extends ItemView {
       this.extractedFields
     );
     const fields = fieldOrder
-      .map((name) => ({ name, value: this.extractedFields[name] }))
-      .filter((field): field is { name: string; value: string } => field.value !== undefined);
+      .map((name) => ({ name, value: this.extractedFields[name] ?? "" }));
     const longFields = fields.filter((field) => isLongPreviewValue(field.value));
     const totalLongLength = longFields.reduce((sum, field) => sum + field.value.length, 0);
     const longFieldWeights = new Map(
@@ -662,7 +661,7 @@ export class TemplateFillView extends ItemView {
 
     let content = cat.noteFormat?.trim()
       ? applyNoteFormat(cat.noteFormat, editedFields)
-      : buildDefaultNoteContent(editedFields, cat.filenameField);
+      : buildDefaultNoteContent(editedFields, cat.filenameField, cat.propertyFields);
     content = addSiteBodyMarker(content, result.siteRule);
 
     const rawName = editedFields[cat.filenameField] || "未命名";
@@ -1408,9 +1407,14 @@ function cssEscape(value: string): string {
 
 function buildDefaultNoteContent(
   fields: Record<string, string>,
-  filenameField: string
+  filenameField: string,
+  propertyFields?: string[]
 ): string {
   let content = "---\n";
+  if (propertyFields?.length) {
+    for (const name of propertyFields) content += `${JSON.stringify(name)}: ${toYamlValue(fields[name] ?? "")}\n`;
+    return content + "---\n";
+  }
   for (const [name, value] of Object.entries(fields)) {
     if (name === filenameField) continue;
     if (name === "原始网址") continue;
@@ -1421,8 +1425,8 @@ function buildDefaultNoteContent(
 }
 
 function addSiteBodyMarker(content: string, siteRule: SiteRule): string {
-  const marker = "【完结可看】";
-  if (!/52shuku/i.test(siteRule.urlPattern) || content.includes(marker)) {
+  const marker = siteRule.bodySuffix?.trim();
+  if (!marker || content.includes(marker)) {
     return content;
   }
   return `${content.trimEnd()}\n\n${marker}\n`;
@@ -1512,6 +1516,9 @@ function getPreviewFieldOrder(
     for (const name of extractTemplateFieldNames(category.noteFormat)) {
       pushUnique(order, name);
     }
+    if (category.filenameField) pushUnique(order, category.filenameField);
+  } else if (category?.propertyFields?.length) {
+    for (const name of category.propertyFields) pushUnique(order, name);
     if (category.filenameField) pushUnique(order, category.filenameField);
   } else {
     for (const field of fields) {

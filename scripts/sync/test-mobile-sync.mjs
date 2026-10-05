@@ -1243,6 +1243,10 @@ try {
     plugin.activateFeature = () => { plugin.featureActive = true; };
     plugin.saveSettings = async () => { steps.push("save"); };
     plugin.mobileHost = () => ({ save: async () => {} });
+    plugin.refreshSyncView = async () => {
+      assert.equal(plugin.syncing, false);
+      assert.equal(plugin.getSyncActivity(), undefined);
+    };
     plugin.setStatus = text => { plugin.lastStatus = text; };
     plugin.recordSuccess = async () => { assert(engine.state.baseCommitSha); steps.push("success"); };
     MobileSyncModal.prototype.wait = async function () {

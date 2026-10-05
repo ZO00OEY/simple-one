@@ -264,6 +264,11 @@ export default class ShareFeature extends Component {
     this.guideStep = Math.min(4, progress); this.guideAvailableStep = Math.min(4, progress);
     addIcon("simple-share-sort-asc", '<g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M25 85V15m-12 12 12-12 12 12M60 35l10-25 10 25M64 27h12M60 60h20L60 85h20"/></g>');
     addIcon("simple-share-sort-desc", '<g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M25 15v70m-12-12 12 12 12-12M60 10h20L60 35h20M60 85l10-25 10 25M64 77h12"/></g>');
+    const settingsBadge = '<path d="M71 60h12l2 7 7 2 4 10-5 5 1 8-10 4-5-5-8 1-4-10 5-5-1-8 7-4z"/><circle cx="79" cy="79" r="6"/>';
+    const pathVisibilityIcon = '<path d="M6 35c19-32 57-32 76 0-19 32-57 32-76 0z"/><circle cx="44" cy="35" r="13"/><path stroke-width="5" d="M61 91V67h12l5 6h17v18z"/>';
+    addIcon("simple-share-paths-visible", `<g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">${pathVisibilityIcon}</g>`);
+    addIcon("simple-share-paths-hidden", `<g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">${pathVisibilityIcon}<path d="M13 8l60 53"/></g>`);
+    addIcon("simple-share-copy-settings", `<g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M27 53H13V9h43v14M55 79H28V26h43v26"/>${settingsBadge}</g>`);
     this.refreshActions = registerMarkdownAction(this.host, "data-simple-share-note", () => this.manifest.enabled,
       view => view.addAction("share-2", "分享当前笔记", runAsync(async () => {
         if (!view.file) return;
@@ -282,7 +287,6 @@ export default class ShareFeature extends Component {
     } });
     this.host.addCommand({ id: "open-share-manager", name: "打开分享管理", callback: () => { void this.open(); } });
     this.host.addCommand({ id: "publish-shared-notes", name: "推送新分享", callback: () => { void this.publish().catch(error => this.fail(error)); } });
-    this.host.addRibbonIcon("share-2", "分享管理", () => { void this.open(); });
     this.registerEvent(this.host.app.workspace.on("file-menu", (menu, file) => {
       if (!(file instanceof TFile) || file.extension !== "md" || file.path.startsWith(SHARE_FOLDER + "/")) return;
       menu.addItem(item => item.setTitle("分享此笔记").setIcon("share-2").onClick(() => { void this.share(file).catch(error => this.fail(error)); }));
@@ -644,7 +648,7 @@ export default class ShareFeature extends Component {
   async open(closeSettings = false, reveal = true): Promise<void> {
     const existing = this.host.app.workspace.getLeavesOfType(VIEW)[0];
     // false creates a tab in the existing right group; true creates a vertical split.
-    const leaf = existing || this.host.app.workspace.getRightLeaf(false);
+    const leaf = existing || this.host.app.workspace.getLeavesOfType("simple-one-sync-view")[0] || this.host.app.workspace.getRightLeaf(false);
     if (!leaf) return; if (!existing) await leaf.setViewState({ type: VIEW, active: reveal });
     if (reveal) await this.host.app.workspace.revealLeaf(leaf);
     if (closeSettings) (this.host.app as typeof this.host.app & { setting?: { close(): void } }).setting?.close();
@@ -672,8 +676,6 @@ export default class ShareFeature extends Component {
     await navigator.clipboard.writeText(this.shareCopyText(id, note.title || fallback));
   }
   addCopyContentMenu(menu: Menu): void {
-    menu.addSeparator();
-    menu.addItem(item => item.setTitle("复制内容").setIcon("copy").setDisabled(true));
     for (const [key, title] of [["title", "笔记标题"], ["github", "GitHub 链接"], ["pageOne", "Page One 链接"]] as const) {
       menu.addItem(item => item.setTitle(title).setIcon(this.copyContent[key] ? "check-square" : "square").setDisabled(this.isPublishing || !this.manifest.enabled)
         .onClick(() => { void this.updateCopyContent(key, !this.copyContent[key]).catch(error => this.fail(error)); }));
@@ -977,6 +979,8 @@ export default class ShareFeature extends Component {
         .addDropdown(dropdown => dropdown.addOptions({ asc: "正序 A→Z", desc: "倒序 Z→A" }).setValue(this.display.descending ? "desc" : "asc").setDisabled(!this.manifest.enabled).onChange(value => this.updateDisplay({ descending: value === "desc" })));
       const templateDisabled = !this.manifest.enabled || this.isPublishing || this.templateBusy;
       const templateSetting = new Setting(appearance).setName("HTML 模板")
+        .setClass("simple-wrapping-setting")
+        .setClass("simple-share-template-setting")
         .addDropdown(dropdown => dropdown.addOptions(this.templateFiles).setValue(this.templateFile).setDisabled(templateDisabled).onChange(value => {
           void this.selectTemplate(value).catch(error => { this.fail(error); this.renderViews(); });
         }))
@@ -1252,7 +1256,7 @@ export class ShareView extends ItemView {
   constructor(leaf: WorkspaceLeaf, private feature: ShareFeature) { super(leaf); }
   getViewType(): string { return VIEW; }
   getDisplayText(): string { return "分享管理"; }
-  getIcon(): string { return "share-2"; }
+  getIcon(): string { return "refresh-cw"; }
   getState(): Record<string, unknown> { return { ...super.getState(), ...this.feature.display, collapsed: [...this.collapsed] }; }
   async setState(state: Record<string, unknown>, result: ViewStateResult): Promise<void> {
     this.feature.restoreDisplay(state);
@@ -1262,7 +1266,7 @@ export class ShareView extends ItemView {
   async onOpen(): Promise<void> { this.render(); }
   render(): void {
     this.contentEl.empty(); this.contentEl.addClass("simple-share-panel");
-    const header = this.feature.addPublishButton(new Setting(this.contentEl))
+    const header = new Setting(this.contentEl)
       .addButton(button => {
         button.setIcon("square-pen").setTooltip(this.editing ? "退出编辑" : "编辑分享")
           .setDisabled(this.feature.isPublishing || !this.feature.manifest.enabled).onClick(() => {
@@ -1278,14 +1282,21 @@ export class ShareView extends ItemView {
       })
       .addButton(button => {
         const labels: Record<ShareLayout, string> = { list: "平铺笔记", source: "本地目录", public: "公开目录" };
+        const modes = ["list", "source", "public"] as const;
         button.setIcon(this.layout === "list" ? "list" : this.layout === "source" ? "folder-tree" : "network")
-          .setTooltip(`当前布局：${labels[this.layout]}；点击切换布局`).onClick(event => {
-            const menu = new Menu();
-            for (const mode of ["list", "source", "public"] as const) menu.addItem(item => item.setTitle(labels[mode]).setIcon(this.layout === mode ? "check" : mode === "list" ? "list" : mode === "source" ? "folder-tree" : "network").onClick(() => {
-              this.feature.updateDisplay({ layout: mode });
-            }));
-            menu.showAtMouseEvent(event);
+          .setTooltip("切换文件视图").onClick(() => {
+            this.feature.updateDisplay({ layout: modes[(modes.indexOf(this.layout) + 1) % modes.length] });
           });
+        button.buttonEl.addEventListener("contextmenu", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          const menu = new Menu();
+          for (const mode of modes) menu.addItem(item => item.setTitle(labels[mode]).setChecked(this.layout === mode).onClick(() => {
+            this.feature.updateDisplay({ layout: mode });
+          }));
+          menu.showAtMouseEvent(event);
+        });
+        button.buttonEl.setAttribute("aria-label", "切换文件视图");
         button.buttonEl.addClass("simple-share-header-icon", "clickable-icon", "nav-action-button");
       });
     header.addButton(button => {
@@ -1295,19 +1306,36 @@ export class ShareView extends ItemView {
       button.buttonEl.addClass("simple-share-header-icon", "simple-share-sort-button", "clickable-icon", "nav-action-button");
     });
     header.addButton(button => {
-      button.setIcon("settings").setTooltip("界面与复制设置").onClick(event => {
+      button.setIcon(this.showPaths ? "simple-share-paths-visible" : "simple-share-paths-hidden").setTooltip("是否显示路径").onClick(() => {
+        this.feature.updateDisplay({ showPaths: !this.showPaths });
+      });
+      button.buttonEl.addClass("simple-share-header-icon", "simple-share-paths-toggle", "clickable-icon", "nav-action-button");
+      button.buttonEl.setAttribute("aria-label", "是否显示路径");
+      button.buttonEl.setAttribute("aria-pressed", String(this.showPaths));
+    });
+    header.addButton(button => {
+      button.setIcon("simple-share-copy-settings").setTooltip("复制设置").onClick(event => {
         const menu = new Menu();
-        menu.addItem(item => item.setTitle("界面设置").setIcon("settings").setDisabled(true));
-        menu.addItem(item => item.setTitle("显示文件路径").setIcon(this.showPaths ? "check-square" : "square").onClick(() => {
-          this.feature.updateDisplay({ showPaths: !this.showPaths });
-        }));
         this.feature.addCopyContentMenu(menu);
         menu.showAtMouseEvent(event);
       });
+      button.buttonEl.addClass("simple-share-header-icon", "simple-share-composite-icon", "clickable-icon", "nav-action-button");
+      button.buttonEl.setAttribute("aria-label", "复制设置");
+    });
+    header.addButton(button => {
+      button.setIcon("settings").setTooltip("打开分享设置").onClick(() => this.feature.host.sync.openPluginSettings(true));
       button.buttonEl.addClass("simple-share-header-icon", "clickable-icon", "nav-action-button");
+      button.buttonEl.setAttribute("aria-label", "打开分享设置");
     });
     header.settingEl.addClass("simple-share-header");
-    const primary = header.settingEl.querySelector<HTMLButtonElement>(".simple-share-publish")!;
+    const syncButton = header.controlEl.createEl("button", { cls: "simple-one-panel-switch",
+      attr: { type: "button", "aria-label": "切换到同步" } });
+    setIcon(syncButton.createSpan({ cls: "simple-one-panel-switch__icon", attr: { "aria-hidden": "true" } }), "arrow-right-left");
+    syncButton.createSpan({ text: "切换同步" });
+    syncButton.addEventListener("click", runAsync(() => this.feature.host.sync.openSyncView()));
+    const publish = this.feature.addPublishButton(new Setting(this.contentEl));
+    publish.settingEl.addClass("simple-share-publish-row");
+    const primary = publish.settingEl.querySelector<HTMLButtonElement>(".simple-share-publish")!;
     primary.addClass("simple-share-new", "mod-cta");
     const uploadIcon = primary.createSpan({ cls: "simple-share-new-icon", attr: { "aria-hidden": "true" } });
     setIcon(uploadIcon, "upload-cloud"); primary.prepend(uploadIcon);

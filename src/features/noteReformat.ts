@@ -18,7 +18,7 @@ export async function reformatCurrentNote(plugin: SimplePlugin): Promise<void> {
 
   const settings = plugin.settings.diary.reformat;
   if (!settings.runFormatReflow && !settings.runLinkConversion) {
-    new Notice("还没有勾选任何重排版选项");
+    new Notice("还没有勾选任何自动排版选项");
     return;
   }
 
@@ -28,20 +28,20 @@ export async function reformatCurrentNote(plugin: SimplePlugin): Promise<void> {
     return;
   }
 
-  new Notice("正在重排版当前笔记...");
+  new Notice("正在对当前笔记自动排版...");
   const cursor = editor.getCursor();
   const result = await reformatText(plugin, original);
   if (result.text === original) {
-    new Notice("当前笔记没有需要重排版的内容");
+    new Notice("当前笔记没有需要调整排版的内容");
     return;
   }
 
   editor.setValue(result.text);
   editor.setCursor(cursor);
   const parts: string[] = [];
-  if (result.formatChanged) parts.push("格式重排版");
+  if (result.formatChanged) parts.push("文本排版");
   if (result.linksChanged > 0) parts.push(`链接 ${result.linksChanged} 个`);
-  new Notice(`已重排版：${parts.join("，")}`);
+  new Notice(`自动排版完成：${parts.join("，")}`);
 }
 
 export async function reformatText(plugin: SimplePlugin, text: string): Promise<ReformatResult> {

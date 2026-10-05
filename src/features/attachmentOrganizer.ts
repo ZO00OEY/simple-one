@@ -522,21 +522,18 @@ class RenamePlanModal extends Modal {
   }
 
   onOpen(): void {
-    this.modalEl.addClass("simple-attachment-modal");
+    this.modalEl.addClass("simple-attachment-modal", "simple-rename-modal");
     applyModalScale(this.modalEl, this.plugin.displaySettings.popupWindowScale, getMainAppWindow(this.plugin.app));
     this.contentEl.empty();
     this.contentEl.createEl("h2", { text: "图片重命名并按笔记归位清单" });
     this.contentEl.createDiv({ cls: "setting-item-description", text: "只处理勾选项；执行时会让 Obsidian 更新引用。" });
     renderRenameChecklist(this.contentEl, this.plans);
     const actions = this.contentEl.createDiv({ cls: "simple-json-actions" });
-    actions.createEl("button", { text: "全选" }).addEventListener("click", () => {
-      setChecked(this.contentEl, this.plans, true);
+    const execute = actions.createEl("button", { text: "执行", cls: "mod-cta" });
+    execute.addEventListener("click", () => {
+      execute.disabled = true;
+      void this.applyPlans().finally(() => { execute.disabled = false; });
     });
-    actions.createEl("button", { text: "反选" }).addEventListener("click", () => {
-      invertChecked(this.contentEl, this.plans);
-    });
-    actions.createEl("button", { text: "取消" }).addEventListener("click", () => this.close());
-    actions.createEl("button", { text: "执行勾选项" }).addEventListener("click", () => void this.applyPlans());
     this.progressEl = this.contentEl.createDiv({ cls: "simple-attachment-progress" });
   }
 
@@ -570,7 +567,7 @@ class AttachmentOrganizationModal extends Modal {
   }
 
   onOpen(): void {
-    this.modalEl.addClass("simple-attachment-modal");
+    this.modalEl.addClass("simple-attachment-modal", "simple-rename-modal");
     applyModalScale(this.modalEl, this.plugin.displaySettings.popupWindowScale, getMainAppWindow(this.plugin.app));
     this.contentEl.empty();
     this.contentEl.createEl("h2", { text: "非图片附件按笔记归位清单" });
@@ -578,15 +575,13 @@ class AttachmentOrganizationModal extends Modal {
       cls: "setting-item-description",
       text: "按引用笔记归位至附件目录/笔记所在目录/笔记名；多处引用时采用路径最靠前的笔记。",
     });
-    renderChecklist(this.contentEl, this.plans, (plan) => {
-      const references = plan.references.map((file) => file.path).join("、");
-      return `${plan.file.path}\n→ ${plan.targetPath}\n引用：${references}`;
-    });
+    renderRenameChecklist(this.contentEl, this.plans);
     const actions = this.contentEl.createDiv({ cls: "simple-json-actions" });
-    actions.createEl("button", { text: "全选" }).addEventListener("click", () => setChecked(this.contentEl, this.plans, true));
-    actions.createEl("button", { text: "反选" }).addEventListener("click", () => invertChecked(this.contentEl, this.plans));
-    actions.createEl("button", { text: "取消" }).addEventListener("click", () => this.close());
-    actions.createEl("button", { text: "执行勾选项" }).addEventListener("click", () => void this.applyPlans());
+    const execute = actions.createEl("button", { text: "执行", cls: "mod-cta" });
+    execute.addEventListener("click", () => {
+      execute.disabled = true;
+      void this.applyPlans().finally(() => { execute.disabled = false; });
+    });
     this.progressEl = this.contentEl.createDiv({ cls: "simple-attachment-progress" });
   }
 
@@ -728,15 +723,20 @@ function changedPathSegments(beforePath: string, afterPath: string): {
     suffix++;
   }
 
+  // Collapse shared directories only; always keep each filename visible.
+  const sharedDirectories = Math.min(prefix, before.length - 1, after.length - 1);
+  const compact = (segments: RenamePathSegment[]): RenamePathSegment[] => sharedDirectories > 0
+    ? [{ text: "...", changed: false }, ...segments.slice(sharedDirectories)]
+    : segments;
   return {
-    before: before.map((text, index) => ({
+    before: compact(before.map((text, index) => ({
       text,
       changed: index >= prefix && index < before.length - suffix,
-    })),
-    after: after.map((text, index) => ({
+    }))),
+    after: compact(after.map((text, index) => ({
       text,
       changed: index >= prefix && index < after.length - suffix,
-    })),
+    }))),
   };
 }
 

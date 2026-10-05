@@ -3,6 +3,7 @@ import { Decoration, DecorationSet, EditorView, ViewPlugin, WidgetType, keymap }
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { Component, MarkdownRenderChild, MarkdownRenderer, MarkdownView, Notice, TFile, addIcon, setIcon, setTooltip } from "obsidian";
 import type SimplePlugin from "../main";
+import type { Editor, Menu } from "obsidian";
 import type { QuickFormatMode } from "../types";
 import { formatSelection, isHeadingMode, setQuickFormatColumnTarget } from "./quickFormat";
 import { parseColumns as parse } from "../shared/columns";
@@ -11,6 +12,8 @@ type Columns = { widths: number[]; content: string[] };
 type Block = { from: number; to: number; source: string; columns: Columns };
 const FENCE = "```simple-columns";
 const COLUMN_DRAG_ICON = "simple-columns-drag-bars";
+const COLUMN_VIEW_ICON = "simple-columns-view";
+addIcon(COLUMN_VIEW_ICON, '<g fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="12" width="76" height="76" rx="7"/><path d="M50 12v76M12 34h76"/></g>');
 addIcon(COLUMN_DRAG_ICON, '<g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"><path d="M20 32h60M20 50h60M20 68h60"/></g>');
 
 function widths(count: number): number[] {
@@ -1244,20 +1247,39 @@ export function registerNotionColumns(plugin: SimplePlugin): void {
     event.preventDefault();
     event.stopPropagation();
   }, { capture: true });
+  const insertColumns = (editor: Editor): void => {
+    const from = editor.getCursor("from");
+    const to = editor.getCursor("to");
+    const before = editor.getLine(from.line).slice(0, from.ch);
+    const after = editor.getLine(to.line).slice(to.ch);
+    const block = serialize({ widths: widths(2), content: [editor.getSelection().trim(), ""] });
+    const atEnd = to.line === editor.lastLine() && !after;
+    editor.replaceSelection(`${before ? "\n" : ""}${block}${atEnd ? "\n\n" : after ? "\n" : ""}`);
+  };
+  // Native insert submenus expose their section IDs only through runtime menu items.
+  type InsertMenu = Menu & { items?: { section?: string; submenu?: InsertMenu }[] };
+  plugin.registerEvent(plugin.app.workspace.on("editor-menu", (menu, editor) => {
+    if (!plugin.settings.enableNotionColumns || !plugin.settings.enableNotionColumnsContextMenu) return;
+    // Obsidian finishes constructing the Insert submenu after editor-menu listeners run.
+    queueMicrotask(() => {
+      if (!plugin.settings.enableNotionColumns || !plugin.settings.enableNotionColumnsContextMenu) return;
+      const insertMenu = (menu as InsertMenu).items?.find(item =>
+        item.submenu?.items?.some(child => child.section === "insert.basic"))?.submenu;
+      if (!insertMenu) return;
+      insertMenu.addItem(item => item.setTitle("双列").setIcon(COLUMN_VIEW_ICON)
+        .setSection("insert.basic")
+        .onClick(() => {
+          if (plugin.settings.enableNotionColumns && plugin.settings.enableNotionColumnsContextMenu) insertColumns(editor);
+        }));
+    });
+  }));
   plugin.addCommand({
     id: "create-two-column-view",
     name: "在当前位置创建双列视图",
+    hotkeys: [],
     editorCheckCallback: (checking, editor) => {
       if (!plugin.settings.enableNotionColumns) return false;
-      if (!checking) {
-        const from = editor.getCursor("from");
-        const to = editor.getCursor("to");
-        const before = editor.getLine(from.line).slice(0, from.ch);
-        const after = editor.getLine(to.line).slice(to.ch);
-        const block = serialize({ widths: widths(2), content: [editor.getSelection().trim(), ""] });
-        const atEnd = to.line === editor.lastLine() && !after;
-        editor.replaceSelection(`${before ? "\n" : ""}${block}${atEnd ? "\n\n" : after ? "\n" : ""}`);
-      }
+      if (!checking) insertColumns(editor);
       return true;
     },
   });
@@ -1523,7 +1545,7 @@ export function registerNotionColumns(plugin: SimplePlugin): void {
         : null;
     }
     private mouseDown = (event: MouseEvent): void => {
-      if (!plugin.settings.enableNotionColumns || event.button !== 0 && event.button !== 2) return;
+      if (!plugin.settings.enableNotionColumns || !plugin.settings.enableNotionColumnsMouseGesture || event.button !== 0 && event.button !== 2) return;
       if (staged?.view === this.view) return;
       if ((event.buttons & 3) === 3) {
         this.beginChord(event);
@@ -1532,7 +1554,7 @@ export function registerNotionColumns(plugin: SimplePlugin): void {
       this.candidate = this.selectionAt(event);
     };
     private beginChord(event: MouseEvent): void {
-      if (this.chordActive || !this.candidate) return;
+      if (!plugin.settings.enableNotionColumns || !plugin.settings.enableNotionColumnsMouseGesture || this.chordActive || !this.candidate) return;
       if (Math.hypot(event.clientX - this.candidate.x, event.clientY - this.candidate.y) > 32) return;
       event.preventDefault();
       event.stopPropagation();
@@ -1563,7 +1585,7 @@ export function registerNotionColumns(plugin: SimplePlugin): void {
       }
     };
     private dragStart = (event: DragEvent): void => {
-      if (this.chordActive || (event.buttons & 3) === 3) { event.preventDefault(); event.stopPropagation(); return; }
+      if (this.chordActive || plugin.settings.enableNotionColumns && plugin.settings.enableNotionColumnsMouseGesture && (event.buttons & 3) === 3) { event.preventDefault(); event.stopPropagation(); return; }
       if (event.target instanceof HTMLElement && event.target.closest(".simple-columns")) return;
       const { from, to } = this.view.state.selection.main;
       nativeTextDrag = from < to ? { view: this.view, from, to, selected: this.view.state.doc.sliceString(from, to) } : null;

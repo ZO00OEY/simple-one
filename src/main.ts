@@ -195,17 +195,24 @@ export default class SimplePlugin extends Plugin {
     await this.sync.initialize().catch(reportError);
     this.share = this.addChild(new ShareFeature(this));
     await this.share.initialize().catch(reportError);
+    this.addRibbonIcon("refresh-cw", "同步与分享", () => {
+      void (this.app.workspace.getLeavesOfType("simple-one-share").length || !this.sync.settings.enabled
+        ? this.share.open() : this.sync.openSyncView()).catch(reportError);
+    });
     this.addSettingTab(new SimpleSettingTab(this.app, this));
     let sidebarTimer: number | undefined, unloaded = false;
     this.register(() => { unloaded = true; if (sidebarTimer !== undefined) window.clearTimeout(sidebarTimer); });
     this.app.workspace.onLayoutReady(() => {
       if (unloaded) return;
-      // Let Obsidian restore registered plugin views after onload finishes before adding missing tabs.
+      // Restore the current page before creating the shared sidebar tab.
       sidebarTimer = window.setTimeout(() => {
         void (async () => {
           if (unloaded) return;
-          if (this.sync.settings.enabled) await this.sync.openSyncView(false);
-          if (!unloaded && this.share.manifest.enabled) await this.share.open();
+          if (this.app.workspace.getLeavesOfType("simple-one-share").length) {
+            for (const leaf of this.app.workspace.getLeavesOfType("simple-one-sync-view")) leaf.detach();
+            await this.share.open();
+          } else if (this.sync.settings.enabled) await this.sync.openSyncView(false);
+          else if (!unloaded && this.share.manifest.enabled) await this.share.open();
         })().catch(reportError);
       }, 0);
     });
@@ -711,7 +718,6 @@ function normalizeTemplateCategories(settings: SimplePluginSettings, data: Loade
       if (!sr.fields) sr.fields = [];
       for (const f of sr.fields) {
         if (!f.id) f.id = nextId();
-        if (!f.page) f.page = defaultFieldPage(sr.urlPattern);
       }
     }
   }
@@ -733,14 +739,12 @@ function defaultCategoryNoteFormat(name: string): string {
 function defaultSiteName(urlPattern: string): string {
   if (/skills/i.test(urlPattern)) return "Agent Skills 网站";
   if (/jjwxc/i.test(urlPattern)) return "晋江";
-  if (/52shuku/i.test(urlPattern)) return "52书库";
   return "";
 }
 
 function defaultSiteShortName(urlPattern: string): string {
   if (/skills/i.test(urlPattern)) return "Skills";
   if (/jjwxc/i.test(urlPattern)) return "晋江";
-  if (/52shuku/i.test(urlPattern)) return "52书库";
   return "";
 }
 
@@ -780,33 +784,4 @@ function applyDefaultSitePipeline(siteRule: {
     return;
   }
 
-  if (!/52shuku/i.test(siteRule.urlPattern)) return;
-  if (!siteRule.input) {
-    siteRule.input = {
-      baseUrl: {
-        type: "urlReplace",
-        regex: "_\\d+\\.html$",
-        replaceWith: ".html",
-      },
-    };
-  }
-  if (!siteRule.pages?.length) {
-    siteRule.pages = [
-      { id: "main", url: "{{baseUrl}}" },
-      {
-        id: "read",
-        urlFrom: {
-          type: "urlReplace",
-          page: "main",
-          regex: "\\.html$",
-          replaceWith: "_2.html",
-        },
-      },
-    ];
-  }
-}
-
-function defaultFieldPage(urlPattern: string): string {
-  if (/52shuku/i.test(urlPattern)) return "read";
-  return "";
 }

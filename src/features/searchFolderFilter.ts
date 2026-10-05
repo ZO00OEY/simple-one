@@ -1,6 +1,17 @@
 import { Modal, Setting, TFolder, normalizePath, setIcon } from "obsidian";
 import type SimplePlugin from "../main";
 import type { SearchFolderSettings } from "../types";
+import { readObsidianAttachmentLocation } from "./attachmentOrganizer";
+import { runAsync } from "../shared/async";
+
+export function addAttachmentFolderToSearchExclusions(plugin: SimplePlugin): boolean {
+  const location = readObsidianAttachmentLocation(plugin);
+  if (location.mode !== "fixed-folder" || !location.folder || location.folder === "/") return false;
+  const folders = plugin.settings.searchFolders.excludeFolders;
+  if (folders.some(folder => normalizePath(folder) === location.folder)) return false;
+  folders.push(location.folder);
+  return true;
+}
 
 type SearchViewLike = {
   containerEl: HTMLElement;
@@ -196,6 +207,7 @@ export function registerSearchFolderFilter(plugin: SimplePlugin): () => void {
   };
 
   const refresh = (): void => {
+    if (addAttachmentFolderToSearchExclusions(plugin)) runAsync(() => plugin.saveSettings())();
     for (const [root, state] of states) {
       if (!root.isConnected || !plugin.settings.searchFolders.enabled) {
         if (state.inputTimer !== null) window.clearTimeout(state.inputTimer);
