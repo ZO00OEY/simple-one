@@ -121,3 +121,24 @@ for (const saved of [{}, { pullOnStartup: true, backupOnStartup: true }]) {
   assert.equal(f.sync.settings.pullOnStartup, !saved.backupOnStartup,
     'default fetch-only mode and backup priority for old overlapping settings');
 }
+
+// Setup uses the same queue without requiring an already completed connection.
+{
+  const setup = Object.create(Sync.prototype);
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const order = [];
+  Object.assign(setup, { desktopGitQueue: pending, host: { app: {} }, settings: { setupComplete: false },
+    clearDesktopTimeouts: () => order.push('pause'), nativeGitEnabled: () => false });
+  const inspection = setup.enqueueSetupGit(async () => { order.push('inspect'); return 'ready'; });
+  assert.equal(setup.setupGitPaused, true);
+  assert.deepEqual(order, ['pause']);
+  await assert.rejects(setup.enqueueDesktopGit(async () => {}), /后台 Git 同步已暂停/);
+  release();
+  assert.equal(await inspection, 'ready');
+  assert.deepEqual(order, ['pause', 'inspect']);
+  assert.equal(setup.desktopTaskActive, false);
+  await assert.rejects(setup.enqueueSetupGit(async () => { throw Error('fixture failure'); }), /fixture failure/);
+  assert.equal(await setup.enqueueSetupGit(async () => 'retry'), 'retry');
+}
+console.log('Desktop setup queue: first connection, background pause, serialization and retry passed');

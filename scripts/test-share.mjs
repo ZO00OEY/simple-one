@@ -111,20 +111,21 @@ try {
   const root = join(folder, "vault");
   await mkdir(root); await writeFile(join(root, "private.md"), "private");
   // Share one fixture class between the host adapter and repository module.
-  await writeFile(join(folder, "entry.ts"), `export {FileSystemAdapter,TFile,TFolder,Platform} from "obsidian"; export {ShareRepository,websiteFiles} from ${JSON.stringify(resolve("src/features/share/repository.ts"))}; export {ApiShareRepository} from ${JSON.stringify(resolve("src/features/share/apiRepository.ts"))}; export {default as ShareFeature,ShareView,ShareDirectoryModal} from ${JSON.stringify(resolve("src/features/share/index.ts"))};`);
+  await writeFile(join(folder, "entry.ts"), `export {FileSystemAdapter,TFile,TFolder,Platform} from "obsidian"; export {ShareRepository,websiteFiles} from ${JSON.stringify(resolve("src/features/share/repository.ts"))}; export {ApiShareRepository,FallbackShareRepository} from ${JSON.stringify(resolve("src/features/share/apiRepository.ts"))}; export {default as ShareFeature,ShareView,ShareDirectoryModal} from ${JSON.stringify(resolve("src/features/share/index.ts"))};`);
   const combined = await bundle(join(folder, "entry.ts"), "combined");
   {
     let probes = 0;
-    const host = { manifest: { id: 'fixture' }, app: { secretStorage: { getSecret: () => 'fixture-token' } }, sync: { exec: async () => { probes++; return 'gh version'; } } };
+    const host = { manifest: { id: 'fixture' }, app: { secretStorage: { getSecret: () => 'fixture-token' } }, sync: { exec: async (_program, args) => { probes++; return args[0] === 'api' ? 'fixture-user' : 'gh version'; } } };
     const desktop = new combined.ShareFeature(host);
-    assert(await desktop.repository() instanceof combined.ShareRepository);
+    assert(await desktop.repository() instanceof combined.FallbackShareRepository);
     assert.equal(desktop.backend, 'cli');
-    await desktop.repository(); assert.equal(probes, 1, 'CLI capability is cached');
+    assert.equal(probes, 2, 'desktop probes CLI authentication and GitHub API access');
+    await desktop.repository(); assert.equal(probes, 4, 'CLI availability is verified again for each repository operation');
     combined.Platform.isMobile = true;
     try {
       const mobile = new combined.ShareFeature(host);
       assert(await mobile.repository() instanceof combined.ApiShareRepository);
-      assert.equal(probes, 1, 'mobile never probes or executes CLI');
+      assert.equal(probes, 4, 'mobile never probes or executes CLI');
     } finally { combined.Platform.isMobile = false; }
     const missing = new combined.ShareFeature({ ...host, sync: { exec: async () => { throw new Error('CLI not installed'); } } });
     assert(await missing.repository() instanceof combined.ApiShareRepository);
@@ -202,7 +203,7 @@ try {
   try {
     const uiCalls = [];
     let savedLayouts = 0;
-    const ui = new combined.ShareFeature({ app: { vault: { getName: () => "fixture" }, workspace: { getLeavesOfType: () => [], requestSaveLayout() { savedLayouts++; } } }, sync: { exec: async (program, args, _auth, _trim, _timeout, output, stdin, signal) => {
+    const ui = new combined.ShareFeature({ manifest: { id: 'fixture' }, app: { secretStorage: { setSecret() {}, getSecret: () => 'fixture-secret' }, vault: { getName: () => "fixture" }, workspace: { getLeavesOfType: () => [], requestSaveLayout() { savedLayouts++; } } }, sync: { exec: async (program, args, _auth, _trim, _timeout, output, stdin, signal) => {
       uiCalls.push({ program, args, stdin });
       if (args.includes("--web")) {
         output("First copy your one-time code: ABCD-1234");
@@ -226,7 +227,7 @@ try {
     const input = rootEl.querySelector("input"); assert.equal(input.type, "password");
     input.value = "fixture-secret"; input.dispatchEvent(new dom.window.Event("input"));
     click("已填写 token，验证授权"); await settle();
-    assert.equal(ui.guideStep, 2); assert.equal(ui.token, "");
+    assert.equal(ui.guideStep, 2, ui.error); assert.equal(ui.token, "");
     assert.equal(uiCalls.find(call => call.args.includes("--with-token")).stdin, "fixture-secret\n");
     assert.equal(rootEl.querySelector(".simple-page-title"), null, "async re-render preserves shared header");
     rootEl.querySelector(".simple-one-sync-setup-nav__step").click();
@@ -475,7 +476,12 @@ try {
     assert(!ui.backFromEdgeOneGuide(), 'normal sharing back can return to its parent');
     const deploymentCalls = [];
     let finishDeployment;
-    ui.host.sync.exec = async (_program, args) => { deploymentCalls.push(args); return await new Promise(resolve => { finishDeployment = resolve; }); };
+    ui.host.sync.exec = async (_program, args) => {
+      deploymentCalls.push(args);
+      if (args[0] === 'auth') return 'authenticated';
+      if (args[0] === 'api' && args[1] === 'user') return 'fixture';
+      return await new Promise(resolve => { finishDeployment = resolve; });
+    };
     ui.local = async () => ({ version: 1, site: "fixture/notes-share", commit: "fixture-commit" });
     const check = ui.checkDeployment();
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -484,21 +490,22 @@ try {
     finishDeployment(JSON.stringify({ commit: "fixture-commit", status: "built" })); await check;
     assert.equal(rootEl.querySelector(".simple-share-deployment-result").textContent, "网站已更新");
     assert(rootEl.querySelector(".simple-share-deployment-result").classList.contains("simple-share-success"));
-    assert.deepEqual(deploymentCalls, [["api", "repos/fixture/notes-share/pages/builds/latest"]], "deployment inspection only reads build status and never configures Pages or publishes notes");
+    assert.deepEqual(deploymentCalls, [["auth", "status", "--active", "--hostname", "github.com"], ["api", "user", "--jq", ".login"], ["api", "repos/fixture/notes-share/pages/builds/latest"]], "deployment verifies local CLI access, then only reads build status");
   } finally { delete globalThis.shareSetting; dom.window.close(); }
   console.log("Share authorization UI: method selection, token handoff, device code cancellation and shared title preservation passed.");
   {
     for (const occupied of ["precheck", "create-race", "permission", "free"]) {
       const calls = [];
-      const creator = new combined.ShareFeature({ sync: { exec: async (_program, args) => {
+      const creator = new combined.ShareFeature({ manifest: { id: 'fixture' }, app: { secretStorage: { getSecret: () => '' } }, sync: { exec: async (_program, args) => {
         calls.push(args);
-        if (args.includes("user")) return "fixture";
+        if (args[0] === 'auth' && args[1] === 'token') throw Error('no fallback token in this fixture');
+        if (args[0] === 'auth') return 'authenticated';
+        if (args[0] === 'api' && args[1] === 'user') return JSON.stringify({ login: "fixture" });
         if (args[0] === "api" && args[1] !== "user/repos") { if (occupied === "precheck") return "{}"; throw new Error("HTTP 404"); }
         if (occupied === "create-race") throw new Error("Name already exists on this account");
         if (occupied === "permission") throw new Error("HTTP 403: denied");
         return "created";
       } } });
-      creator.cliAvailable = true; // This fixture tests CLI repository errors, not capability detection.
       let bound;
       creator.bind = async (owner, name) => { bound = `${owner}/${name}`; };
       if (["precheck", "create-race"].includes(occupied)) {
@@ -568,6 +575,8 @@ try {
     sync: { isSyncing: () => false, exec: async (program, args, _auth, _trim, _timeout, _output, stdin) => {
       assert.equal(program, 'gh', 'publishing must never execute Git');
       if (args[0] === '--version') return 'gh version';
+      if (args[0] === 'auth') return 'authenticated';
+      if (args[0] === 'api' && args[1] === 'user') return 'fixture';
       assert.equal(args[0], 'api');
       const methodIndex = args.indexOf('--method');
       return JSON.stringify(await cloud.request(args[1], methodIndex >= 0 ? args[methodIndex + 1] : 'GET', stdin ? JSON.parse(stdin) : undefined));

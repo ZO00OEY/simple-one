@@ -1,19 +1,24 @@
+# 本机依赖与开发临时文件
 node_modules/
-data.json
+.codex/
+AGENTS.md
 .env
 .env.*
 *.log
-.codex/
-AGENTS.md
 
-# 同步与分享的个人配置、凭据与运行状态
+# 个人配置、API 凭据与同步状态（包括恢复副本和归档）
 data.json*
+sync-settings.json*
 sync-local.json*
-sync-settings.json
+sync-api-local.json*
+sync-log.json*
 link-state.json*
 mobile-ignore.json*
+private/
+
+# 个人分享记录与自定义模板
 share-manifest.json*
 share-local.json*
 share-template*.html
 custom-*.html
-share-template-selection.json
+share-template-selection.json*

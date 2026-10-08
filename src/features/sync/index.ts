@@ -6,7 +6,6 @@ import {
   EventRef,
   FileSystemAdapter,
   ItemView,
-  Menu,
   Modal,
   Notice,
   Platform,
@@ -36,10 +35,10 @@ import { applyConflictResolutions, ConflictBlock, parseConflictBlocks } from "./
 import { describeGitError, isMissingRemoteRefError, isTransientGitNetworkError, isUncertainGitAuthError } from "./gitError";
 import { LiveReview, ZoeySyncConflictPreviewModal } from "./conflictPreview";
 import { SetupDifferencesModal } from "./setupDifferences";
-import { GitSetup, OverlapChoice, SetupOverlapContent, SetupPreview, VerifiedRepo, setupGitIgnore, missingSetupIgnoreRules, pathBatches, explainSetupError, parseGithubRepoUrl, applySetupIgnoreBase, setupIgnoreComparisonText, setupIgnoreDiffers, setupIgnoreRuleGroups, setupFinalIgnoreRuleGroups } from "./onboarding";
+import { GitSetup, OverlapChoice, SetupOverlapContent, SetupPreview, VerifiedRepo, setupGitIgnore, missingSetupIgnoreRules, pathBatches, explainSetupError, parseGithubRepoUrl, applySetupIgnoreBase } from "./onboarding";
 import { findNestedRepos, nestedGitIgnoreRules, nestedRepoFiles, rebuildNestedRepoTracking } from "./nestedRepos";
 
-import { DEFAULT_MOBILE_OPTIONS, MobileOptions, mobileIgnores, newPathRecords } from "./linkDiff";
+import { DEFAULT_MOBILE_OPTIONS, MobileOptions, newPathRecords } from "./linkDiff";
 import { ConflictChoice, MobileGithub, RemoteSnapshot } from "./mobileGithub";
 import { MobileHost, MobileSyncModal, renderMobileSettings, renderMobileSyncRules, type MobileSyncFlow } from "./mobileUi";
 import { renderDownloadTask, renderPlanConfirmation, renderStrategy } from "./syncFlowUi";
@@ -307,6 +306,7 @@ export default class SyncFeature extends Component {
   private automaticBackupQueued = false;
   private startupPullScheduled = false;
   private desktopGitQueue: Promise<void> = Promise.resolve();
+  private setupGitPaused = false;
   private desktopGitTrace: string[] = [];
   private sharedSettingsWritable = true;
   private deferredMergePaths: string[] = [];
@@ -726,12 +726,7 @@ export default class SyncFeature extends Component {
   async saveSettings(): Promise<void> {
     await this.saveData(pickLocalSettings(this.settings));
     if (this.sharedSettingsWritable) await this.saveSharedSettings();
-    if (this.useLightweightSync()) {
-      const path = `${this.app.vault.configDir}/plugins/${this.manifest.id}/mobile-ignore.json`;
-      await this.app.vault.adapter.write(path, JSON.stringify({ generated: mobileIgnores(
-        this.settings.mobile, this.app.vault.configDir, this.manifest.id),
-        selectedPlugins: this.settings.mobile.plugins }, null, 2));
-    }
+
   }
 
   private sharedSettingsPath(): string {
@@ -945,10 +940,24 @@ export default class SyncFeature extends Component {
     }
   }
 
+  private enqueueSetupGit<T>(task: () => Promise<T>): Promise<T> {
+    this.setupGitPaused = true;
+    this.clearDesktopTimeouts();
+    const run = this.desktopGitQueue.then(async () => {
+      if (this.host.share?.busy || legacySyncRunning(this.app)) throw new Error("请先等待分享完成或关闭旧 Simple Link 同步");
+      this.desktopTaskActive = true;
+      try { return await task(); } finally { this.desktopTaskActive = false; }
+    });
+    this.desktopGitQueue = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
   private enqueueDesktopGit(task: () => Promise<void | boolean>, errorContext?: string): Promise<void> {
+    if (this.setupGitPaused) return Promise.reject(new SyncDeferredError("接入引导中，后台 Git 同步已暂停"));
     if (!this.nativeGitEnabled()) return Promise.reject(new SyncDeferredError("电脑端原生 Git 同步已关闭"));
     if (!this.settings.setupComplete) return Promise.reject(new Error("请先完成首次使用引导"));
     const trackedTask = async (): Promise<void> => {
+      if (this.setupGitPaused) throw new SyncDeferredError("接入引导中，后台 Git 同步已暂停");
       if (this.host.share?.busy) throw new SyncDeferredError("笔记分享正在发布，主库自动同步暂缓。");
       if (legacySyncRunning(this.app)) throw new SyncDeferredError("旧 Simple Link 仍在运行，已暂停新入口的 Git 操作");
       if (!this.nativeGitEnabled()) throw new SyncDeferredError("电脑端原生 Git 同步已关闭");
@@ -1260,10 +1269,6 @@ export default class SyncFeature extends Component {
   }
 
   async openSyncView(refreshExisting = true, reveal = true): Promise<void> {
-    if (!this.settings.enabled) {
-      new Notice("同步已关闭，请先在设置中启用");
-      return;
-    }
     let leaf: WorkspaceLeaf | null = this.app.workspace.getLeavesOfType(ZoeySyncView.type)[0] ?? null;
     const existing = !!leaf;
     if (!leaf) {
@@ -1881,7 +1886,10 @@ export default class SyncFeature extends Component {
 
   async beginSetup(): Promise<void> {
     if (this.syncing) throw new Error("当前有同步任务正在运行，请稍后重试");
+    this.setupGitPaused = true;
+    this.clearDesktopTimeouts();
     await this.desktopGitQueue;
+    this.setupActivity = undefined;
     this.settings.setupBackup = {
       step: this.settings.setupStep,
       repoUrl: this.settings.setupRepoUrl,
@@ -1915,6 +1923,8 @@ export default class SyncFeature extends Component {
     this.setupChoices = {};
     this.setupTrackingChoice = undefined;
     await this.saveSettings();
+    this.setupGitPaused = false;
+    this.setupActivity = undefined;
     await this.restartDesktopAutomation();
     this.setStatus("桌面端 · Git 模式");
     await this.refreshSyncView();
@@ -1961,15 +1971,21 @@ export default class SyncFeature extends Component {
   async inspectSetupRepository(onProgress?: (message: string) => void): Promise<void> {
     const repoUrl = this.settings.setupVerified?.url || this.settings.setupRepoUrl;
     if (!repoUrl) throw new Error("请先填写并核验私人仓库地址");
-    onProgress?.("正在确认仓库与访问权限…");
-    const verified = this.settings.setupComplete || !this.settings.setupVerified
-      ? await this.setup().verifyRepository(repoUrl)
-      : this.settings.setupVerified;
-    this.settings.setupVerified = verified;
-    this.setupPreview = await this.setup().preview(verified, onProgress);
+    this.setupPreview = undefined;
+    this.setupActivity = undefined;
+    await this.enqueueSetupGit(async () => {
+      onProgress?.("正在确认仓库与访问权限…");
+      const setup = this.setup();
+      const verified = await setup.verifyRepository(repoUrl);
+      this.settings.setupVerified = verified;
+      onProgress?.("正在提交本机可提交的改动…");
+      const commitSummary = await setup.commitForInspection();
+      this.setupPreview = await setup.preview(verified, onProgress);
+      this.setupPreview.commitSummary = commitSummary;
+    });
     if (!this.settings.setupComplete) {
       this.setupChoices = {};
-      this.setupTrackingChoice = undefined;
+      this.setupTrackingChoice = this.setupPreview!.trackedExcludedLocal.length || this.setupPreview!.trackedExcludedRemote.length ? "rebuild" : undefined;
       this.settings.setupStep = 3;
       await this.saveSettings();
     }
@@ -1977,9 +1993,6 @@ export default class SyncFeature extends Component {
 
   async confirmSetupPreview(): Promise<void> {
     if (!this.setupPreview) throw new Error("请先检查本地与远端文件");
-    if (setupIgnoreDiffers(this.setupPreview) && !this.setupChoices[".gitignore"]) {
-      throw new Error("请先选择 .gitignore 基准。");
-    }
     for (const path of this.setupPreview.overlaps) {
       if (!this.setupChoices[path]) throw new Error(`请选择同名文件的保留版本：${path}`);
     }
@@ -2011,7 +2024,7 @@ export default class SyncFeature extends Component {
     publishProgress();
     const progressTimer = window.setInterval(publishProgress, 1000);
     try {
-    const skippedPaths = await this.setup().finish(verified, preview, this.setupChoices, {
+    const skippedPaths = await this.enqueueSetupGit(() => this.setup().finish(verified, preview, this.setupChoices, {
       name: this.settings.gitAuthorName,
       email: this.settings.gitAuthorEmail
     }, async () => {
@@ -2020,7 +2033,7 @@ export default class SyncFeature extends Component {
     }, new Set<string>(), this.setupTrackingChoice === "rebuild", current => {
       stage = current;
       publishProgress();
-    });
+    }));
     stage = "保存接入配置";
     publishProgress();
     preview.missingIgnoreRules = [];
@@ -2032,6 +2045,7 @@ export default class SyncFeature extends Component {
     await this.saveSettings();
     stage = "启用电脑端 Git 同步";
     publishProgress();
+    this.setupGitPaused = false;
     await this.setDesktopSyncMode("git");
     if (!this.nativeGitEnabled()) throw new Error("当前同步仍在运行，请稍后启用电脑端 Git 同步。");
     this.setStatus(skippedPaths.length > 0
@@ -2041,8 +2055,8 @@ export default class SyncFeature extends Component {
     window.clearInterval(progressTimer);
     this.setSetupActivity("首次接入已成功 · 首次推送完成", "success");
     onProgress?.("首次接入已成功 · 首次推送完成");
-    await this.refreshSyncView();
     this.setupActivity = undefined;
+    await this.refreshSyncView();
     } catch (error) {
       const message = `${stage}失败 · ${formatStatusError(explainSetupError(error))}`;
       this.setSetupActivity(message, "error");
@@ -2859,7 +2873,7 @@ class ZoeySyncView extends ItemView {
   }
 
   getDisplayText(): string {
-    return "同步";
+    return "同步与分享";
   }
 
   getIcon(): string {
@@ -2964,10 +2978,28 @@ class ZoeySyncView extends ItemView {
     quota.setAttr("title", "以最近一次 GitHub 响应为准；下一次请求会更新额度，同账号其他设备可能共享额度。");
   }
 
+  private renderShareSwitch(header: HTMLElement): void {
+    const shareButton = header.createEl("button", { cls: "simple-one-panel-switch",
+      attr: { type: "button", "aria-label": "切换到分享" } });
+    setIcon(shareButton.createSpan({ cls: "simple-one-panel-switch__icon", attr: { "aria-hidden": "true" } }), "arrow-right-left");
+    shareButton.createSpan({ text: "切换分享" });
+    shareButton.addEventListener("click", runAsync(() => this.plugin.host.share.open()));
+  }
+
   async render(reuseChanges = false): Promise<void> {
     if (this.closed || this.review || this.promptCancel || !this.app.workspace.layoutReady) return;
     const generation = ++this.renderGeneration;
     const container = this.containerEl.children[1] as HTMLElement;
+
+    if (this.plugin.settings.enabled === false) {
+      container.empty();
+      container.addClass("simple-one-sync-view");
+      this.renderShareSwitch(container.createDiv({ cls: "simple-one-sync-view__header" }));
+      container.createEl("p", { text: "同步已关闭，可在同步设置中启用。" });
+      container.createEl("button", { text: "打开同步设置", attr: { type: "button" } })
+        .addEventListener("click", () => this.plugin.openPluginSettings());
+      return;
+    }
 
     let changes: ChangeItem[] = [];
     let changesError: unknown;
@@ -3045,11 +3077,7 @@ class ZoeySyncView extends ItemView {
       reminder.addEventListener("click", () => void this.showDownloadTask());
     }
 
-    const shareButton = header.createEl("button", { cls: "simple-one-panel-switch",
-      attr: { type: "button", "aria-label": "切换到分享" } });
-    setIcon(shareButton.createSpan({ cls: "simple-one-panel-switch__icon", attr: { "aria-hidden": "true" } }), "arrow-right-left");
-    shareButton.createSpan({ text: "切换分享" });
-    shareButton.addEventListener("click", runAsync(() => this.plugin.host.share.open()));
+    this.renderShareSwitch(header);
 
     const status = container.createDiv({ cls: "simple-one-sync-view__status" });
     status.addClass(`is-${statusState.tone}`);
@@ -3148,7 +3176,7 @@ class ZoeySyncView extends ItemView {
 
     if (!changesError) {
       if (this.plugin.useLightweightSync() && this.plugin.isSyncing()) {
-        section.createDiv({ text: "正在核对两端或等待文件选择，当前列表暂不显示。", cls: "simple-one-sync-view__empty" });
+        // Keep the list empty until the sync plan is ready for display.
       } else if (this.plugin.getLightweightPendingStatus()) {
         section.createDiv({ text: "尚未完成轻量同步首次对齐。点击同步核对实际差异；没有基准时，空列表不代表没有变化。", cls: "simple-one-sync-view__empty" });
       } else if (changes.length === 0) {
@@ -3307,9 +3335,8 @@ export class SyncSettingsTab extends PluginSettingTab {
   private setupBusy = false;
   private setupRebuildConfirmed = false;
   private setupReviewPreview?: SetupPreview;
-  private setupReviewStage: 1 | 2 | 3 = 1;
-  private setupBaseConfirmed = false;
-  private setupRulesConfirmed = false;
+  private setupFinishedPreview?: SetupPreview;
+  private setupFileFilter: "local" | "remote" | "changed" = "changed";
   private setupMessage = "";
   private setupFailure = false;
 
@@ -4052,8 +4079,8 @@ export class SyncSettingsTab extends PluginSettingTab {
   }
 
   private async advanceSetupAfterPreview(): Promise<void> {
-    if (this.plugin.settings.setupComplete || this.setupViewStep !== 3 || this.setupReviewStage !== 3 ||
-      !this.setupBaseConfirmed || !this.setupRulesConfirmed || !this.setupPreviewReady()) return;
+    if (this.setupViewStep !== 3 ||
+      !this.setupPreviewReady()) return;
     await this.plugin.confirmSetupPreview();
     await this.advanceSetupAfterCheck(3, () => this.setupPreviewReady());
   }
@@ -4211,7 +4238,7 @@ export class SyncSettingsTab extends PluginSettingTab {
       "核对本地与远端文件，并决定同名文件如何处理。",
       guidedDone ? "接入已完成，可回看核验结果或重新检查两端状态。" : "确认接入信息，然后执行首次推送。"
     ];
-    if (this.setupViewStep !== 1) {
+    if (this.setupViewStep !== 1 && this.setupViewStep !== 3) {
       new Setting(body).setName("").setHeading();
       body.createEl("p", { text: descriptions[this.setupViewStep - 1], cls: "simple-one-sync-setup-step-desc" });
     }
@@ -4390,18 +4417,14 @@ export class SyncSettingsTab extends PluginSettingTab {
 
   private displaySetupPreview(body: HTMLElement): void {
     const preview = this.plugin.getSetupPreview();
+    body.addClass("simple-one-sync-check-page");
     body.createEl("p", { text: `当前 Vault：${this.plugin.getVaultBasePath()}`, cls: "simple-one-sync-section-desc" });
-    body.createEl("p", { text: "先检查本机和 GitHub 的文件差异，再决定如何接入。检查不会合并、删除或推送笔记。", cls: "simple-one-sync-section-desc" });
     if (this.plugin.settings.setupComplete && !this.plugin.settings.setupVerified) {
       body.createEl("p", { text: "当前连接来自旧版设置，尚未经过此向导核验。使用上方「从第一步重新检查接入」后可查看两端文件。" });
     }
-    body.createEl("p", { text: this.setupMessage, cls: `simple-one-sync-setup-preview-progress ${this.setupFailure ? "simple-one-sync-setup-error" : this.setupMessage.startsWith("✓") ? "simple-one-sync-setup-done" : "simple-one-sync-section-desc"}`, attr: { role: "status", "aria-live": "polite" } });
-    if (!preview && this.plugin.settings.setupStep >= 3 && (this.plugin.settings.setupVerified || this.plugin.settings.setupRepoUrl)) {
-      const actionLabel = !this.plugin.settings.setupVerified
-        ? "重新核验仓库并检查本地与云端文件"
-        : this.plugin.settings.setupComplete
-          ? "重新检查本地与云端文件"
-          : "检查本地与云端文件";
+    body.createEl("p", { text: preview && !this.setupBusy && !this.setupFailure ? ["✓ 检查完成", preview.commitSummary, "忽略规则已自动整理"].filter(Boolean).join(" · ") : this.setupMessage, cls: `simple-one-sync-setup-preview-progress ${this.setupFailure ? "simple-one-sync-setup-error" : this.setupMessage.startsWith("✓") ? "simple-one-sync-setup-done" : "simple-one-sync-section-desc"}`, attr: { role: "status", "aria-live": "polite" } });
+    if ((!preview || this.setupFailure) && this.plugin.settings.setupStep >= 3 && (this.plugin.settings.setupVerified || this.plugin.settings.setupRepoUrl)) {
+      const actionLabel = preview ? "重新检查两端" : "检查两端";
       const action = body.createDiv({ cls: "simple-one-sync-setup-file-check" });
       const check = action.createEl("button", { text: this.setupBusy ? "正在检查…" : actionLabel, cls: "mod-cta", attr: { type: "button" } });
       check.disabled = this.setupBusy;
@@ -4423,141 +4446,55 @@ export class SyncSettingsTab extends PluginSettingTab {
         } finally {
           window.clearInterval(timer);
         }
-        this.setupMessage = "✓ 检查完成，请依次确认忽略规则、追踪和文件差异。";
+        this.setupMessage = "✓ 检查完成 · 忽略规则已自动整理";
       }, undefined, false));
     }
     if (!preview) return;
     if (this.setupReviewPreview !== preview) {
       this.setupReviewPreview = preview;
-      this.setupReviewStage = 1;
-      this.setupBaseConfirmed = false;
-      this.setupRulesConfirmed = false;
-      this.setupRebuildConfirmed = false;
+      this.setupFileFilter = "changed";
+      const excluded = preview.trackedExcludedLocal.length + preview.trackedExcludedRemote.length;
+      this.plugin.setSetupTrackingChoice(excluded ? "rebuild" : undefined);
+      this.setupRebuildConfirmed = excluded > 0;
     }
     const summary = body.createDiv({ cls: "simple-one-sync-setup-detail" });
     new Setting(summary).setName("两端检查概况").setHeading();
     const overview = summary.createDiv({ cls: "simple-one-sync-setup-overview" });
-    for (const [label, value] of [["本机文件", preview.localFiles.length], ["GitHub 文件", preview.remoteFiles.length], ["仅本机", preview.localOnly.length], ["仅 GitHub", preview.remoteOnly.length], ["同名差异", preview.overlaps.length]] as [string, number][]) {
-      const item = overview.createDiv({ cls: "simple-one-sync-setup-overview__item" });
-      item.createEl("strong", { text: String(value) });
-      item.createSpan({ text: label });
+    const groups: { label: string; value: number; filter?: "local" | "remote" | "changed" }[] = [
+      { label: "本机文件", value: preview.localFiles.length },
+      { label: "GitHub 文件", value: preview.remoteFiles.length },
+      { label: "仅本机", value: preview.localOnly.length, filter: "local" },
+      { label: "仅 GitHub", value: preview.remoteOnly.length, filter: "remote" },
+      { label: "文件变化", value: preview.relatedHistory ? (preview.changedFiles ?? []).length : preview.overlaps.length, filter: "changed" }
+    ];
+    for (const group of groups) {
+      const item = group.filter
+        ? overview.createEl("button", { cls: "simple-one-sync-setup-overview__item is-filter", attr: { type: "button", "aria-pressed": String(this.setupFileFilter === group.filter) } })
+        : overview.createDiv({ cls: "simple-one-sync-setup-overview__item" });
+      item.createEl("strong", { text: String(group.value) });
+      item.createSpan({ text: group.label });
+      if (group.filter) {
+        if (this.setupFileFilter === group.filter) item.addClass("is-selected");
+        item.addEventListener("click", () => { this.setupFileFilter = group.filter!; this.renderSettings(); });
+      }
     }
-    if (preview.nestedRepos.length) summary.createEl("p", {
-      text: `发现 ${preview.nestedRepos.length} 个内嵌 Git 仓库。只会排除它们的 .git 元数据；这些仓库自己的历史不受影响。`,
-      cls: "simple-one-sync-section-desc"
-    });
-    if (preview.alreadyLinked) summary.createEl("p", { text: "本机已包含 GitHub 的提交记录，可以继续核对文件。", cls: "simple-one-sync-setup-done" });
-    else if (preview.relatedHistory) summary.createEl("p", { text: "两端有共同历史；完成接入时会合并 GitHub 的新提交，冲突会停下等待处理。", cls: "simple-one-sync-section-desc" });
     summary.createEl("p", { text: preview.localRoot ? `本机分支：${preview.localBranch} · GitHub 分支：${preview.branch}` : `当前 Vault 还没有 Git 仓库；完成接入时会创建 ${preview.branch} 分支。`, cls: "simple-one-sync-section-desc" });
     if (preview.localRoot && !preview.relatedHistory && preview.localBranch !== preview.branch) summary.createEl("p", {
       text: `本机已有独立历史，${preview.localBranch} 分支将接入远端 ${preview.branch} 分支，请确认目标仓库。`, cls: "simple-one-sync-section-desc"
     });
-    const nav = body.createDiv({ cls: "simple-one-sync-setup-nav simple-one-sync-review-nav", attr: { "aria-label": "两端检查确认进度" } });
-    ["忽略规则基准", "建议规则与追踪", "文件差异"].forEach((label, index) => {
-      const stage = (index + 1) as 1 | 2 | 3;
-      const done = stage === 1 ? this.setupBaseConfirmed : stage === 2 ? this.setupRulesConfirmed : false;
-      const button = nav.createEl("button", { cls: `simple-one-sync-setup-nav__step${this.setupReviewStage === stage ? " is-active" : ""}${done ? " is-done" : ""}`,
-        attr: { type: "button", "aria-current": this.setupReviewStage === stage ? "step" : "false" } });
-      button.createSpan({ text: String(stage), cls: "simple-one-sync-setup-nav__marker" });
-      button.createSpan({ text: label, cls: "simple-one-sync-setup-nav__label" });
-      button.disabled = this.setupBusy || (stage === 2 && !this.setupBaseConfirmed) || (stage === 3 && !this.setupRulesConfirmed);
-      button.addEventListener("click", () => { this.setupReviewStage = stage; this.renderSettings(); });
-    });
-    const module = body.createDiv({ cls: "simple-one-sync-setup-detail simple-one-sync-review-module" });
-    const footer = () => module.createDiv({ cls: "simple-one-sync-setup-footer simple-one-sync-review-footer" });
-    const ignoreChoice = this.plugin.getSetupChoices()[".gitignore"];
-    if (this.setupReviewStage === 1) {
-      new Setting(module).setName("1 · 选择 Git 忽略规则基准").setHeading();
-      const differs = setupIgnoreDiffers(preview);
-      module.createEl("p", { text: differs ? "两端 .gitignore 不同。先查看规则，再在下方选择作为基准的版本。" : "两端 .gitignore 一致，确认后继续检查建议规则。" });
-      if (differs) {
-        const compare = module.createEl("button", { text: "查看差异 / 合并编辑", attr: { type: "button" } });
-        compare.disabled = this.setupBusy;
-        compare.addEventListener("click", () => void this.reviewSetupIgnoreDifferences(preview));
-      }
-      if (preview.customIgnore !== undefined) {
-        module.createEl("p", { text: "✓ 已保存合并编辑结果，作为本次接入的规则基准。", cls: "simple-one-sync-setup-done" });
-        const result = module.createEl("details", { cls: "simple-one-sync-setup-files" });
-        result.createEl("summary", { text: "查看已合并的完整基准" });
-        result.createEl("pre", { text: preview.customIgnore || "（空）" });
-      }
-      const actions = footer();
-      if (differs) {
-        const choice = new Setting(actions).setName("使用哪一端作为基准？");
-        for (const base of ["local", "remote"] as const) choice.addButton(button => {
-          button.setButtonText(base === "local" ? "应用本地" : "应用远端").setDisabled(this.setupBusy);
-          if (ignoreChoice === base && preview.customIgnore === undefined) button.setCta();
-          button.onClick(() => {
-            this.plugin.setSetupChoice(".gitignore", base);
-            this.setupBaseConfirmed = false;
-            this.setupRulesConfirmed = false;
-            this.setupRebuildConfirmed = false;
-            this.renderSettings();
-          });
-        });
-      }
-      const next = actions.createEl("button", { text: "确认基准，下一步", cls: "mod-cta", attr: { type: "button" } });
-      next.disabled = this.setupBusy || (differs && !ignoreChoice);
-      next.addEventListener("click", () => this.confirmSetupIgnoreBase());
-    } else if (this.setupReviewStage === 2) {
-      new Setting(module).setName("2 · 建议规则与文件追踪").setHeading();
-      module.createEl("p", { text: `规则基准：${preview.customIgnore !== undefined ? "合并结果" : ignoreChoice === "remote" ? "远端" : "本机"} · 新增规则：${preview.missingIgnoreRules.length} 条 · 建议停止追踪：本机 ${preview.trackedExcludedLocal.length} / 远端 ${preview.trackedExcludedRemote.length}` });
-      const ruleViews = module.createDiv({ cls: "simple-one-sync-setup-rule-views" });
-      const ruleOptions = ruleViews.createDiv({ cls: "simple-one-sync-setup-options" });
-      const ruleContent = ruleViews.createDiv({ cls: "simple-one-sync-setup-rule-content" });
-      const customTitle = preview.customIgnore !== undefined ? "合并后的自有规则" : ignoreChoice === "remote" ? "远端自有规则" : "本机自有规则";
-      let selectedRuleView: HTMLButtonElement | null = null;
-      for (const [view, title] of [["suggested", "查看建议规则"], ["final", "查看最终 .gitignore"], ["full", "查看完整文件"]] as const) {
-        const button = ruleOptions.createEl("button", { text: title, cls: "simple-one-sync-setup-option", attr: { type: "button", "aria-pressed": "false" } });
-        button.addEventListener("click", () => {
-          const collapse = selectedRuleView === button;
-          selectedRuleView?.removeClass("is-selected");
-          selectedRuleView?.setAttribute("aria-pressed", "false");
-          selectedRuleView = collapse ? null : button;
-          ruleContent.empty();
-          if (collapse) return;
-          button.addClass("is-selected");
-          button.setAttribute("aria-pressed", "true");
-          if (view === "full") {
-            ruleContent.createEl("p", { text: "含注释与原始顺序", cls: "simple-one-sync-section-desc" });
-            ruleContent.createEl("pre", { text: preview.optimizedIgnore || "（空）" });
-          } else {
-            if (view === "suggested") ruleContent.createEl("p", { text: "建议规则保护缓存、凭据、本机状态及内嵌仓库的 .git 元数据，原有用户规则保留。", cls: "simple-one-sync-section-desc" });
-            this.renderSetupRuleCards(ruleContent, title, view === "suggested"
-              ? setupIgnoreRuleGroups(preview, this.plugin.app.vault.configDir)
-              : setupFinalIgnoreRuleGroups(preview, this.plugin.app.vault.configDir, customTitle));
-            ruleContent.querySelector("details")?.setAttribute("open", "");
-          }
-        });
-      }
-      const excluded = preview.trackedExcludedLocal.length + preview.trackedExcludedRemote.length;
-      this.setupFileList(module, "本机建议停止追踪", preview.trackedExcludedLocal);
-      this.setupFileList(module, "远端建议停止追踪", preview.trackedExcludedRemote);
-      const actions = footer();
-      if (excluded && !this.plugin.settings.setupComplete) {
-        actions.createEl("p", { text: "确认应用建议规则，并选择如何处理已有追踪：" });
-        for (const choice of ["rebuild", "keep"] as const) {
-          const button = actions.createEl("button", { text: choice === "rebuild" ? "应用建议并重建追踪，下一步" : "应用建议但保留追踪，下一步", cls: choice === "rebuild" ? "mod-cta" : "", attr: { type: "button" } });
-          button.title = choice === "rebuild" ? "本机文件保留；第四步推送后，远端将停止追踪这些文件。" : "仅添加忽略规则，已有文件仍保持追踪。";
-          button.disabled = this.setupBusy;
-          button.addEventListener("click", () => this.confirmSetupRules(choice));
-        }
-      } else {
-        const button = actions.createEl("button", { text: this.plugin.settings.setupComplete ? "已查看规则，下一步" : "确认应用建议规则，下一步", cls: "mod-cta", attr: { type: "button" } });
-        button.disabled = this.setupBusy;
-        button.addEventListener("click", () => this.confirmSetupRules());
-      }
-    } else {
-      new Setting(module).setName("3 · 确认文件差异").setHeading();
-      this.setupFileList(module, "仅本机文件", preview.localOnly);
-      this.setupFileList(module, "仅远端文件", preview.remoteOnly);
-      const files = preview.overlaps.filter(path => path !== ".gitignore");
-      const choices = this.plugin.getSetupChoices();
-      if (this.plugin.settings.setupComplete) this.setupFileList(module, "同名文件", files);
-      else if (files.length) module.createEl("p", { text: `同名差异已选择 ${files.filter(path => !!choices[path]).length} / ${files.length} 个文件。忽略规则已在第一环节单独确认。` });
-      else module.createEl("p", { text: "没有需要逐项选择的同名文件差异。", cls: "simple-one-sync-setup-done" });
-      module.createEl("p", { text: "本页仅确认方案；实际合并、提交与推送在第四步执行。" });
-      const actions = footer();
+    const module = summary.createDiv({ cls: "simple-one-sync-check-results", attr: { "aria-live": "polite" } });
+    const files = preview.overlaps.filter(path => path !== ".gitignore");
+    const choices = this.plugin.getSetupChoices();
+    const selectedPaths = this.setupFileFilter === "local" ? preview.localOnly : this.setupFileFilter === "remote" ? preview.remoteOnly : preview.relatedHistory ? (preview.changedFiles ?? []) : files;
+    const selectedLabel = this.setupFileFilter === "local" ? "仅本机" : this.setupFileFilter === "remote" ? "仅 GitHub" : "文件变化";
+    module.createEl("p", { text: selectedPaths.length ? `${selectedLabel} · ${selectedPaths.length} 个文件` : `${selectedLabel} · 无文件`, cls: "simple-one-sync-section-desc" });
+    for (const path of selectedPaths.slice(0, 200)) module.createDiv({ text: path, cls: "simple-one-sync-check-file" });
+    if (selectedPaths.length > 200) module.createEl("p", { text: `另有 ${selectedPaths.length - 200} 个文件。` });
+    const hasDifferences = (preview.changedFiles ?? []).length > 0 || preview.localOnly.length > 0 || preview.remoteOnly.length > 0 || files.length > 0;
+    const bottom = body.createDiv({ cls: "simple-one-sync-check-bottom" });
+    bottom.createEl("p", { text: !hasDifferences ? "当前两端没有文件差异。" : preview.relatedHistory ? "以上变化将由 Git 处理，遇到冲突时暂停。" : "请确认同名文件版本。", cls: "simple-one-sync-section-desc" });
+    if (files.length && !this.plugin.settings.setupComplete) bottom.createEl("p", { text: `已选择 ${files.filter(path => !!choices[path]).length} / ${files.length} 个版本。` });
+    const actions = bottom.createDiv({ cls: "simple-one-sync-check-actions" });
       if (files.length && !this.plugin.settings.setupComplete) {
         const resolve = actions.createEl("button", { text: "对照并选择文件版本", attr: { type: "button" } });
         resolve.disabled = this.setupBusy;
@@ -4569,77 +4506,17 @@ export class SyncSettingsTab extends PluginSettingTab {
           }).open();
         });
       }
-      if (!this.plugin.settings.setupComplete) {
-        const next = actions.createEl("button", { text: "确认差异，进入完成接入", cls: "mod-cta", attr: { type: "button" } });
+      {
+        const next = actions.createEl("button", { text: "下一步：完成接入", cls: "mod-cta", attr: { type: "button" } });
         next.disabled = this.setupBusy || !this.setupPreviewReady();
         next.addEventListener("click", () => void this.runSetup(() => this.advanceSetupAfterPreview(), "", false));
       }
-    }
-  }
-
-  private renderSetupRuleCards(container: HTMLElement, title: string, groups: { title: string; rules: string[] }[]): void {
-    const section = container.createEl("details", { cls: "simple-one-sync-rule-section" });
-    section.createEl("summary", { text: title });
-    const cards = section.createDiv({ cls: "simple-one-sync-rule-cards" });
-    for (const group of groups) {
-      const rules = [...new Set(group.rules)];
-      const card = cards.createEl("details", { cls: "simple-one-sync-rule-card" });
-      const heading = card.createEl("summary");
-      heading.createSpan({ text: group.title, cls: "simple-one-sync-rule-card__title" });
-      heading.createSpan({ text: `${rules.length} 条`, cls: "simple-one-sync-rule-card__count" });
-      card.createEl("pre", { text: rules.join("\n") });
-    }
-    if (!groups.length) section.createEl("p", { text: "没有规则。", cls: "simple-one-sync-section-desc" });
-  }
-
-  private async reviewSetupIgnoreDifferences(preview: SetupPreview): Promise<void> {
-    if (!setupIgnoreDiffers(preview)) return;
-    const host = this.settingsHost ?? this.containerEl;
-    const result = await new ZoeySyncConflictPreviewModal(this.app, {
-      editableColumns: true,
-      title: ".gitignore 差异与合并",
-      description: "仅展示变化区块。确认后保存接入基准，第四步才应用到仓库；相同内容会原样保留。",
-      files: [{ path: ".gitignore", description: "规则内容差异", totalLines: 0,
-        localUpdatedAt: "", remoteUpdatedAt: "", blocks: [], mergeable: true }],
-      read: async () => ({ local: setupIgnoreComparisonText(preview.localIgnore), remote: setupIgnoreComparisonText(preview.remoteIgnore) })
-    }).wait();
-    if (!result || this.plugin.getSetupPreview() !== preview || !host?.isConnected ||
-      (this.settingsHost ?? this.containerEl) !== host || this.desktopPage !== "setup" || this.setupViewStep !== 3) return;
-    const choice = result[".gitignore"];
-    if (choice?.choice === "manual" && choice.text !== undefined) this.plugin.setSetupIgnoreMerge(choice.text);
-    else if (choice?.choice === "local" || choice?.choice === "remote") this.plugin.setSetupChoice(".gitignore", choice.choice);
-    else return;
-    this.setupBaseConfirmed = false;
-    this.setupRulesConfirmed = false;
-    this.setupRebuildConfirmed = false;
-    this.renderSettings();
-  }
-
-  private confirmSetupIgnoreBase(): void {
-    const preview = this.plugin.getSetupPreview();
-    if (!preview || this.setupBusy || (setupIgnoreDiffers(preview) && !this.plugin.getSetupChoices()[".gitignore"])) return;
-    if (!this.plugin.getSetupChoices()[".gitignore"]) this.plugin.setSetupChoice(".gitignore", "local");
-    this.setupBaseConfirmed = true;
-    this.setupReviewStage = 2;
-    this.renderSettings();
-  }
-
-  private confirmSetupRules(choice?: "keep" | "rebuild"): void {
-    const preview = this.plugin.getSetupPreview();
-    if (!preview || this.setupBusy || !this.setupBaseConfirmed) return;
-    if (!this.plugin.settings.setupComplete && (preview.trackedExcludedLocal.length || preview.trackedExcludedRemote.length) && !choice) return;
-    if (choice) this.plugin.setSetupTrackingChoice(choice);
-    this.setupRebuildConfirmed = choice === "rebuild";
-    this.setupRulesConfirmed = true;
-    this.setupReviewStage = 3;
-    this.renderSettings();
   }
 
   private setupPreviewReady(): boolean {
     const preview = this.plugin.getSetupPreview();
     if (!preview) return false;
     const choices = this.plugin.getSetupChoices();
-    if (setupIgnoreDiffers(preview) && !choices[".gitignore"]) return false;
     if (preview.overlaps.some((path) => !choices[path])) return false;
     return !(preview.trackedExcludedLocal.length || preview.trackedExcludedRemote.length) || !!this.plugin.getSetupTrackingChoice();
   }
@@ -4662,10 +4539,7 @@ export class SyncSettingsTab extends PluginSettingTab {
         : "本次打开后尚无检查结果，请返回第 3 步重新检查。" });
       return;
     }
-    const remoteIgnoreSelected = this.plugin.getSetupChoices()[".gitignore"] === "remote";
-    const ignoreSummary = preview.customIgnore !== undefined ? `将采用合并编辑后的 .gitignore，并补充 ${preview.missingIgnoreRules.length} 条建议规则。` : remoteIgnoreSelected ? `将以远端 .gitignore 为基准优化，补充 ${preview.missingIgnoreRules.length} 条建议规则。`
-      : preview.missingIgnoreRules.length ? `将保留现有 .gitignore，并补充 ${preview.missingIgnoreRules.length} 条建议规则。`
-      : "现有 .gitignore 已包含建议规则。";
+    const ignoreSummary = "将统一写入推荐规则、内嵌仓库规则和两端自有规则；推送后两端 .gitignore 一致。";
     body.createEl("p", { text: `将保留本地 ${preview.localFiles.length} 个文件，并接入远端 ${preview.remoteFiles.length} 个文件。${ignoreSummary}` });
     if (preview.nestedRepos.length) body.createEl("p", {
       text: `已识别 ${preview.nestedRepos.length} 个内嵌仓库；${this.plugin.settings.setupComplete ? "下次同步" : "完成接入"}时将重建主仓库对小库文件的追踪，并忽略小库的 .git 元数据。`,
@@ -4697,6 +4571,10 @@ export class SyncSettingsTab extends PluginSettingTab {
       rules.createEl("pre", { text: preview.missingIgnoreRules.join("\n") });
     }
     if (preview.overlaps.length) this.setupFileList(body, "已选择远端版本的同名文件", preview.overlaps.filter((path) => this.plugin.getSetupChoices()[path] === "remote"));
+    const finished = this.setupFinishedPreview === preview;
+    if (finished) {
+      body.createEl("p", { text: "✓ 接入与推送已完成，自动同步已启用。无需再次接入。", cls: "simple-one-sync-setup-done simple-one-sync-finish-success", attr: { role: "status" } });
+    }
     if (this.setupBusy || this.setupFailure) {
       body.createEl("p", {
         text: this.setupBusy ? "正在完成接入，请稍候…" : this.setupMessage,
@@ -4704,11 +4582,11 @@ export class SyncSettingsTab extends PluginSettingTab {
         attr: { role: "status", "aria-live": "polite" }
       });
     }
-    if (!this.plugin.settings.setupComplete) {
-      const footer = body.createDiv({ cls: "simple-one-sync-setup-footer" });
-      const finish = footer.createEl("button", { text: "完成接入并首次推送", cls: "mod-cta", attr: { type: "button" } });
+    if (!finished) {
+      const footer = body.createDiv({ cls: "simple-one-sync-setup-footer simple-one-sync-check-actions" });
+      const finish = footer.createEl("button", { text: this.plugin.settings.setupComplete ? "应用检查结果并推送" : "完成接入并首次推送", cls: "mod-cta", attr: { type: "button" } });
       finish.disabled = this.setupBusy || (this.plugin.getSetupTrackingChoice() === "rebuild" && !this.setupRebuildConfirmed);
-      finish.addEventListener("click", () => void this.runSetup(() => this.plugin.finishSetup(this.setupRebuildConfirmed, (message, error) => {
+      finish.addEventListener("click", () => void this.runSetup(async () => { await this.plugin.finishSetup(this.setupRebuildConfirmed, (message, error) => {
         if (this.desktopPage !== "setup" || this.setupViewStep !== 4) return;
         this.setupMessage = message;
         const progress = (this.settingsHost ?? this.containerEl).querySelector(".simple-one-sync-setup-finish-progress");
@@ -4717,7 +4595,7 @@ export class SyncSettingsTab extends PluginSettingTab {
           progress.toggleClass("simple-one-sync-setup-error", !!error);
           progress.toggleClass("simple-one-sync-setup-feedback", !error);
         }
-      }), "首次推送成功，向导已完成。"));
+      }); this.setupFinishedPreview = preview; }, "已完成接入并推送。"));
     }
   }
 

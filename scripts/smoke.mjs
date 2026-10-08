@@ -121,4 +121,69 @@ for (const location of ["/", ".", "./", "./images", "", undefined]) {
 attachmentFolder = "New Attachments";
 assert.equal(addAttachmentFolderToSearchExclusions(searchPlugin), true);
 assert.deepEqual(searchConfig.excludeFolders, ["Private", "Attachments", "New Attachments"]);
-console.log("Smoke checks passed: formatting, window hooks, platform settings, confirmation, async errors, attachment search exclusions.");
+const organizer = await load("src/features/attachmentOrganizer.ts", String.raw`
+export class TFile {
+  constructor(path) {
+    this.path = path;
+    this.name = path.split('/').pop();
+    this.extension = this.name.split('.').pop();
+    this.basename = this.name.slice(0, -this.extension.length - 1);
+    const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '/';
+    this.parent = { path: parent, name: parent.split('/').pop() };
+    this.stat = { ctime: 1, mtime: 1 };
+  }
+}
+export class TFolder { constructor(children) { this.children = children; } }
+export class Modal { open() { globalThis.__attachmentTest.modal = this; } }
+export class Notice { constructor(message) { globalThis.__attachmentTest.notices.push(message); } }
+export class Setting {}
+export const normalizePath = path => path.replace(/\\/g, '/').replace(/\/{2,}/g, '/').replace(/^\/+|\/+$/g, '');
+globalThis.__attachmentTest = { TFile, TFolder, notices: [] };
+`);
+const { TFile, TFolder } = globalThis.__attachmentTest;
+const organizerFiles = [
+  'Notes/Example.md', 'IMG_4439.jpeg', 'Diagram.png', 'data.pdf',
+  'orphan.png', 'standalone.json', 'Root.md', 'Root.canvas', 'Root.base',
+  'Templates/Example.md', 'template.png', 'Notes/IMG_9999.png',
+  'Attachments/IMG_1111.png', 'Attachments/orphan.png', 'Attachments/data.txt',
+  'Attachments/Notes/Example 1.jpeg',
+].map(path => new TFile(path));
+const organizerFolder = new TFolder(organizerFiles.filter(file => file.path.startsWith('Attachments/')));
+let organizerLocation = 'Attachments';
+const organizerPlugin = {
+  getTemplateFolder: () => 'Templates',
+  app: {
+    vault: {
+      configDir: '.obsidian', getConfig: () => organizerLocation,
+      getFiles: () => organizerFiles,
+      getMarkdownFiles: () => organizerFiles.filter(file => file.extension === 'md'),
+      getAbstractFileByPath: path => path === 'Attachments' ? organizerFolder : organizerFiles.find(file => file.path === path),
+    },
+    metadataCache: { resolvedLinks: {
+      'Notes/Example.md': { 'IMG_4439.jpeg': 1, 'Diagram.png': 1, 'data.pdf': 1, 'Notes/IMG_9999.png': 1, 'Attachments/IMG_1111.png': 1 },
+      'Templates/Example.md': { 'template.png': 1 },
+    } },
+  },
+};
+await organizer.planAttachmentImageRename(organizerPlugin);
+let plans = globalThis.__attachmentTest.modal.plans;
+assert.deepEqual(plans.map(plan => plan.file.path).sort(), ['Attachments/IMG_1111.png', 'Diagram.png', 'IMG_4439.jpeg'].sort());
+assert.equal(plans.find(plan => plan.file.path === 'IMG_4439.jpeg').targetPath, 'Attachments/Notes/Example 2.jpeg', 'existing image names must reserve numbered targets');
+assert.equal(plans.find(plan => plan.file.path === 'Diagram.png').targetPath, 'Attachments/Notes/Diagram.png', 'meaningful root image names must be preserved');
+await organizer.planAttachmentOrganization(organizerPlugin);
+plans = globalThis.__attachmentTest.modal.plans;
+assert.deepEqual(plans.map(plan => plan.file.path), ['data.pdf']);
+assert.equal(plans[0].targetPath, 'Attachments/Notes/Example/data.pdf');
+await organizer.checkUnusedAttachments(organizerPlugin);
+const unused = globalThis.__attachmentTest.modal.items;
+assert.equal(unused.find(item => item.file.path === 'orphan.png').checked, false);
+assert.equal(unused.find(item => item.file.path === 'Attachments/orphan.png').checked, true);
+assert.ok(!unused.some(item => ['IMG_4439.jpeg', 'standalone.json', 'Root.md', 'Root.canvas', 'Root.base', 'Notes/IMG_9999.png'].includes(item.file.path)));
+organizerLocation = '.';
+await organizer.planAttachmentImageRename(organizerPlugin);
+assert.deepEqual(globalThis.__attachmentTest.modal.plans.map(plan => plan.file.path), ['Notes/IMG_9999.png'], 'same-folder behavior must remain scoped to the source note folder');
+organizerLocation = '/';
+await organizer.planAttachmentImageRename(organizerPlugin);
+assert.match(globalThis.__attachmentTest.notices.at(-1), /已禁用/);
+delete globalThis.__attachmentTest;
+console.log("Smoke checks passed: formatting, window hooks, platform settings, confirmation, async errors, attachment search exclusions, root attachment organization.");

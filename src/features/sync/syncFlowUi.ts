@@ -40,8 +40,9 @@ export function renderStrategy(root: HTMLElement, plan: MobilePlan, resolve: (ch
 
 export function renderPlanConfirmation(root: HTMLElement, plan: MobilePlan, resolve: (confirmed: boolean) => void): void {
   const content = page(root, "确认本次同步计划");
-  content.createEl("p", { text: `上传 ${plan.uploads.length.toLocaleString()} 个 · 下载 ${plan.downloads.length.toLocaleString()} 个 · 删除本地 ${plan.localDeletes.length.toLocaleString()} 个 · 删除云端 ${plan.remoteDeletes.length.toLocaleString()} 个` });
-  content.createEl("p", { text: "确认后先更新云端；下载量较大时，再选择自动下载或手动下载整库导入。同步范围以外的文件和本机凭据不参与操作。" });
+  content.addClass("simple-one-sync-plan-confirmation");
+  content.createEl("p", { text: `上传 ${plan.uploads.length.toLocaleString()} 个 · 下载 ${plan.downloads.length.toLocaleString()} 个` });
+  content.createEl("p", { cls: "simple-one-sync-plan-deletions", text: `删除本地 ${plan.localDeletes.length.toLocaleString()} 个 · 删除云端 ${plan.remoteDeletes.length.toLocaleString()} 个` });
   for (const [title, paths] of [["待上传", plan.uploads], ["待下载", plan.downloads], ["待删除本地文件", plan.localDeletes], ["待删除云端文件", plan.remoteDeletes]] as const) {
     if (!paths.length) continue;
     const details = content.createEl("details");
@@ -53,7 +54,7 @@ export function renderPlanConfirmation(root: HTMLElement, plan: MobilePlan, reso
     });
   }
   const actions = content.createDiv({ cls: "simple-one-sync-transfer__buttons" });
-  button(actions, "返回，重新预览", () => resolve(false));
+  button(actions, "返回预览", () => resolve(false));
   button(actions, plan.localDeletes.length || plan.remoteDeletes.length ? "确认同步及上述删除" : "确认同步", () => resolve(true), true);
 }
 

@@ -120,6 +120,7 @@ export interface SimplePluginSettings {
     popupWindowScale: string;
     headerButtonSize: string;
     disableThemeHeaderButtons: boolean;
+    compactBottomBar: boolean;
   };
   enableMermaidEnhancer: boolean;
   imageMaxHeight: string;
@@ -678,7 +679,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   popupWindowScale: "70",
   enableWindowPositionOptimization: true,
   mobileSwitches: {},
-  mobileDisplay: { readableLineWidth: "", imageMaxHeight: "", popupWindowScale: "0", headerButtonSize: "29", disableThemeHeaderButtons: true },
+  mobileDisplay: { readableLineWidth: "", imageMaxHeight: "", popupWindowScale: "0", headerButtonSize: "29", disableThemeHeaderButtons: true, compactBottomBar: true },
   enableMermaidEnhancer: true,
   imageMaxHeight: "450",
   enableImageZoom: true,

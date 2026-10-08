@@ -110,7 +110,7 @@ try {
   firstSync = await engine.preview(Object.fromEntries(firstSync.conflicts.map(c => [c.id, { choice: "remote" }])));
   assert(firstSync.downloads.includes(".obsidian/plugins/cloud-only/main.js"));
   assert(firstSync.downloads.includes(".obsidian/plugins/cloud-only/manifest.json"));
-  assert(!firstSync.downloads.includes(".obsidian/plugins/cloud-only/data.json"));
+  assert(firstSync.downloads.includes(".obsidian/plugins/cloud-only/data.json"));
   assert(!firstSync.downloads.includes(".obsidian/plugins/simple-link/main.js"));
   assert.equal(firstSync.uploads.length, 0);
   assert.equal(firstSync.remoteDeletes.length, 0, "empty local vault must not delete cloud files on first sync");

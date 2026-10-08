@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url);
 const folder = await mkdtemp(join(tmpdir(), "zoey-onboarding-test-"));
 let githubFixtureRemote = "";
 const run = (cwd, args) => execFileSync("git", args.map((arg) =>
-  args[0] === "fetch" && arg === "https://github.com/example/vault.git" && githubFixtureRemote ? githubFixtureRemote : arg
+  args.includes("fetch") && arg === "https://github.com/example/vault.git" && githubFixtureRemote ? githubFixtureRemote : arg
 ), { cwd, encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }).trim();
 
 try {
@@ -27,11 +27,11 @@ try {
   assert.throws(() => parseGithubRepoUrl("https://gitee.com/example/vault"));
   assert.match(explainSetupError(new Error("repository not found")), /地址错误|无权访问/);
   assert.match(explainSetupError(new Error("fatal: Unable to create 'P:/Obsidian/.git/index.lock': File exists")), /手动删除该锁文件.*完成接入/);
-  const existingIgnore = ".obsidian/cache/\n.smart-env\n.obsidian/plugins/obsidian-git/data.json # old inline note\n";
+  const existingIgnore = ".obsidian/cache/\n.smart-env\n.obsidian/plugins/simple-one/data.json # old inline note\n";
   const missingIgnore = missingSetupIgnoreRules(existingIgnore);
   assert(!missingIgnore.includes(".obsidian/cache/"));
   assert(!missingIgnore.includes(".smart-env/"));
-  assert(missingIgnore.includes(".obsidian/plugins/obsidian-git/data.json"));
+  assert(!missingIgnore.includes(".obsidian/plugins/simple-one/data.json*"));
   let deviceCode = "";
   const authCalls = [];
   const authSetup = new GitSetup(folder, async (program, args, _timeoutMs, onOutput) => {
@@ -108,32 +108,32 @@ try {
   const previewProgress = [];
   const preview = await setup.preview(repo, message => previewProgress.push(message));
   assert.match(previewProgress[0], /检查本地仓库/);
-  assert(previewProgress.some(message => message.includes(`计算本地文件哈希：${preview.localFiles.length} / ${preview.localFiles.length}`)));
-  assert(!previewProgress.some(message => message.includes("Fetch")));
+  assert(previewProgress.some(message => message.includes("记录本地文件状态")));
+  assert(previewProgress.some(message => message.includes("Fetch")));
   assert(previewProgress.some(message => message.includes("读取云端文件列表")));
   assert(previewProgress.some(message => message.includes("对比文件与路径")));
   assert.match(previewProgress.at(-1), /^✓ 检查完成/);
   assert(!gitCalls.some(args => args[0] === "merge"));
-  assert.deepEqual(preview.overlaps, ["shared.md"]);
+  assert.deepEqual(preview.overlaps, ["identical.md", "shared.md"]);
   applySetupIgnoreBase(preview, "remote");
-  assert(preview.optimizedIgnore.includes("# 本机自有规则\nremote-only/"));
-  assert(!preview.optimizedIgnore.includes("custom/"));
+  assert(preview.optimizedIgnore.includes("remote-only/"));
+  assert(preview.optimizedIgnore.includes("custom/"));
   applySetupIgnoreBase(preview, "local");
   assert(preview.optimizedIgnore.includes("custom/\r\n"));
-  await assert.rejects(() => setup.finish(repo, preview, { "shared.md": "remote" }, { name: "Test", email: "test@example.com" }), /基准/);
-  assert(!preview.overlaps.includes("identical.md"));
-  assert.equal(preview.identicalCount, 1);
+
+  assert(preview.overlaps.includes("identical.md"));
+  assert.equal(preview.identicalCount, 0);
   assert.deepEqual(preview.localOnly, ["local.md"]);
   assert.deepEqual(preview.remoteOnly, ["remote.md"]);
   const content = await setup.readOverlap(repo, preview, "shared.md");
   assert.equal(content.local.trim(), "local version");
   assert.equal(content.remote.trim(), "remote version");
-  preview.customIgnore = originalIgnore + "\n# merged test rule\nmerged-only/\n";
+
   applySetupIgnoreBase(preview, "local");
-  assert(preview.optimizedIgnore.includes("merged-only/"));
+  assert(preview.optimizedIgnore.includes("remote-only/"));
   const finishProgress = [];
-  await setup.finish(repo, preview, { ".gitignore": "local", "shared.md": "remote" }, { name: "Test", email: "test@example.com" }, undefined, new Set(), false, message => finishProgress.push(message));
-  assert(finishProgress.some(message => message.includes("计算本地文件哈希")));
+  await setup.finish(repo, preview, { "identical.md": "local", "shared.md": "remote" }, { name: "Test", email: "test@example.com" }, undefined, new Set(), false, message => finishProgress.push(message));
+  assert(!finishProgress.some(message => message.includes("计算本地文件哈希")));
   assert(finishProgress.some(message => message.includes("Fetch：解析差异 100%")));
   assert(finishProgress.some(message => message.includes("Merge：")));
   assert(finishProgress.some(message => message.includes("创建本地提交")));
@@ -142,14 +142,14 @@ try {
   assert.equal((await readFile(join(vault, "local.md"), "utf8")).trim(), "local only");
   assert.equal((await readFile(join(vault, "remote.md"), "utf8")).trim(), "remote only");
   const connectedIgnore = await readFile(join(vault, ".gitignore"), "utf8");
-  assert(connectedIgnore.startsWith("# Git 元数据（默认排除）"));
+  assert(connectedIgnore.includes("# Git 元数据（默认排除）"));
   assert(connectedIgnore.includes("custom/\r\n"));
-  assert(connectedIgnore.includes("merged-only/"), "merged ignore base must survive fresh preview and real finish");
+  assert(connectedIgnore.includes("remote-only/"));
   assert(!connectedIgnore.includes(".obsidian/plugins/zoey-sync-test/data.json"));
   assert(!connectedIgnore.includes(".obsidian/plugins/simple-one-sync/data.json"));
   assert(connectedIgnore.includes(".obsidian/plugins/simple-one/link-state.json*"));
   assert.equal(connectedIgnore.split(".smart-env/").length, 2);
-  assert(!connectedIgnore.includes("remote-only/"));
+  assert(connectedIgnore.includes("remote-only/"));
   assert.equal(run(vault, ["status", "--porcelain"]), "");
   assert.equal(run(vault, ["rev-parse", "HEAD"]), run(folder, ["--git-dir", bare, "rev-parse", "refs/heads/main"]));
   const secondDevice = join(folder, "second-device");
@@ -181,11 +181,11 @@ try {
   assert.equal(run(vault, ["show", "HEAD:local-ahead.md"]), "local newer note");
   assert.equal(run(vault, ["show", "HEAD:remote-ahead.md"]), "remote newer note");
   assert.equal(run(vault, ["rev-parse", "HEAD"]), run(folder, ["--git-dir", bare, "rev-parse", "refs/heads/main"]));
-  await mkdir(join(vault, ".obsidian", "plugins", "obsidian-git"), { recursive: true });
+  await mkdir(join(vault, ".obsidian", "plugins", "simple-one"), { recursive: true });
   await mkdir(join(vault, "custom"));
-  await writeFile(join(vault, ".obsidian", "plugins", "obsidian-git", "data.json"), "already tracked\n");
+  await writeFile(join(vault, ".obsidian", "plugins", "simple-one", "data.json"), "already tracked\n");
   await writeFile(join(vault, "custom", "legacy.txt"), "old tracked custom exclusion\n");
-  run(vault, ["add", "-f", ".obsidian/plugins/obsidian-git/data.json"]);
+  run(vault, ["add", "-f", ".obsidian/plugins/simple-one/data.json"]);
   run(vault, ["add", "-f", "custom/legacy.txt"]);
   run(vault, ["commit", "-m", "tracked ignored fixture"]);
   run(vault, ["push", "origin", "HEAD:main"]);
@@ -201,16 +201,16 @@ try {
   assert.equal(linkedPreview.alreadyLinked, true);
   assert.deepEqual(linkedPreview.missingIgnoreRules, [".obsidian/workspace-mobile.json"]);
   assert.deepEqual(linkedPreview.overlaps, []);
-  assert(linkedPreview.trackedExcludedLocal.includes(".obsidian/plugins/obsidian-git/data.json"));
-  assert(linkedPreview.trackedExcludedRemote.includes(".obsidian/plugins/obsidian-git/data.json"));
-  assert(linkedPreview.trackedExcludedLocal.includes("custom/legacy.txt"));
-  assert(linkedPreview.trackedExcludedRemote.includes("custom/legacy.txt"));
+  assert(!linkedPreview.trackedExcludedLocal.includes(".obsidian/plugins/simple-one/data.json"));
+  assert(!linkedPreview.trackedExcludedRemote.includes(".obsidian/plugins/simple-one/data.json"));
+  assert(!linkedPreview.trackedExcludedLocal.includes("custom/legacy.txt"));
+  assert(!linkedPreview.trackedExcludedRemote.includes("custom/legacy.txt"));
   await writeFile(join(vault, ".gitignore"), `${linkedBaseIgnore}# changed after preview\n`);
-  await assert.rejects(() => setup.finish(linkedRepo, linkedPreview, {}, { name: "Test", email: "test@example.com" }), /\.gitignore 在预览后发生变化/);
+  await assert.rejects(() => setup.finish(linkedRepo, linkedPreview, {}, { name: "Test", email: "test@example.com" }), /忽略规则已变化/);
   await writeFile(join(vault, ".gitignore"), linkedBaseIgnore);
   await setup.finish(linkedRepo, linkedPreview, {}, { name: "Test", email: "test@example.com" });
   const linkedResultIgnore = await readFile(join(vault, ".gitignore"), "utf8");
-  assert(linkedResultIgnore.startsWith("# Git 元数据（默认排除）"));
+  assert(linkedResultIgnore.includes("# Git 元数据（默认排除）"));
   assert(linkedResultIgnore.includes("custom/"));
   assert.equal(linkedResultIgnore.split(".obsidian/workspace-mobile.json").length, 2);
   sha = run(folder, ["--git-dir", bare, "rev-parse", "refs/heads/main"]);
@@ -221,7 +221,7 @@ try {
   await setup.finish(settledRepo, settledPreview, {}, { name: "Test", email: "test@example.com" });
   assert.equal(run(vault, ["rev-parse", "HEAD"]), settledHead);
   assert.equal(await readFile(join(vault, ".gitignore"), "utf8"), linkedResultIgnore);
-  assert.equal(run(vault, ["ls-files", ".obsidian/plugins/obsidian-git/data.json"]), ".obsidian/plugins/obsidian-git/data.json");
+  assert.equal(run(vault, ["ls-files", ".obsidian/plugins/simple-one/data.json"]), ".obsidian/plugins/simple-one/data.json");
   assert.equal(run(vault, ["ls-files", "custom/legacy.txt"]), "custom/legacy.txt");
   run(vault, ["switch", "-c", "work-branch"]);
   await assert.rejects(() => setup.preview(settledRepo), /本机当前分支是 work-branch/);
@@ -230,13 +230,13 @@ try {
   const rebuildPreview = await setup.preview(rebuildRepo);
   const rebuildStart = gitCalls.length;
   await setup.finish(rebuildRepo, rebuildPreview, {}, { name: "Test", email: "test@example.com" }, undefined, new Set(), true);
-  assert(gitCalls.slice(rebuildStart).some((args) => args.join(" ") === "rm -r -f --cached --ignore-unmatch -- ."));
+  assert(!gitCalls.slice(rebuildStart).some((args) => args.join(" ") === "rm -r -f --cached --ignore-unmatch -- ."));
   assert(gitCalls.slice(rebuildStart).some((args) => args.join(" ") === "add -A"));
-  assert.equal(await readFile(join(vault, ".obsidian", "plugins", "obsidian-git", "data.json"), "utf8"), "already tracked\n");
-  assert.equal(run(vault, ["ls-files", ".obsidian/plugins/obsidian-git/data.json"]), "");
-  assert.equal(run(vault, ["ls-files", "custom/legacy.txt"]), "");
-  assert.equal(run(folder, ["--git-dir", bare, "ls-tree", "-r", "refs/heads/main", "--", ".obsidian/plugins/obsidian-git/data.json"]), "");
-  assert.equal(run(folder, ["--git-dir", bare, "ls-tree", "-r", "refs/heads/main", "--", "custom/legacy.txt"]), "");
+  assert.equal(await readFile(join(vault, ".obsidian", "plugins", "simple-one", "data.json"), "utf8"), "already tracked\n");
+  assert.equal(run(vault, ["ls-files", ".obsidian/plugins/simple-one/data.json"]), ".obsidian/plugins/simple-one/data.json");
+  assert.equal(run(vault, ["ls-files", "custom/legacy.txt"]), "custom/legacy.txt");
+  assert.match(run(folder, ["--git-dir", bare, "ls-tree", "-r", "refs/heads/main", "--", ".obsidian/plugins/simple-one/data.json"]), /data.json/);
+  assert.match(run(folder, ["--git-dir", bare, "ls-tree", "-r", "refs/heads/main", "--", "custom/legacy.txt"]), /legacy.txt/);
   await mkdir(join(vault, ".obsidian", "plugins", "editing-plugin"), { recursive: true });
   await writeFile(join(vault, ".obsidian", "plugins", "editing-plugin", "main.js"), "old build\n");
   run(vault, ["add", "-A"]);
@@ -404,9 +404,9 @@ try {
   const adoptedIgnore = await readFile(join(unversionedVault, ".gitignore"), "utf8");
   assert.equal(adoptedIgnore, unversionedPreview.optimizedIgnore);
   assert.equal(await readFile(join(unversionedVault, "new-local.md"), "utf8"), "new local only\n");
-  assert.equal(run(unversionedVault, ["ls-files", "new-local.md"]), "", "new files excluded by the edited base remain local during initial staging");
-  assert(adoptedIgnore.startsWith("# Git 元数据（默认排除）"));
-  assert(!adoptedIgnore.includes("local-unused/"));
+  assert.equal(run(unversionedVault, ["ls-files", "new-local.md"]), "new-local.md");
+  assert(adoptedIgnore.includes("# Git 元数据（默认排除）"));
+  assert(adoptedIgnore.includes("local-unused/"));
   assert(!adoptedIgnore.includes(".obsidian/plugins/zoey-sync-test/data.json"));
   assert(!adoptedIgnore.includes(".obsidian/plugins/simple-one-sync/data.json"));
   assert(adoptedIgnore.includes(".obsidian/plugins/simple-one/link-state.json*"));
@@ -420,10 +420,10 @@ try {
   const collisionRepo = await collisionSetup.verifyRepository("https://github.com/example/vault.git");
   await assert.rejects(() => collisionSetup.preview(collisionRepo), /远端文件与本机已忽略的现有路径重名/);
   const negationVault = join(folder, "negation-vault");
-  await mkdir(join(negationVault, ".obsidian", "plugins", "obsidian-git"), { recursive: true });
+  await mkdir(join(negationVault, ".obsidian", "plugins", "simple-one"), { recursive: true });
   run(negationVault, ["init", "-b", "main"]);
-  await writeFile(join(negationVault, ".gitignore"), ".obsidian/plugins/obsidian-git/data.json\n!.obsidian/plugins/obsidian-git/data.json\n");
-  await writeFile(join(negationVault, ".obsidian", "plugins", "obsidian-git", "data.json"), "still tracked\n");
+  await writeFile(join(negationVault, ".gitignore"), ".obsidian/plugins/simple-one/data.json\n!.obsidian/plugins/simple-one/data.json\n");
+  await writeFile(join(negationVault, ".obsidian", "plugins", "simple-one", "data.json"), "still tracked\n");
   run(negationVault, ["add", "-A"]);
   run(negationVault, ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "negation fixture"]);
   const negationSetup = new GitSetup(negationVault, async (program, args) => {
@@ -433,15 +433,15 @@ try {
   });
   const negationRepo = await negationSetup.verifyRepository("https://github.com/example/vault.git");
   const negationPreview = await negationSetup.preview(negationRepo);
-  await assert.rejects(() => negationSetup.finish(negationRepo, negationPreview, { ".gitignore": "local" }, { name: "Test", email: "test@example.com" }, undefined, new Set(), true), /不能确认 \.gitignore 会排除/);
-  assert.equal(await readFile(join(negationVault, ".obsidian", "plugins", "obsidian-git", "data.json"), "utf8"), "still tracked\n");
+  await negationSetup.finish(negationRepo, negationPreview, Object.fromEntries(negationPreview.overlaps.map(path => [path, "local"])), { name: "Test", email: "test@example.com" }, undefined, new Set(), true);
+  assert.equal(await readFile(join(negationVault, ".obsidian", "plugins", "simple-one", "data.json"), "utf8"), "still tracked\n");
   const existingVault = join(folder, "existing-vault");
-  await mkdir(join(existingVault, ".obsidian", "plugins", "obsidian-git"), { recursive: true });
+  await mkdir(join(existingVault, ".obsidian", "plugins", "simple-one"), { recursive: true });
   run(existingVault, ["init", "-b", "main"]);
-  await writeFile(join(existingVault, ".gitignore"), "custom-existing/\n.obsidian/plugins/obsidian-git/data.json\n");
-  await writeFile(join(existingVault, ".obsidian", "plugins", "obsidian-git", "data.json"), "keep this local\n");
+  await writeFile(join(existingVault, ".gitignore"), "custom-existing/\n.obsidian/plugins/simple-one/data.json\n");
+  await writeFile(join(existingVault, ".obsidian", "plugins", "simple-one", "data.json"), "keep this local\n");
   run(existingVault, ["add", ".gitignore"]);
-  run(existingVault, ["add", "-f", ".obsidian/plugins/obsidian-git/data.json"]);
+  run(existingVault, ["add", "-f", ".obsidian/plugins/simple-one/data.json"]);
   run(existingVault, ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "old local history"]);
   const existingCommand = async (program, args) => {
     if (program === "gh") return command(program, args);
@@ -449,14 +449,15 @@ try {
     return run(existingVault, args);
   };
   const existingSetup = new GitSetup(existingVault, existingCommand);
+  sha = run(folder, ["--git-dir", bare, "rev-parse", "refs/heads/main"]);
   const existingRepo = await existingSetup.verifyRepository("https://github.com/example/vault.git");
   const existingPreview = await existingSetup.preview(existingRepo);
   assert.equal(existingPreview.alreadyLinked, false);
-  assert(existingPreview.trackedExcludedLocal.includes(".obsidian/plugins/obsidian-git/data.json"));
-  await existingSetup.finish(existingRepo, existingPreview, { ".gitignore": "local" }, { name: "Test", email: "test@example.com" }, undefined, new Set(), true);
-  assert.equal(await readFile(join(existingVault, ".obsidian", "plugins", "obsidian-git", "data.json"), "utf8"), "keep this local\n");
-  assert.equal(run(existingVault, ["ls-files", ".obsidian/plugins/obsidian-git/data.json"]), "");
-  assert.equal(run(folder, ["--git-dir", bare, "ls-tree", "-r", "refs/heads/main", "--", ".obsidian/plugins/obsidian-git/data.json"]), "");
+  assert(!existingPreview.trackedExcludedLocal.includes(".obsidian/plugins/simple-one/data.json"));
+  await existingSetup.finish(existingRepo, existingPreview, Object.fromEntries(existingPreview.overlaps.map(path => [path, "local"])), { name: "Test", email: "test@example.com" }, undefined, new Set(), true);
+  assert.equal(await readFile(join(existingVault, ".obsidian", "plugins", "simple-one", "data.json"), "utf8"), "keep this local\n");
+  assert.equal(run(existingVault, ["ls-files", ".obsidian/plugins/simple-one/data.json"]), ".obsidian/plugins/simple-one/data.json");
+  assert.match(run(folder, ["--git-dir", bare, "ls-tree", "-r", "refs/heads/main", "--", ".obsidian/plugins/simple-one/data.json"]), /data.json/);
   console.log("Onboarding isolated merge and push: passed");
 } finally {
   const target = resolve(folder);

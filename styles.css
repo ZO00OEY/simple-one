@@ -35,11 +35,15 @@
 
 .simple-overview-shortcut-entry .setting-item-name,
 .simple-overview-accent-title {
+  color: var(--text-normal);
+}
+
+.simple-overview-shortcut-entry:is(:hover, :focus-visible) .setting-item-name {
   color: var(--interactive-accent);
 }
 
 .simple-overview-shortcut-entry:hover {
-  background-color: var(--background-modifier-hover);
+  background-color: transparent;
 }
 
 .simple-overview-shortcut-entry:focus-visible {
@@ -66,7 +70,7 @@
 .simple-template-property-tags, .simple-template-property-tag-list { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .simple-template-property-tag-list:empty { display: none; }
 .simple-template-property-tag { display: inline-flex; align-items: center; max-width: 100%; border: 1px solid var(--background-modifier-border); border-radius: 16px; background: var(--background-secondary); }
-.simple-template-property-tag.is-filename { border-color: var(--interactive-accent); background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary)); }
+.simple-template-property-tag.is-filename { border-color: var(--background-modifier-border); background: var(--background-secondary); }
 .simple-template-property-tag button { background: transparent; box-shadow: none; border: 0; height: auto; min-height: 32px; padding: 4px 8px; white-space: normal; overflow-wrap: anywhere; }
 .simple-template-property-tag button:first-child { min-width: 0; }
 .simple-template-property-remove { flex-shrink: 0; color: var(--text-muted); }
@@ -90,8 +94,9 @@
 .simple-template-manager-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .simple-template-source-card {
   margin-top: 16px;
-  padding: 16px;
-  border-radius: 10px;
+  padding: 16px 20px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
   background: var(--background-secondary);
   min-width: 0;
 }
@@ -232,8 +237,9 @@ body.simple-one-active .notice-container .notice {
 .simple-card {
   min-width: 0;
   margin: 0 0 14px;
-  padding: 12px 20px;
-  border-inline-start: 3px solid var(--background-modifier-border-hover);
+  padding: 4px 20px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
   background: var(--background-secondary);
 }
 
@@ -243,7 +249,7 @@ body.simple-one-active .notice-container .notice {
 }
 
 .simple-card .setting-item + .setting-item {
-  border-top: 1px solid var(--background-modifier-border);
+  border-top: 1px dashed var(--background-modifier-border);
 }
 
 .simple-card .simple-nav-setting {
@@ -305,14 +311,14 @@ body.simple-one-active .notice-container .notice {
   font-weight: 600;
 }
 
-.simple-settings .setting-item.simple-nav-setting {
+.simple-settings button.setting-item.simple-nav-setting {
   display: grid;
   box-sizing: border-box;
-  width: calc(100% + 40px);
+  width: 100%;
   height: auto;
   min-height: var(--simple-setting-row-min-height);
-  margin-inline: -20px;
-  padding: 12px 20px;
+  margin-inline: 0;
+  padding: 12px 0;
   grid-template-columns: minmax(0, 1fr) 32px;
   align-items: center;
   gap: 16px;
@@ -321,14 +327,22 @@ body.simple-one-active .notice-container .notice {
   white-space: normal;
   font: inherit;
   color: var(--text-normal);
+  border-inline: 0;
+  border-bottom: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .simple-settings .simple-card > .simple-nav-setting:first-child {
-  margin-top: -12px;
+  margin-top: 0;
 }
 
 .simple-settings .simple-card > .simple-nav-setting:last-child {
-  margin-bottom: -12px;
+  margin-bottom: 0;
+}
+
+.simple-settings .simple-nav-setting:hover {
+  background: transparent;
 }
 
 .simple-settings .simple-nav-setting .setting-item-description {
@@ -351,9 +365,11 @@ body.simple-one-active .notice-container .notice {
   justify-content: center;
 }
 
-.simple-nav-setting:focus-visible {
-  outline: 2px solid var(--interactive-accent);
-  outline-offset: 2px;
+/* Navigation rows use the text accent instead of native button focus chrome. */
+.simple-settings button.setting-item.simple-nav-setting:is(:hover, :active, :focus, :focus-visible) {
+  background: transparent;
+  box-shadow: none;
+  outline: none;
 }
 
 .simple-nav-setting-arrow {
@@ -372,6 +388,11 @@ body.simple-one-active .notice-container .notice {
   display: flex;
   align-items: center;
   gap: 8px;
+  color: var(--text-normal);
+}
+
+.simple-nav-setting:is(:hover, :focus-visible) .setting-item-name {
+  color: var(--interactive-accent);
 }
 
 .simple-nav-setting-icon {
@@ -420,7 +441,7 @@ body.simple-one-active .notice-container .notice {
 }
 
 .simple-locked-field-setting .setting-item-control input[type="text"]:not(:disabled) {
-  box-shadow: 0 0 0 1px var(--interactive-accent);
+  border-color: var(--interactive-accent);
 }
 
 body.simple-one-active .simple-heading-size-input {
@@ -501,7 +522,9 @@ body.simple-one-active .simple-font-size-probe {
 .simple-callout-section {
   min-width: 0;
   margin: 0 0 14px;
-  border-radius: 6px;
+  padding: 0 20px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
   background: var(--background-secondary);
 }
 
@@ -509,7 +532,7 @@ body.simple-one-active .simple-font-size-probe {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 16px 20px;
+  padding: 16px 0;
   cursor: pointer;
   list-style: none;
 }
@@ -534,20 +557,37 @@ body.simple-one-active .simple-font-size-probe {
 }
 
 .simple-callout-section-content {
-  padding: 0 20px 12px;
+  padding: 0 0 12px;
+}
+
+.simple-callout-section-summary .simple-card-title {
+  color: var(--text-normal);
+}
+
+.simple-callout-section-summary:is(:hover, :focus-visible) .simple-card-title {
+  color: var(--interactive-accent);
+}
+
+.simple-callout-section-summary:hover {
+  background: transparent;
+}
+
+.simple-callout-section-summary:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
 }
 
 .simple-callout-section-content .setting-item {
   padding: 12px 0;
-  border-top: 1px solid var(--background-modifier-border);
+  border-top: 1px dashed var(--background-modifier-border);
 }
 
 .simple-custom-callout-name-input {
   flex: 0 1 260px;
   width: min(260px, 32vw);
   min-width: 140px;
-  border-color: var(--interactive-accent);
-  box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.16);
+  border-color: var(--background-modifier-border);
+  box-shadow: none;
   background: var(--background-primary);
 }
 
@@ -2566,7 +2606,7 @@ body.is-mobile .simple-diary-year {
 
 /* ---- JSON configuration manager ---- */
 .simple-json-list {
-  padding: 4px 16px 4px 28px;
+  padding: 4px 20px;
 }
 
 .simple-json-row {
@@ -2614,11 +2654,11 @@ body.is-mobile .simple-diary-year {
 }
 
 .simple-recurring-card {
-  padding: 4px 16px;
+  padding: 4px 20px;
 }
 
 .simple-date-list-card {
-  padding: 10px 18px 12px;
+  padding: 10px 20px 12px;
 }
 
 .simple-anniversary-tags {
@@ -4289,8 +4329,14 @@ body.simple-one-active.is-mobile.simple-mobile-native-header .view-header :is(.v
 .simple-one-sync-transfer__error { display: block; color: var(--text-error); }
 .simple-one-sync-transfer__file { display: none; }
 .simple-one-sync-transfer__hint { display: inline-flex; margin-left: 8px; color: var(--text-error); vertical-align: middle; }
-.is-mobile .simple-one-sync-transfer { font-size: 16px; }
-.is-mobile .simple-one-sync-transfer button { min-height: 44px; font-size: 16px; }
+.is-mobile .simple-one-sync-transfer {
+  font-size: 14px;
+  line-height: 1.55;
+}
+.is-mobile .simple-one-sync-transfer h3 { font-size: 18px; line-height: 1.35; }
+.is-mobile .simple-one-sync-transfer h4 { font-size: 15px; line-height: 1.4; }
+.is-mobile .simple-one-sync-transfer :is(p, summary, li, pre) { font-size: 14px; }
+.is-mobile .simple-one-sync-transfer button { min-height: 44px; font-size: 14px; line-height: 1.4; }
 
 .simple-one-sync-view__actions {
   display: flex;
@@ -4333,6 +4379,92 @@ body.simple-one-active.is-mobile.simple-mobile-native-header .view-header :is(.v
   width: 16px;
   height: 16px;
   stroke-width: 1.8px;
+}
+
+.is-mobile :is(.simple-one-sync-view, .simple-share-panel) {
+  --simple-panel-toolbar-size: 14px;
+}
+
+.is-mobile :is(.simple-one-sync-view, .simple-share-panel) button.simple-one-panel-switch {
+  font-size: var(--simple-panel-toolbar-size);
+  gap: 3px;
+  min-height: 32px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.is-mobile .simple-one-sync-view .simple-one-sync-view__header svg,
+.is-mobile .simple-share-panel .simple-share-header button svg {
+  width: var(--simple-panel-toolbar-size);
+  height: var(--simple-panel-toolbar-size);
+}
+
+.is-mobile .simple-one-sync-view button.simple-one-sync-view__section-action {
+  min-height: 40px;
+  padding: 6px 12px;
+  font-size: 14px;
+}
+
+.is-mobile .simple-one-sync-view__section-header {
+  padding-top: 8px;
+  padding-bottom: 5px;
+}
+
+/* Keep the share panel compact in narrow mobile panes. */
+.is-mobile .simple-share-panel {
+  padding: 12px;
+}
+
+.is-mobile .simple-share-panel .simple-share-header {
+  gap: 2px;
+  padding-bottom: 8px;
+}
+
+.is-mobile .simple-share-panel .simple-share-header .setting-item-control {
+  gap: 2px;
+  min-width: 0;
+}
+
+.is-mobile .simple-share-panel .simple-share-header button.simple-share-header-icon {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  padding: 3px;
+}
+
+.is-mobile .simple-share-panel .simple-share-header .simple-share-sort-button svg,
+.is-mobile .simple-share-panel .simple-share-header .simple-share-composite-icon svg,
+.is-mobile .simple-share-panel .simple-share-header .simple-share-paths-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.is-mobile .simple-share-panel .simple-share-publish-row {
+  padding: 4px 0 8px;
+}
+
+.is-mobile .simple-share-panel .simple-share-publish-row .simple-share-new {
+  height: 28px;
+  min-height: 28px;
+}
+
+.is-mobile .simple-share-panel .simple-share-search {
+  padding-bottom: 8px;
+}
+
+.is-mobile .simple-share-panel .simple-share-search input[type="search"] {
+  min-height: 38px;
+}
+
+.is-mobile .simple-share-panel .simple-share-note-row {
+  padding: 3px 4px;
+}
+
+.is-mobile .simple-share-panel .simple-share-note-row button {
+  width: 24px;
+  min-width: 24px;
+  height: 28px;
+  min-height: 28px;
 }
 
 .simple-one-sync-view__error-button {
@@ -6934,6 +7066,16 @@ body.simple-one-active.is-mobile.simple-mobile-native-header .view-header :is(.v
 
 /* 笔记分享管理 */
 .simple-share-panel { padding: 16px; }
+.simple-share-panel .setting-item:where(:not(.setting-item-heading)) {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.simple-share-panel .simple-share-search input[type="search"]:is(:hover, :focus, :focus-visible) {
+  box-shadow: none;
+}
 .simple-share-panel .setting-item { flex-wrap: wrap; gap: 8px; }
 .simple-share-panel .setting-item-control { flex-wrap: wrap; gap: 6px; }
 .simple-share-panel .setting-item-info { min-width: 140px; }
@@ -7076,7 +7218,8 @@ body.simple-one-active.is-mobile.simple-mobile-native-header .view-header :is(.v
 .simple-share-settings-card .simple-share-repository-row .setting-item-control { max-width: none; }
 .simple-share-settings-card .simple-share-repository-row :is(.setting-item-name, .simple-share-external-link) { font-size: var(--font-ui-small); }
 .simple-share-settings-card .simple-share-repository-row .simple-share-external-link { max-width: 100%; white-space: normal; word-break: normal; overflow-wrap: anywhere; }
-.simple-share-deployment-providers { padding: 0 0 0 16px; border-left: 2px solid var(--background-modifier-border); }
+/* Keep deployment providers visually grouped, as in the sharing status UI. */
+.simple-share-deployment-providers { padding: 0 16px; border-left: 2px solid var(--background-modifier-border); background: var(--background-secondary); }
 .simple-share-deployment-providers > .setting-item + .setting-item { border-top: 1px dashed var(--background-modifier-border); }
 .simple-share-provider-links { display: flex; flex-wrap: wrap; gap: 8px 18px; }
 .simple-share-provider-row .setting-item-control { flex-wrap: wrap; }
@@ -7102,3 +7245,198 @@ body.simple-one-active.is-mobile.simple-mobile-native-header .view-header :is(.v
 .simple-template-property-rows .simple-template-property-tag > button:first-child { flex:1; min-width:0; text-align:start; white-space:normal; overflow-wrap:anywhere; }
 .simple-template-layout-editor { margin-top:16px; }
 .simple-template-layout-editor textarea { width:100%; resize:vertical; }
+
+/* Shared, flat form controls for plugin settings and configuration dialogs.
+   Keep these scoped away from note content and calendar/status decorations. */
+:is(.simple-settings, .simple-json-modal, .simple-anniversary-modal, .simple-recurring-modal, .simple-template-create-modal, .simple-template-layout-editor, .simple-attachment-modal, .simple-search-folder-modal, .simple-share-panel, .simple-share-directory-picker, .simple-one-sync-settings, .simple-one-sync-error-modal, .simple-one-sync-tracking-modal) :is(input[type="text"], input[type="number"], input[type="password"], input[type="search"], input[type="url"], input[type="date"], input[type="time"], textarea, select) {
+  box-sizing: border-box;
+  max-width: 100%;
+  box-shadow: none;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  font-size: var(--font-ui-small);
+}
+:is(.simple-settings, .simple-json-modal, .simple-anniversary-modal, .simple-recurring-modal, .simple-template-create-modal, .simple-template-layout-editor, .simple-attachment-modal, .simple-search-folder-modal, .simple-share-panel, .simple-share-directory-picker, .simple-one-sync-settings, .simple-one-sync-error-modal, .simple-one-sync-tracking-modal) :is(input[type="text"], input[type="number"], input[type="password"], input[type="search"], input[type="url"], input[type="date"], input[type="time"], textarea, select):is(:hover, :focus, :focus-visible) {
+  box-shadow: none;
+  border-color: var(--background-modifier-border-hover);
+  outline: none;
+  background-color: var(--background-modifier-form-field);
+}
+:is(.simple-settings, .simple-json-modal, .simple-anniversary-modal, .simple-recurring-modal, .simple-template-create-modal, .simple-template-layout-editor, .simple-attachment-modal, .simple-search-folder-modal, .simple-share-panel, .simple-share-directory-picker, .simple-one-sync-settings, .simple-one-sync-error-modal, .simple-one-sync-tracking-modal) button {
+  box-shadow: none;
+}
+:is(.simple-settings, .simple-json-modal, .simple-anniversary-modal, .simple-recurring-modal, .simple-template-create-modal, .simple-template-layout-editor, .simple-attachment-modal, .simple-search-folder-modal, .simple-share-panel, .simple-share-directory-picker, .simple-one-sync-settings, .simple-one-sync-error-modal, .simple-one-sync-tracking-modal) textarea {
+  padding: 12px 14px;
+  line-height: 1.5;
+}
+:is(.simple-settings, .simple-json-modal, .simple-anniversary-modal, .simple-recurring-modal, .simple-template-create-modal, .simple-template-layout-editor, .simple-attachment-modal, .simple-search-folder-modal, .simple-share-panel, .simple-share-directory-picker, .simple-one-sync-settings, .simple-one-sync-error-modal, .simple-one-sync-tracking-modal) :is(input, textarea)::placeholder {
+  color: var(--text-faint);
+  font-weight: var(--font-normal);
+}
+:is(.simple-settings, .simple-anniversary-modal, .simple-recurring-modal, .simple-template-create-modal, .simple-attachment-modal, .simple-search-folder-modal, .simple-one-sync-settings) .setting-item-name {
+  font-size: var(--font-ui-small);
+}
+:is(.simple-settings, .simple-anniversary-modal, .simple-recurring-modal, .simple-template-create-modal, .simple-attachment-modal, .simple-search-folder-modal, .simple-one-sync-settings) .setting-item-description {
+  font-size: var(--font-ui-smaller);
+  line-height: 1.5;
+  margin-top: 6px;
+}
+.simple-settings :is(.simple-section-title, .simple-page-title) .setting-item-name {
+  font-size: inherit;
+}
+.simple-settings .simple-locked-field-setting .setting-item-control input[type="text"]:not(:disabled) {
+  border-color: var(--background-modifier-border-hover);
+}
+
+.simple-template-ai-controls { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:12px 0; }
+.simple-template-ai-controls select { max-width:100%; min-width:0; }
+.simple-template-ai-controls button:disabled { opacity:0.45; cursor:default; }
+
+/* Mobile sync/share use one toolbar origin, type scale and control height. */
+body.is-mobile :is(.simple-one-sync-view, .simple-share-panel) {
+  padding: 10px 10px 18px; font-size: 13px; line-height: 1.45;
+  -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
+}
+body.is-mobile .simple-one-sync-view .simple-one-sync-view__header,
+body.is-mobile .simple-share-panel .simple-share-header {
+  display: flex; align-items: center; box-sizing: border-box;
+  height: 36px; min-height: 36px; margin: 0; padding: 0 0 6px; border: 0;
+}
+body.is-mobile .simple-share-panel .simple-share-header .setting-item-info { display: none; }
+body.is-mobile .simple-share-panel .simple-share-header .setting-item-control { width: 100%; flex: 1; align-items: center; }
+body.is-mobile :is(.simple-one-sync-view, .simple-share-panel) button.simple-one-panel-switch {
+  font-size: 13px; line-height: 1.4; height: 30px; min-height: 30px; padding: 0 2px;
+}
+body.is-mobile .simple-one-sync-view button.simple-one-sync-view__section-action.simple-one-sync-view__section-action,
+body.is-mobile .simple-share-panel .simple-share-publish-row button.simple-share-new {
+  box-sizing: border-box; height: 34px; min-height: 34px; padding: 5px 12px;
+  font-size: 13px; line-height: 1.4;
+}
+body.is-mobile .simple-share-panel .simple-share-search { padding: 4px 0 8px; margin: 0; }
+body.is-mobile .simple-share-panel .simple-share-search input[type="search"] {
+  box-sizing: border-box; height: 34px; min-height: 34px; padding-block: 5px; font-size: 13px; line-height: 1.4;
+}
+body.is-mobile .simple-share-panel .simple-share-search input::placeholder,
+body.is-mobile .simple-share-panel .simple-share-empty { font-size: 13px; line-height: 1.45; }
+
+/* Opt-out mobile chrome compaction; retain the host safe-area padding. */
+body.simple-one-active.is-mobile.simple-mobile-compact-bottom {
+  --mobile-navbar-height: 40px;
+}
+body.simple-one-active.is-mobile.simple-mobile-compact-bottom .mobile-navbar {
+  font-size: 13px;
+}
+body.simple-one-active.is-mobile.simple-mobile-compact-bottom .mobile-navbar :is(.mobile-navbar-action, .mobile-navbar-tab, .mobile-navbar-tab-title) {
+  font-size: 13px; line-height: 1.35; padding-block: 4px;
+}
+body.simple-one-active.is-mobile.simple-mobile-compact-bottom .status-bar {
+  font-size: 11px; line-height: 1.35; padding-top: 3px; padding-bottom: 3px;
+}
+body.simple-one-active.is-mobile.simple-mobile-compact-bottom .status-bar-item {
+  font-size: 11px; line-height: 1.35; padding-block: 2px;
+}
+
+.simple-one-sync-plan-confirmation { font-size: 14px; line-height: 1.5; }
+.simple-one-sync-plan-confirmation :is(p, summary, pre) { font-size: inherit; line-height: inherit; }
+.simple-one-sync-plan-confirmation pre { font-family: var(--font-interface); padding: 8px 10px; background: var(--background-secondary); border-radius: 6px; }
+.simple-one-sync-plan-confirmation .simple-one-sync-transfer__buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.simple-one-sync-plan-confirmation .simple-one-sync-transfer__buttons button {
+  min-height: 34px; height: auto; padding: 6px 12px; border-radius: 6px;
+  font-size: inherit; line-height: 1.4; box-shadow: none;
+}
+body.is-mobile .simple-one-sync-plan-confirmation { font-size: 13px; }
+body.is-mobile .simple-one-sync-plan-confirmation :is(p, summary, pre) { font-size: inherit; }
+body.is-mobile .simple-one-sync-plan-confirmation .simple-one-sync-transfer__buttons button { min-height: 34px; border-radius: 6px; font-size: inherit; }
+
+/* Desktop two-side check: consistent typography and compact spacing. */
+.simple-one-sync-setup-page .simple-one-sync-setup-body.simple-one-sync-check-page {
+  padding: 20px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.simple-one-sync-setup-page .simple-one-sync-check-page p,
+.simple-one-sync-setup-page .simple-one-sync-check-page summary,
+.simple-one-sync-setup-page .simple-one-sync-check-page .simple-one-sync-setup-files > div {
+  margin: 8px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.simple-one-sync-setup-page .simple-one-sync-check-page .setting-item-heading {
+  padding: 0;
+  margin: 0 0 12px;
+  border: 0;
+}
+.simple-one-sync-setup-page .simple-one-sync-check-page .setting-item-heading .setting-item-name {
+  font-size: 15px;
+  line-height: 1.4;
+}
+.simple-one-sync-setup-page .simple-one-sync-check-page .simple-one-sync-setup-detail {
+  margin-top: 20px;
+  padding-top: 16px;
+}
+.simple-one-sync-setup-page .simple-one-sync-check-page .simple-one-sync-setup-overview {
+  margin: 0 0 12px;
+  gap: 8px;
+}
+.simple-one-sync-setup-page .simple-one-sync-check-page .simple-one-sync-setup-overview__item {
+  padding: 12px;
+  font-size: 13px;
+}
+.simple-one-sync-setup-page .simple-one-sync-check-page .simple-one-sync-setup-overview__item strong {
+  font-size: 24px;
+  line-height: 1.3;
+}
+.simple-one-sync-setup-page .simple-one-sync-check-page .simple-one-sync-setup-file-check {
+  margin: 12px 0;
+  display: flex;
+  justify-content: flex-end;
+}
+.simple-one-sync-setup-page .simple-one-sync-check-page .simple-one-sync-setup-preview-progress:empty {
+  display: none;
+}
+
+.simple-one-sync-setup-page .simple-one-sync-check-page .simple-one-sync-setup-overview button.is-filter {
+  height: auto;
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  text-align: left;
+  box-shadow: none;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 12px;
+  gap: 4px;
+}
+.simple-one-sync-setup-page .simple-one-sync-check-page .simple-one-sync-setup-overview button.is-filter:hover,
+.simple-one-sync-setup-page .simple-one-sync-check-page .simple-one-sync-setup-overview button.is-filter.is-selected {
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+}
+.simple-one-sync-check-results {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.simple-one-sync-check-file {
+  font-size: 13px;
+  line-height: 1.6;
+  font-family: var(--font-monospace);
+  padding: 4px 0;
+  overflow-wrap: anywhere;
+}
+.simple-one-sync-check-bottom {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  text-align: right;
+}
+.simple-one-sync-check-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}

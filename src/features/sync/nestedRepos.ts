@@ -47,6 +47,8 @@ export async function nestedRepoFiles(vaultPath: string, repos: readonly NestedR
     for (const name of listed.split("\0").filter(Boolean)) {
       if (name === ".git" || name.startsWith(".git/") || name.startsWith("../") || path.isAbsolute(name)) continue;
       const relative = `${repo.directory}/${name.replace(/\\/g, "/")}`;
+      // The vault's exclusions govern ordinary child files too, not just data.json.
+      if (shouldIgnore(relative, [...defaultSyncIgnorePatterns(configDir), ...vaultIgnore], configDir)) continue;
       try {
         if ((await fs.lstat(path.join(vaultPath, relative))).isFile()) files.push(relative);
       } catch { /* deleted child file */ }

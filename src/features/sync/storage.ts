@@ -1,6 +1,29 @@
 import type { App, DataAdapter } from "obsidian";
 
 const localPath = (configDir: string, pluginId: string) => `${configDir}/plugins/${pluginId}/sync-local.json`;
+const apiWrites = new WeakMap<DataAdapter, Promise<void>>();
+export async function readApiLocal(adapter: DataAdapter, configDir: string, pluginId: string): Promise<Record<string, unknown>> {
+  const path = `${configDir}/plugins/${pluginId}/sync-api-local.json`;
+  for (const candidate of [path, path + ".recovery"]) {
+    if (!await adapter.exists(candidate)) continue;
+    try { return readObject(await adapter.read(candidate)); } catch (error) {
+      if (candidate.endsWith(".recovery")) throw error;
+    }
+  }
+  if (await adapter.exists(path)) throw new Error("API 本机数据损坏，已停止覆盖，请保留文件检查。");
+  return {};
+}
+export function writeApiLocal(adapter: DataAdapter, configDir: string, pluginId: string, patch: Record<string, unknown>): Promise<void> {
+  const operation = (apiWrites.get(adapter) ?? Promise.resolve()).then(async () => {
+    const value = { ...await readApiLocal(adapter, configDir, pluginId), ...patch };
+    const path = `${configDir}/plugins/${pluginId}/sync-api-local.json`;
+    const text = JSON.stringify(value);
+    await adapter.write(path + ".recovery", text);
+    await adapter.write(path, text);
+  });
+  apiWrites.set(adapter, operation.catch(() => {}));
+  return operation;
+}
 
 function readObject(text: string): Record<string, unknown> {
   const value: unknown = JSON.parse(text);
@@ -10,11 +33,32 @@ function readObject(text: string): Record<string, unknown> {
 
 export async function readLocalSyncSettings(adapter: DataAdapter, configDir: string, pluginId: string): Promise<unknown> {
   const path = localPath(configDir, pluginId);
-  return await adapter.exists(path) ? readObject(await adapter.read(path)) : null;
+  const local = await adapter.exists(path) ? readObject(await adapter.read(path)) : {};
+  const api = await readApiLocal(adapter, configDir, pluginId);
+  if (api.settings && typeof api.settings === "object") Object.assign(local, api.settings);
+  const logPath = `${configDir}/plugins/${pluginId}/sync-log.json`;
+  if (await adapter.exists(logPath)) {
+    const logs = readObject(await adapter.read(logPath));
+    for (const key of ["errorLogs", "lastSyncAt", "lastPullAt"]) if (logs[key] !== undefined) local[key] = logs[key];
+  }
+  return Object.keys(local).length ? local : null;
 }
 
 export async function writeLocalSyncSettings(adapter: DataAdapter, configDir: string, pluginId: string, value: unknown): Promise<void> {
-  await adapter.write(localPath(configDir, pluginId), JSON.stringify(value, null, 2));
+  const settings = { ...(value as Record<string, unknown>) };
+  const apiSettings: Record<string, unknown> = {};
+  for (const key of ["mobile", "mobileSyncEnabled", "lightweightGuideProgress"]) {
+    if (settings[key] !== undefined) apiSettings[key] = settings[key];
+    delete settings[key];
+  }
+  if (Object.keys(apiSettings).length) await writeApiLocal(adapter, configDir, pluginId, { settings: apiSettings });
+  const logs: Record<string, unknown> = {};
+  for (const key of ["errorLogs", "lastSyncAt", "lastPullAt"]) {
+    if (settings[key] !== undefined) logs[key] = settings[key];
+    delete settings[key];
+  }
+  if (Object.keys(logs).length) await adapter.write(`${configDir}/plugins/${pluginId}/sync-log.json`, JSON.stringify(logs, null, 2));
+  await adapter.write(localPath(configDir, pluginId), JSON.stringify(settings, null, 2));
 }
 
 /** Copy once; never write Simple One's data.json or overwrite established state. */

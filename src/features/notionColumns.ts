@@ -1276,7 +1276,6 @@ export function registerNotionColumns(plugin: SimplePlugin): void {
   plugin.addCommand({
     id: "create-two-column-view",
     name: "在当前位置创建双列视图",
-    hotkeys: [],
     editorCheckCallback: (checking, editor) => {
       if (!plugin.settings.enableNotionColumns) return false;
       if (!checking) insertColumns(editor);

@@ -20,7 +20,7 @@ export class TemplateCreateModal extends Modal {
     root.addClass("simple-template-create-modal");
     root.createEl("h2", { text: this.template ? "模板设置" : "新增模板" });
     let name = this.template?.name ?? "", folder = this.template?.outputFolder ?? "", filenameField = this.template?.filenameField ?? "";
-    let noteFormat = this.template?.noteFormat ?? "";
+    const noteFormat = this.template?.noteFormat ?? "";
     const properties = this.template ? templatePropertyNames(this.template) : [];
     const originalProperties = JSON.stringify(properties);
     const form = root.createEl("fieldset", { cls: "simple-template-create-form" });
@@ -104,12 +104,7 @@ export class TemplateCreateModal extends Modal {
     renderTags();
     if (this.template) {
       form.createEl("p", { cls: "setting-item-description", text: "属性与网站规则中的同名字段对应，未获取的内容可手动填写。提取与正则替换在各网站规则中设置。" });
-      const advanced = form.createEl("details", { cls: "simple-template-layout-editor" });
-      advanced.createEl("summary", { text: "笔记内容模板" });
-      advanced.createEl("p", { cls: "setting-item-description", text: "使用 {{属性名}} 填入内容。留空时使用默认属性布局；已有内容模板优先，调整属性后请同步检查占位符。" });
-      const layout = advanced.createEl("textarea", { attr: { "aria-label": "笔记内容模板", rows: "8" } });
-      layout.value = noteFormat;
-      layout.addEventListener("input", () => { noteFormat = layout.value; });
+
     }
     const footer = root.createDiv({ cls: "simple-json-modal-footer" });
     footer.createEl("button", { text: "取消" }).addEventListener("click", () => this.close());

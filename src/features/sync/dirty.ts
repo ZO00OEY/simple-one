@@ -19,15 +19,14 @@ export function recommendedIgnoreRules(configDir: string): string[] {
   ".trash/",
   ".gitshare/",
   "# 插件生成的本机状态与日志（同步设置保留）",
-  `${configDir}/plugins/obsidian-git/data.json`,
-  `${configDir}/plugins/recent-files-obsidian/data.json`,
-  `${configDir}/plugins/simple-one/data.json*`,
+
   `${configDir}/plugins/simple-one/sync-local.json*`,
+  `${configDir}/plugins/simple-one/sync-log.json*`,
+  `${configDir}/plugins/simple-one/sync-api-local.json*`,
   `${configDir}/plugins/simple-one/share-local.json*`,
   `${configDir}/plugins/simple-one/link-state.json*`,
   `${configDir}/plugins/simple-one/link-state.json.recovery`,
   `${configDir}/plugins/simple-one/mobile-ignore.json*`,
-  `${configDir}/plugins/simple-ai/private/`,
   "conflict-files-obsidian-git.md",
   "# AI 工具的本机临时产物与会话",
   ".codex/output/",
@@ -160,11 +159,10 @@ export function coalesceDirty(entries: DirtyEntry[], next: DirtyEntry): DirtyEnt
 
 export function isPrivateSyncPath(path: string, configDir: string): boolean {
   if (path === ".gitshare" || path.startsWith(".gitshare/")) return true;
-  const aiStorage = `${configDir}/plugins/simple-ai/private`;
-  if (path === aiStorage || path.startsWith(`${aiStorage}/`)) return true;
   for (const id of ["simple-one", "simple-link"]) {
     const prefix = `${configDir}/plugins/${id}/`;
-    if (path.startsWith(prefix) && /^(?:data\.json|sync-local\.json|share-local\.json|link-state\.json|mobile-ignore\.json)(?:$|[.~_-])/i.test(path.slice(prefix.length))) return true;
+    if (id === "simple-one" && path === `${prefix}data.json`) continue;
+    if (path.startsWith(prefix) && /^(?:data\.json|sync-api-local\.json|sync-log\.json|sync-local\.json|share-local\.json|link-state\.json|mobile-ignore\.json)(?:$|[.~_-])/i.test(path.slice(prefix.length))) return true;
   }
   return false;
 }

@@ -78,9 +78,9 @@ export async function checkUnusedAttachments(plugin: SimplePlugin): Promise<void
   if (!folder) return;
 
   const used = referencedPaths(plugin);
-  const items = filesInFolder(folder)
+  const items = [...filesInFolder(folder), ...rootAttachmentFiles(plugin).filter(isImage)]
     .filter((file) => isAttachmentCandidate(file) && !used.has(file.path))
-    .map((file) => ({ file, checked: isImage(file) }));
+    .map((file) => ({ file, checked: isImage(file) && !isRootFile(file) }));
 
   if (!items.length) {
     new Notice("未发现未引用附件");
@@ -231,6 +231,14 @@ function isAttachmentCandidate(file: TFile): boolean {
   return !NOTE_EXTENSIONS.has(file.extension.toLowerCase());
 }
 
+function isRootFile(file: TFile): boolean {
+  return !file.path.includes("/");
+}
+
+function rootAttachmentFiles(plugin: SimplePlugin): TFile[] {
+  return plugin.app.vault.getFiles().filter((file) => isRootFile(file) && isAttachmentCandidate(file));
+}
+
 function referencedPaths(plugin: SimplePlugin): Set<string> {
   const paths = new Set<string>();
   for (const links of Object.values(plugin.app.metadataCache.resolvedLinks)) {
@@ -361,7 +369,7 @@ function imageRenameCandidates(
 ): TFile[] {
   if (location.mode === "fixed-folder") {
     const folder = getFixedAttachmentFolder(plugin, location);
-    return folder ? filesInFolder(folder) : [];
+    return folder ? [...filesInFolder(folder), ...rootAttachmentFiles(plugin)] : [];
   }
   return referencedAttachmentFiles(plugin, references).filter((file) =>
     Boolean(pickSourceNote(plugin, file, references.get(file.path), location))
@@ -375,7 +383,7 @@ function organizationCandidates(
 ): TFile[] {
   if (location.mode === "fixed-folder") {
     const folder = getFixedAttachmentFolder(plugin, location);
-    return folder ? filesInFolder(folder) : [];
+    return folder ? [...filesInFolder(folder), ...rootAttachmentFiles(plugin)] : [];
   }
   return referencedAttachmentFiles(plugin, references).filter((file) =>
     Boolean(pickSourceNote(plugin, file, references.get(file.path), location))
@@ -489,7 +497,7 @@ class UnusedAttachmentModal extends Modal {
     applyModalScale(this.modalEl, this.plugin.displaySettings.popupWindowScale, getMainAppWindow(this.plugin.app));
     this.contentEl.empty();
     this.contentEl.createEl("h2", { text: "未引用附件" });
-    this.contentEl.createDiv({ cls: "setting-item-description", text: "图片默认勾选；JSON、txt 等非图片默认不勾选。确认后删除到 Obsidian 回收站。" });
+    this.contentEl.createDiv({ cls: "setting-item-description", text: "附件目录内的图片默认勾选；根目录图片及 JSON、txt 等非图片默认不勾选。确认后删除到 Obsidian 回收站。" });
     renderChecklist(this.contentEl, this.items, (item) => item.file.path);
     this.renderActions(async () => {
       const selected = this.items.filter((item) => item.checked);

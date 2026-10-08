@@ -27,7 +27,7 @@ export function sameContent(a?: FileEntry, b?: FileEntry): boolean {
   return !!a && !!b && (a.sha === b.sha || a.rawSha === b.sha || b.rawSha === a.sha);
 }
 export interface CacheEntry extends FileEntry { mtime: number; ctime: number; size: number; verifiedAt: number; hashVersion?: number }
-const SYNC_HASH_VERSION = 2;
+export const SYNC_HASH_VERSION = 2;
 
 /** Compare and upload UTF-8 text with LF, while retaining its exact disk hash for write guards. */
 export function syncBytes(bytes: Uint8Array): Uint8Array {
@@ -91,7 +91,7 @@ export function mobileIgnores(options: MobileOptions, configDir: string, pluginI
   if (!options.syncImages) generated.push(...IMAGE_EXTENSIONS.map((ext) => `*.${ext}`));
   if (!options.syncPlugins) generated.push(`${configDir}/plugins/`);
   // The generated list is informational; hard exclusions below cannot be negated.
-  generated.push(`${configDir}/plugins/${pluginId}/sync-local.json`, `${configDir}/plugins/${pluginId}/data.json`, `${configDir}/plugins/${pluginId}/link-state.json`,
+  generated.push(`${configDir}/plugins/${pluginId}/sync-local.json`, `${configDir}/plugins/${pluginId}/link-state.json`,
     `${configDir}/plugins/${pluginId}/link-state.json.recovery`, `${configDir}/plugins/${pluginId}/mobile-ignore.json`, ".git/", ".simple-link/");
   generated.push(`!${configDir}/plugins/${pluginId}/sync-settings.json`);
   return generated;
@@ -108,17 +108,16 @@ export function included(path: string, options: MobileOptions, configDir: string
   if (isPrivateSyncPath(path, configDir)) return false;
   if (path === `${configDir}/plugins/${pluginId}/share-manifest.json`) return true;
   if (path === `${configDir}/plugins/${pluginId}/sync-settings.json`) return true;
+  if (pluginId === "simple-one" && path === `${configDir}/plugins/${pluginId}/data.json`) return true;
   const ownPrefix = configDir + "/plugins/" + pluginId + "/";
   if (path.startsWith(ownPrefix)) {
     const relative = path.slice(ownPrefix.length);
     // Device state and recovery/backup variants cannot be enabled by ignore rules.
-    if (/^(?:data\.json|sync-local\.json|share-local\.json|link-state\.json|mobile-ignore\.json)(?:$|[.~_-])/i.test(relative)) return false;
+    if (/^(?:data\.json|sync-api-local\.json|sync-log\.json|sync-local\.json|share-local\.json|link-state\.json|mobile-ignore\.json)(?:$|[.~_-])/i.test(relative)) return false;
   }
   if (path.startsWith(`${configDir}/plugins/`)) {
     const id = path.slice(`${configDir}/plugins/`.length).split("/")[0];
     if (!options.syncPlugins || (id !== "__link_scan__" && !options.plugins.includes(id))) return false;
-    // Device credentials and runtime plugin state never travel through API sync.
-    if (/\/(?:data|sync-settings)\.json$/i.test(path) && path !== `${configDir}/plugins/simple-ai/data.json`) return false;
   }
   else if (path === configDir || path.startsWith(`${configDir}/`)) return false;
   if (!options.syncImages && IMAGE_EXTENSIONS.includes(path.split(".").pop()!.toLowerCase())) return false;
@@ -181,7 +180,7 @@ export async function listIncluded(adapter: DataAdapter, allowed: (path: string)
 
 export async function scanCurrent(
   adapter: DataAdapter, state: LocalState, options: MobileOptions,
-  allowed: (path: string) => boolean, force: boolean, progress?: (message: string) => void
+  allowed: (path: string) => boolean, force: boolean, progress?: (message: string) => void, verifiedPaths: ReadonlySet<string> = new Set()
 ): Promise<Manifest> {
   const paths = await listIncluded(adapter, allowed);
   const current: Manifest = {};
@@ -190,7 +189,7 @@ export async function scanCurrent(
     const before = await adapter.stat(path);
     if (!before || before.type !== "file") throw new Error("扫描期间文件发生变化，请重试。");
     const cached = state.cache[path];
-      const recentlyWritten = !!cached && Math.max(before.mtime, cached.mtime) >= cached.verifiedAt - 2000;
+      const recentlyWritten = !!cached && !verifiedPaths.has(path) && Date.now() - Math.max(before.mtime, cached.mtime) < 2000;
     if (!force && options.cacheEnabled && cached?.hashVersion === SYNC_HASH_VERSION && !state.dirty[path] && !recentlyWritten &&
         before.mtime === cached.mtime && before.ctime === cached.ctime && before.size === cached.size) {
       cached.mode = state.base[path]?.mode ?? cached.mode;
@@ -211,7 +210,7 @@ export async function scanCurrent(
       if (state.dirty[path] === dirtyRevision) delete state.dirty[path];
     }
     if (index % 25 === 0) {
-      progress?.(`本地哈希 ${index + 1}/${paths.length}`);
+      progress?.(`核对本地文件 ${index + 1}/${paths.length}`);
       await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     }
   }

@@ -195,12 +195,17 @@ export class SimpleSettingTab extends PluginSettingTab {
           });
         } };
       }
-      const description = createFragment();
-      description.append(document.createTextNode(desc));
-      const arrow = description.createSpan({ cls: "simple-native-entry-arrow" });
-      arrow.setAttr("aria-hidden", "true");
-      setIcon(arrow, "chevron-right");
-      return { name, aliases, desc: description, action: () => this.openPage({ type }) };
+      return { name, aliases, desc, render: (setting: Setting) => {
+        setting.setName(name).setDesc(desc).setClass("simple-overview-shortcut-entry");
+        const arrow = setting.controlEl.createSpan({ cls: "simple-nav-setting-arrow", attr: { "aria-hidden": "true" } });
+        setIcon(arrow, "chevron-right");
+        setting.settingEl.setAttribute("role", "button");
+        setting.settingEl.tabIndex = 0;
+        setting.settingEl.addEventListener("click", () => this.openPage({ type }));
+        setting.settingEl.addEventListener("keydown", event => {
+          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); this.openPage({ type }); }
+        });
+      } };
     };
     return [
       { type: "group", heading: "功能拓展", cls: "simple-settings simple-native-overview", items: [
@@ -435,6 +440,9 @@ export class SimpleSettingTab extends PluginSettingTab {
       }
       if (mobile) {
         const settings = this.plugin.settings.mobileDisplay;
+        new Setting(card).setName("紧凑底栏").setDesc("缩小手机底部页签与文件信息的字号和留白。").addToggle(toggle => toggle.setValue(settings.compactBottomBar).onChange(async value => {
+          settings.compactBottomBar = value; this.plugin.applyMobileHeaderButtons(); await this.plugin.saveSettings();
+        }));
         const sizeSetting = new Setting(card).setName("顶部按钮大小");
         const updateSizeDescription = (): void => {
           const button = this.plugin.isMobile ? document.querySelector<HTMLElement>(".workspace-leaf.mod-active .view-header .view-action, .view-header .view-action") : null;
@@ -694,7 +702,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       if (location.mode === "vault-root") {
         card.createDiv({
           cls: "simple-attachment-mode-warning",
-          text: "当前附件默认存放在 Vault 根目录。附件优化可能扫描并误处理普通笔记和资源文件，为避免误删，所有功能已禁用。",
+          text: "当前附件默认存放在 Vault 根目录。请先指定附件文件夹，再检查根目录遗留附件的重命名和归位清单。",
         });
         const quickConfig = card.createDiv({ cls: "simple-attachment-quick-config" });
         quickConfig.createSpan({ text: "将所有附件放入指定文件夹（默认 Attachment；仅影响新附件）" });
@@ -712,7 +720,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.renderAttachmentOrganizerAction(
         card,
         "清理未引用附件",
-        "扫描附件目录，列出未被 Markdown 引用的文件；确认后移入 Obsidian 回收站。",
+        "扫描附件目录及根目录遗留图片，列出未引用的文件；根目录图片默认不勾选，确认后移入 Obsidian 回收站。",
         "开始检查",
         disabledReasons.unused,
         () => void checkUnusedAttachments(this.plugin)
@@ -723,7 +731,7 @@ export class SimpleSettingTab extends PluginSettingTab {
         location.mode === "same-folder" || location.mode === "current-subfolder" ? "图片重命名" : "图片重命名并按笔记归位",
         location.mode === "same-folder" || location.mode === "current-subfolder"
           ? "检查已被 Markdown 引用且名称明显无意义的图片；保留所在目录，只修改文件名。"
-          : "检查文件名明显无意义的图片，根据引用笔记完成重命名和目录归位。",
+          : "检查附件目录及根目录遗留图片，根据引用笔记归位；名称明显无意义的图片同时重命名。",
         "开始检查",
         disabledReasons.imageRename,
         () => void planAttachmentImageRename(this.plugin)
@@ -732,7 +740,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.renderAttachmentOrganizerAction(
         card,
         "非图片附件按笔记归位",
-        "检查 JSON、txt、PDF 等非图片附件，根据引用笔记归位至相应附件目录。",
+        "检查附件目录及根目录遗留的 JSON、txt、PDF 等非图片附件，根据引用笔记归位至相应附件目录。",
         "开始检查",
         disabledReasons.organization,
         () => void planAttachmentOrganization(this.plugin)
@@ -1263,7 +1271,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     importButton.addEventListener("click", runAsync(async (event: MouseEvent) => {
       const value = await importJsonFile();
       if (!value) return;
-      const sample = Array.isArray(value) ? value[0] : value;
+      const sample: unknown = Array.isArray(value) ? value[0] : value;
       const isSite = isRecord(sample) && ("urlPattern" in sample || "siteRule" in sample || sample.type === "simple-plugin.site-rules" || ("siteRules" in sample && !("outputFolder" in sample) && !("filenameField" in sample) && !("name" in sample)));
       if (isSite) {
         const rules = normalizeSiteRuleImport(value);
@@ -1293,19 +1301,17 @@ export class SimpleSettingTab extends PluginSettingTab {
     for (const cat of cats) {
       const card = container.createDiv({ cls: "simple-template-source-card" });
       const header = card.createDiv({ cls: "simple-template-manager-heading" });
-      header.createEl("h4", { text: cat.name || "未命名分类" });
+      new Setting(header).setName(cat.name || "未命名分类").setHeading();
       const tools = header.createDiv({ cls: "simple-template-manager-actions" });
       tools.createEl("button", { text: "模板设置" }).addEventListener("click", () => this.openTemplateCreator(cat));
-      this.renderMoreButton(tools, [
-        { title: "导出模板 JSON", icon: "download", onClick: () => downloadJsonFile(`simple-template-${slugify(cat.name || cat.id)}.json`, cat) },
-        { title: "管理网站规则", icon: "list", onClick: () => this.openPage({ type: "category-sites", categoryId: cat.id }) },
-        { title: "删除模板", icon: "trash-2", onClick: async () => {
-          if (!await confirmAction(this.app, `删除模板“${cat.name}”及其中的网站规则？已生成的笔记会保留。`)) return;
-          this.plugin.settings.templateCategories = this.plugin.settings.templateCategories.filter(item => item.id !== cat.id);
-          await this.plugin.saveSettings();
-          this.renderSettings();
-        } },
-      ]);
+      const removeTemplate = tools.createEl("button", { attr: { "aria-label": "删除模板", title: "删除模板" } });
+      setIcon(removeTemplate, "trash-2");
+      removeTemplate.addEventListener("click", runAsync(async () => {
+        if (!await confirmAction(this.app, `删除模板“${cat.name}”及其中的网站规则？已生成的笔记会保留。`)) return;
+        this.plugin.settings.templateCategories = this.plugin.settings.templateCategories.filter(item => item.id !== cat.id);
+        await this.plugin.saveSettings();
+        this.renderSettings();
+      }));
       card.createDiv({ cls: "setting-item-description simple-template-source-output", text: `保存位置：${cat.outputFolder || "当前库根目录"}；基础属性：${templatePropertyNames(cat).join("、") || "未设置"}` });
       for (const site of cat.siteRules) {
         const row = card.createDiv({ cls: "simple-template-source-row" });
@@ -1321,48 +1327,43 @@ export class SimpleSettingTab extends PluginSettingTab {
             this.renderSettings();
           });
         });
-        this.renderMoreButton(row, [
-          { title: "导出网站 JSON", icon: "download", onClick: () => downloadJsonFile(`simple-site-rule-${slugify(siteLabel(site) || site.id)}.json`, site) },
-          { title: "删除网站", icon: "trash-2", onClick: async () => {
-            if (!await confirmAction(this.app, `删除网站规则“${siteLabel(site)}”？`)) return;
-            cat.siteRules = cat.siteRules.filter(item => item.id !== site.id);
-            await this.plugin.saveSettings();
-            this.renderSettings();
-          } },
-        ]);
+        const removeSite = row.createEl("button", { attr: { "aria-label": "删除网站", title: "删除网站" } });
+        setIcon(removeSite, "trash-2");
+        removeSite.addEventListener("click", runAsync(async () => {
+          if (!await confirmAction(this.app, `删除网站规则“${siteLabel(site)}”？`)) return;
+          cat.siteRules = cat.siteRules.filter(item => item.id !== site.id);
+          await this.plugin.saveSettings();
+          this.renderSettings();
+        }));
       }
       if (!cat.siteRules.length) card.createEl("p", { cls: "simple-empty-text", text: "还没有网站来源，点击下方“添加网站”开始配置。" });
-      card.createEl("button", { text: "＋ 添加网站", cls: "simple-template-source-add" }).addEventListener("click", event => {
-        new Menu()
-          .addItem(item => item.setTitle("粘贴或编辑 JSON").setIcon("clipboard").onClick(() => {
-            this.openJsonModal(`添加网站：${cat.name}`, formatJson(makeBlankSiteRule()), async value => {
-              for (const rule of normalizeSiteRuleImport(value)) upsertById(cat.siteRules, rule);
-              await this.plugin.saveSettings();
-              this.renderSettings();
-            });
-          }))
-          .addItem(item => item.setTitle("导入 JSON 文件").setIcon("upload").onClick(runAsync(async () => {
-            const value = await importJsonFile();
-            if (!value) return;
-            for (const rule of normalizeSiteRuleImport(value)) upsertById(cat.siteRules, rule);
-            await this.plugin.saveSettings();
-            this.renderSettings();
-          })))
-          .showAtMouseEvent(event);
+      card.createEl("button", { text: "＋ 添加网站", cls: "simple-template-source-add" }).addEventListener("click", () => {
+        this.openJsonModal(`添加网站：${cat.name}`, formatJson(makeBlankSiteRule()), async value => {
+          for (const rule of normalizeSiteRuleImport(value)) upsertById(cat.siteRules, rule);
+          await this.plugin.saveSettings();
+          this.renderSettings();
+        }, true);
       });
     }
-    this.renderGroup(container, "链接分析与搜索规则创建指南", (card) => {
-      card.createEl("p", { cls: "setting-item-description", text: "将网页链接与下方复制的规则说明、提示词一起发送给 AI，让 AI 判断网站是否适用，并尝试生成可导入的 JSON。" });
-      const steps = card.createEl("ol", { cls: "simple-template-rule-guide-steps" });
-      steps.createEl("li", { text: "点击下方按钮复制提示词，发送给 AI，同时提供具体内容页的链接，并告诉 AI 需要获取哪些字段，例如书名、作者、简介。需要搜索功能时，再提供搜索结果页链接和关键词，请 AI 先判断能否使用简单规则完成。" });
-      steps.createEl("li", { text: "如果 AI 无法直接读取网页，可以尝试将网页另存为本地 HTML 文件，再发送给 AI。也可以导出插件中已有网站的 JSON，一并提供给 AI，作为规则格式和字段写法的参考。" });
-      steps.createEl("li", { text: "在上方对应分类中点击“添加网站”，选择粘贴 JSON 或导入 JSON 文件。添加后，用实际链接和搜索词检查结果。" });
-      card.createEl("p", { cls: "setting-item-description", text: "复制内容已包含插件支持范围与 JSON 格式说明。遇到需要专用接口或脚本的网站，会要求 AI 说明限制，不要勉强生成规则。" });
-      const copy = card.createEl("button", { cls: "simple-soft-button", text: "复制规则说明与 AI 提示词" });
+    this.renderGroup(container, "用 AI 创建网站规则", (card) => {
+      card.createEl("p", { cls: "setting-item-description", text: "选择要添加网站的笔记模板，复制完整提示词发给 AI，并提供具体内容页链接及希望获取的信息。需要搜索时，再提供搜索页链接和关键词。" });
+      const controls = card.createDiv({ cls: "simple-template-ai-controls" });
+      const select = controls.createEl("select", { attr: { "aria-label": "选择要添加网站的模板" } });
+      select.createEl("option", { text: "选择要添加网站的模板", value: "" });
+      for (const template of cats) select.createEl("option", { text: template.name || "未命名模板", value: template.id });
+      const copy = controls.createEl("button", { cls: "simple-soft-button", text: "复制完整提示词" });
+      copy.disabled = true;
+      select.addEventListener("change", () => { copy.disabled = !cats.some(template => template.id === select.value); });
       copy.addEventListener("click", runAsync(async () => {
-        await navigator.clipboard.writeText(templateRuleCreationPrompt());
-        new Notice("规则说明与 AI 提示词已复制");
+        const template = cats.find(item => item.id === select.value);
+        if (!template) return;
+        await navigator.clipboard.writeText(templateRuleCreationPrompt({ name: template.name, filenameField: template.filenameField, propertyFields: templatePropertyNames(template) }));
+        new Notice("完整提示词已复制，包含所选模板的属性与规则说明");
       }));
+      const steps = card.createEl("ol", { cls: "simple-template-rule-guide-steps" });
+      steps.createEl("li", { text: "如果 AI 无法读取网页，可将网页另存为 HTML 文件后发给 AI。也可复制已有网站规则的 JSON 作为参考；番茄、起点含有内嵌处理机制，不适合作为普通网站规则的参考。" });
+      steps.createEl("li", { text: "将 AI 生成的 JSON 添加到所选模板：点击“添加网站”，粘贴 JSON 或从文件导入，再用实际链接和搜索词检查结果。" });
+      card.createEl("p", { cls: "setting-item-description", text: "适用于可从普通网页直接提取内容的网站。提示词已包含支持范围；需要专用接口或脚本时，会要求 AI 说明限制。" });
     });
   }
 
@@ -3129,9 +3130,10 @@ export class SimpleSettingTab extends PluginSettingTab {
   private openJsonModal(
     title: string,
     initialValue: string,
-    onSave: (value: unknown) => Promise<void>
+    onSave: (value: unknown) => Promise<void>,
+    allowFileImport = false
   ): void {
-    new JsonEditModal(this.app, title, initialValue, onSave).open();
+    new JsonEditModal(this.app, title, initialValue, onSave, allowFileImport).open();
   }
 
   private renderCalendarDiarySettings(container: HTMLElement): void {
@@ -3235,7 +3237,8 @@ class JsonEditModal extends Modal {
     app: App,
     private readonly title: string,
     private readonly initialValue: string,
-    private readonly onSave: (value: unknown) => Promise<void>
+    private readonly onSave: (value: unknown) => Promise<void>,
+    private readonly allowFileImport = false
   ) {
     super(app);
   }
@@ -3247,11 +3250,12 @@ class JsonEditModal extends Modal {
     contentEl.createEl("h2", { text: this.title });
 
     const toolbar = contentEl.createDiv({ cls: "simple-json-modal-toolbar" });
-    const paste = toolbar.createEl("button");
-    paste.setText("粘贴");
-    paste.addEventListener("click", runAsync(async () => {
-      this.textarea.value = await navigator.clipboard.readText();
-    }));
+    if (!this.allowFileImport) {
+      const paste = toolbar.createEl("button", { text: "粘贴" });
+      paste.addEventListener("click", runAsync(async () => {
+        this.textarea.value = await navigator.clipboard.readText();
+      }));
+    }
 
     const copy = toolbar.createEl("button");
     copy.setText("复制");
@@ -3259,6 +3263,13 @@ class JsonEditModal extends Modal {
       await navigator.clipboard.writeText(this.textarea.value);
       new Notice("JSON 已复制到剪贴板");
     }));
+
+    if (this.allowFileImport) {
+      toolbar.createEl("button", { text: "从 JSON 文件导入" }).addEventListener("click", runAsync(async () => {
+        const value = await importJsonFile(contentEl.ownerDocument);
+        if (value) this.textarea.value = formatJson(value);
+      }));
+    }
 
     this.textarea = contentEl.createEl("textarea", { cls: "simple-json-textarea" });
     this.textarea.value = this.initialValue;
@@ -4494,31 +4505,46 @@ function makeBlankSiteRule(): SiteRule {
   };
 }
 
-function importJsonFile(): Promise<unknown> {
+function importJsonFile(ownerDocument: Document = document): Promise<unknown> {
   return new Promise((resolve) => {
-    const input = createEl("input");
+    const input = ownerDocument.win.createEl("input");
     input.type = "file";
     input.accept = "application/json,.json";
+    input.hidden = true;
+    ownerDocument.body.appendChild(input);
+    const finish = (value: unknown): void => {
+      input.remove();
+      resolve(value);
+    };
+    input.addEventListener("cancel", () => finish(null), { once: true });
     input.addEventListener("change", runAsync(async () => {
       const file = input.files?.[0];
       if (!file) {
-        resolve(null);
+        finish(null);
         return;
       }
-      const text = await file.text();
       try {
-        resolve(JSON.parse(text));
-      } catch (error) {
-        const looseRule = parseLooseHtmlPreviewRuleJson(text);
-        if (looseRule) {
-          resolve(looseRule);
-          return;
+        const text = await file.text();
+        let value: unknown;
+        try {
+          value = JSON.parse(text);
+        } catch (error) {
+          const looseRule = parseLooseHtmlPreviewRuleJson(text);
+          if (!looseRule) throw error;
+          value = looseRule;
         }
+        finish(value);
+      } catch (error) {
         new Notice(`JSON 导入失败：${error instanceof Error ? error.message : String(error)}`);
-        resolve(null);
+        finish(null);
       }
     }));
-    input.click();
+    try {
+      if (typeof input.showPicker === "function") input.showPicker();
+      else input.click();
+    } catch {
+      input.click();
+    }
   });
 }
 
@@ -4553,7 +4579,12 @@ function siteSummary(siteRule: SiteRule): string {
     siteRule.fields.length > 0 ? "链接" : "",
     siteRule.search && siteRule.search.enabled !== false ? "搜索" : "",
   ].filter(Boolean);
-  return parts.length ? `${label}（${parts.join(" + ")}）` : label;
+  const summary = parts.length ? `${label}（${parts.join(" + ")}）` : label;
+  const hasEmbeddedProcessing = siteRule.handler === "fanqieNovel"
+    || siteRule.handler === "qidianBook"
+    || siteRule.search?.type === "fanqieApi"
+    || /qidian/i.test(siteRule.urlPattern);
+  return hasEmbeddedProcessing ? `${summary} · 有内嵌处理机制` : summary;
 }
 
 function upsertById<T extends { id: string }>(items: T[], item: T): void {

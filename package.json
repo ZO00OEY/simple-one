@@ -1,6 +1,6 @@
 {
   "name": "simple-one",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "description": "A collection of practical Obsidian tools",
   "main": "main.js",
   "scripts": {
@@ -10,7 +10,7 @@
     "check": "npm audit --omit=dev && npm run lint && npm run test && npm run build",
     "test": "node scripts/smoke.mjs && npm run test:sync && npm run test:share",
     "test:share": "node scripts/test-share.mjs && node scripts/test-share-api.mjs && node scripts/test-share-edgeone.mjs && node scripts/test-share-reader.mjs",
-    "test:sync": "node scripts/sync/test-dirty.mjs && node scripts/sync/test-onboarding.mjs && node scripts/sync/test-lightweight-guide.mjs && node scripts/sync/test-mobile-sync.mjs && node scripts/sync/test-mobile-runtime.mjs && node scripts/sync/test-migration.mjs && node scripts/sync/test-desktop-backup.mjs && node scripts/sync/test-sync-panel.mjs"
+    "test:sync": "node scripts/sync/test-hash-cache.mjs && node scripts/sync/test-download-cache.mjs && node scripts/sync/test-dirty.mjs && node scripts/sync/test-onboarding.mjs && node scripts/sync/test-lightweight-guide.mjs && node scripts/sync/test-mobile-sync.mjs && node scripts/sync/test-mobile-runtime.mjs && node scripts/sync/test-migration.mjs && node scripts/sync/test-desktop-backup.mjs && node scripts/sync/test-sync-panel.mjs"
   },
   "devDependencies": {
     "@types/katex": "^0.16.8",
@@ -40,6 +40,7 @@
     "mermaid": "^12.1.0"
   },
   "overrides": {
-    "moment": "^2.31.0"
+    "moment": "^2.31.0",
+    "katex": "^0.19.0"
   }
 }

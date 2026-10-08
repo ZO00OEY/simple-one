@@ -1,3 +1,4 @@
+const readStoredState = async (adapter, path) => { const raw = JSON.parse(await adapter.read(path)); return raw.state ?? raw; };
 import assert from "node:assert/strict";
 import { zipSync } from "fflate";
 import { createRequire } from "node:module";
@@ -151,7 +152,8 @@ try {
     assert.deepEqual(f.engine.state.dirty, {});
     assert.deepEqual(f.engine.state.paths, { moves: {} });
     for (const path of [f.engine.statePath, `${f.engine.statePath}.recovery`]) {
-      const saved = JSON.parse(await f.adapter.read(path));
+      const rawSaved = JSON.parse(await f.adapter.read(path));
+      const saved = rawSaved.state ?? rawSaved;
       assert.equal(saved.pending, undefined); assert.equal(saved.downloadVerification, undefined);
       assert.equal(saved.rejoinReview, true);
     }
@@ -257,11 +259,11 @@ try {
     f.cloudEdit("download.md", "new cloud");
     f.progress.length = 0;
     const plan = await f.engine.preview();
-    assert(f.progress.some(text => text.includes("待同步 2 个文件 · 待准备上传 1 个")));
+    assert(f.progress.some(text => text.includes("待同步 2 个文件 · 准备上传 1 个")));
     await f.engine.execute(plan);
-    assert(f.progress.some(text => text.includes("正在确认云端更新 · 待同步 2 个文件 · 待准备上传 0 个 · 已准备 1/1")), "prepared uploads remain pending until the branch update succeeds");
-    assert(f.progress.some(text => text.includes("正在应用本地同步结果 · 待同步 1 个文件")));
-    assert(f.progress.some(text => text.includes("正在应用本地同步结果 · 待同步 0 个文件")));
+    assert(f.progress.some(text => text.includes("待同步 2 个文件 · 准备上传 0 个")), "prepared uploads remain pending until the branch update succeeds");
+    assert(f.progress.some(text => text.includes("待同步 1 个文件")));
+    assert(f.progress.some(text => text.includes("待同步 0 个文件")));
     assert.equal(f.local.get("download.md").bytes.toString(), "new cloud");
     assert.equal(f.remote()["upload.md"].sha, hash(Buffer.from("new local")));
   }
@@ -376,7 +378,7 @@ try {
     assert(f.local.has('first.md'));
     assert(!f.local.has('second.md') && !f.local.has('third.md'));
     assert.equal(f.engine.state.baseCommitSha, base);
-    const saved = JSON.parse(await f.adapter.read(f.engine.statePath));
+    const saved = (await readStoredState(f.adapter, f.engine.statePath));
     assert.equal(saved.baseCommitSha, base);
     assert.equal(saved.downloadVerification.phase, 'downloading');
     await assert.rejects(f.engine.execute(plan), /未完成的下载或验证/);
@@ -387,7 +389,7 @@ try {
     assert.equal(restarted.state.baseCommitSha, f.head());
     assert.equal(resumed.remoteDeletes.length + resumed.localDeletes.length + resumed.downloads.length + resumed.uploads.length, 0);
     for (const name of ['first.md', 'second.md', 'third.md']) assert.equal(f.local.get(name).bytes.toString(), name);
-    assert.equal(JSON.parse(await f.adapter.read(restarted.statePath)).pending, undefined);
+    assert.equal((await readStoredState(f.adapter, restarted.statePath)).pending, undefined);
     assert.equal(JSON.parse(await f.adapter.read(restarted.statePath)).downloadVerification, undefined);
   }
   // Even if an existing base lists a missing file, an unfinished download guard
@@ -416,10 +418,10 @@ try {
     f.cloudEdit('lost.md', 'must be downloaded');
     const originalWrite = f.adapter.writeBinary;
     f.adapter.writeBinary = async (path, bytes) => { if (path !== 'lost.md') await originalWrite(path, bytes); };
-    await assert.rejects(f.engine.execute(await f.engine.preview()), /下载结果验证未通过/);
+    await assert.rejects(f.engine.execute(await f.engine.preview()), /下载文件缺失/);
     assert.equal(f.engine.state.baseCommitSha, base);
     assert.equal(f.engine.state.downloadVerification.phase, 'verifying');
-    assert.equal(JSON.parse(await f.adapter.read(f.engine.statePath)).downloadVerification.phase, 'verifying');
+    assert.equal((await readStoredState(f.adapter, f.engine.statePath)).downloadVerification.phase, 'verifying');
     f.adapter.writeBinary = originalWrite;
     const recovered = await f.engine.preview();
     assert.equal(recovered.remoteDeletes.length, 0);
@@ -450,10 +452,10 @@ try {
   // of full JSON snapshots or concurrent writes.
   let releaseWrite, writeCount = 0, lastSaved;
   const writeGate = new Promise(resolve => { releaseWrite = resolve; });
-  const batchEngine = new MobileGithub({ write: async (_path, text) => {
+  const batchEngine = new MobileGithub({ exists: async () => false, write: async (_path, text) => {
     writeCount++;
     if (writeCount === 1) await writeGate;
-    lastSaved = JSON.parse(text);
+    lastSaved = JSON.parse(text).state;
   } }, ".obsidian", "simple-link", () => ({}), () => {});
   const firstSave = batchEngine.save();
   await Promise.resolve();
@@ -469,7 +471,7 @@ try {
   assert.equal(lastSaved.revision, 4000);
   batchEngine.adapter.write = async () => { throw new Error("save failed"); };
   await assert.rejects(batchEngine.save(), /save failed/);
-  batchEngine.adapter.write = async (_path, text) => { lastSaved = JSON.parse(text); };
+  batchEngine.adapter.write = async (_path, text) => { lastSaved = JSON.parse(text).state; };
   batchEngine.state.revision = 4001;
   await batchEngine.save();
   assert.equal(lastSaved.revision, 4001, "failed writes can be retried");
@@ -490,13 +492,13 @@ try {
   assert.equal(f.calls.filter(c => c.path.startsWith("/git/blobs/")).length, 0, "archive supplies verified duplicate bytes");
   assert(!f.local.has('.obsidian/app.json'), 'excluded settings never reach the vault');
   assert.equal(f.calls.filter(c => c.path === "/git/commits").length, 0, "import creates no unnecessary commit");
-  const saved = JSON.parse(f.local.get(".obsidian/plugins/simple-link/link-state.json").bytes.toString());
+  const saved = (await readStoredState(f.adapter, f.engine.statePath));
   assert(!("baseTreeSha" in saved));
   assert.equal(saved.cache["copy.md"].sha, saved.base["copy.md"].sha);
-  await f.adapter.write(".obsidian/plugins/simple-link/link-state.json", JSON.stringify({ ...saved, baseTreeSha: "legacy-tree" }));
+  await f.adapter.write(f.engine.statePath, JSON.stringify({ state: { ...saved, baseTreeSha: "legacy-tree" } }));
   const migrated = new MobileGithub(f.adapter, ".obsidian", "simple-link", () => f.options, () => {});
   await migrated.load();
-  const cleaned = JSON.parse(f.local.get(".obsidian/plugins/simple-link/link-state.json").bytes.toString());
+  const cleaned = (await readStoredState(f.adapter, f.engine.statePath));
   assert(!("baseTreeSha" in cleaned));
   assert.equal(cleaned.baseCommitSha, saved.baseCommitSha);
   assert.deepEqual(cleaned.base, saved.base);
@@ -510,13 +512,13 @@ try {
     const f = await fixture({ 'note.md': 'same' }, { 'note.md': 'same' });
     await align(f);
     const base = f.engine.state.baseCommitSha;
-    await f.adapter.write('.obsidian/plugins/simple-link/link-state.json', '{torn');
+    await f.adapter.write(f.engine.statePath, '{torn');
     const recovered = new MobileGithub(f.adapter, '.obsidian', 'simple-link', () => f.options, () => {});
     await recovered.load();
     assert.equal(recovered.state.baseCommitSha, base);
-    assert.equal(JSON.parse(await f.adapter.read('.obsidian/plugins/simple-link/link-state.json')).baseCommitSha, base);
-    await f.adapter.write('.obsidian/plugins/simple-link/link-state.json', '{torn');
-    await f.adapter.write('.obsidian/plugins/simple-link/link-state.json.recovery', '{torn');
+    assert.equal((await readStoredState(f.adapter, f.engine.statePath)).baseCommitSha, base);
+    await f.adapter.write(f.engine.statePath, '{torn');
+    await f.adapter.write(f.engine.recoveryPath, '{torn');
     const broken = new MobileGithub(f.adapter, '.obsidian', 'simple-link', () => f.options, () => {});
     await assert.rejects(broken.load(), /停止同步/);
   }
@@ -594,7 +596,7 @@ try {
   };
   await assert.rejects(f.engine.execute(plan), /network failure/);
   globalThis.githubRequest = successfulRequest;
-  const failedSaved = JSON.parse(f.local.get(".obsidian/plugins/simple-link/link-state.json").bytes.toString());
+  const failedSaved = (await readStoredState(f.adapter, f.engine.statePath));
   assert.equal(failedSaved.cache["retry.md"].sha, hash(Buffer.from("edited")));
   assert.equal(failedSaved.baseCommitSha, retryCommit);
   assert.deepEqual(failedSaved.base, retryBase);
@@ -750,6 +752,7 @@ try {
   // Migrate legacy deletion markers while preserving commit/cache and moves.
   const oldState = structuredClone(f.engine.state);
   oldState.paths = { "old.md": null, "other.md": "moved.md" };
+  f.local.delete(f.engine.statePath); f.local.delete(f.engine.recoveryPath);
   await f.adapter.write(".obsidian/plugins/simple-link/link-state.json", JSON.stringify(oldState));
   const oldEngine = new MobileGithub(f.adapter, ".obsidian", "simple-link", () => f.options, () => {});
   await oldEngine.load();
@@ -759,11 +762,12 @@ try {
 
   // Strip the previous copy-source format without changing baseline or moves.
   oldState.paths = { moves: { "other.md": "moved.md" }, copies: { "new.md": "old.md" } };
+  f.local.delete(f.engine.statePath); f.local.delete(f.engine.recoveryPath);
   await f.adapter.write(".obsidian/plugins/simple-link/link-state.json", JSON.stringify(oldState));
   const moveOnlyEngine = new MobileGithub(f.adapter, ".obsidian", "simple-link", () => f.options, () => {});
   await moveOnlyEngine.load();
   assert.deepEqual(moveOnlyEngine.state.paths, { moves: { "other.md": "moved.md" } });
-  const moveOnlySaved = JSON.parse(f.local.get(".obsidian/plugins/simple-link/link-state.json").bytes.toString());
+  const moveOnlySaved = (await readStoredState(f.adapter, f.engine.statePath));
   assert(!("copies" in moveOnlySaved.paths));
   assert.deepEqual(moveOnlySaved.base, oldState.base);
   assert.equal(moveOnlySaved.baseCommitSha, oldState.baseCommitSha);
@@ -895,8 +899,8 @@ try {
     const titles = [], sharedTitles = [];
     tab.desktopPage = "root"; tab.navigationParents = [];
     tab.plugin = { host: { share: { backFromEdgeOneGuide() { return false; }, detachSettings() {}, renderSettings(_root, _guide, showTitle) { sharedTitles.push(showTitle); } } } };
-    const container = { empty() {}, addClass() {}, toggleClass() {} };
-    for (const method of ["addEnableSetting", "addDefaultRepoSetting", "displayBeginner", "displayDesktop", "displayBeginnerMobile", "displayDevicePreview", "displayMobilePreview", "displaySetup", "displayDesktopSettings"]) tab[method] = () => {};
+    const container = { empty() {}, addClass() {}, toggleClass() {}, createDiv() { return this; } };
+    for (const method of ["addEnableSetting", "addDefaultRepoSetting", "addShareRepoSetting", "displayBeginner", "displayDesktop", "displayBeginnerMobile", "displayDevicePreview", "displayMobilePreview", "displaySetup", "displayDesktopSettings"]) tab[method] = () => {};
     tab.renderInto(container, title => titles.push(title));
     tab.navigateTo("beginner-mobile"); tab.navigateTo("setup"); tab.backToOverview(); tab.backToOverview();
     tab.navigateTo("desktop-settings"); tab.backToOverview();
@@ -1011,7 +1015,7 @@ try {
     // Ignore baseline, rule/tracking acknowledgement and file choices are separate gates.
     {
       const tab = Object.create(SyncSettingsTab.prototype), host = new GuideElement();
-      let preview = { localFiles: ["note.md"], remoteFiles: ["note.md"], localOnly: [], remoteOnly: [], overlaps: [".gitignore", "note.md"],
+      let preview = { localFiles: ["note.md"], remoteFiles: ["note.md"], localOnly: [], remoteOnly: [], overlaps: ["note.md"],
         nestedRepos: [], localRoot: true, localBranch: "master", branch: "main", relatedHistory: true,
         localIgnore: "local/", remoteIgnore: "remote/", optimizedIgnore: "local/", missingIgnoreRules: [],
         trackedExcludedLocal: ["private.json"], trackedExcludedRemote: [] };
@@ -1025,46 +1029,27 @@ try {
       tab.advanceSetupAfterCheck = async step => { assert.equal(step, 3); tab.setupViewStep = 4; };
       const render = () => { host.empty(); tab.displaySetupPreview(host.createDiv()); return host.querySelectorAll("*"); };
       let nodes = render();
-      assert(nodes.some(node => node.name === "1 · 选择 Git 忽略规则基准"));
-      assert(nodes.some(node => node.text === "查看差异 / 合并编辑"), "different rules offer the merge viewer");
-      const originalRemoteIgnore = preview.remoteIgnore;
-      preview.remoteIgnore = preview.localIgnore + "\r\n";
-      nodes = render();
-      assert(!nodes.some(node => node.text === "查看差异 / 合并编辑"), "identical rules hide the merge viewer");
-      await tab.reviewSetupIgnoreDifferences(preview);
-      assert.equal(tab.setupBaseConfirmed, false, "identical rules do not open a modal or change the review state");
-      preview.remoteIgnore = originalRemoteIgnore;
-      nodes = render();
-      assert(!nodes.some(node => node.name === "3 · 确认文件差异"));
-      tab.confirmSetupIgnoreBase();
-      assert.equal(tab.setupReviewStage, 1, "a different ignore baseline requires a choice");
-      choices[".gitignore"] = "local";
-      tab.confirmSetupIgnoreBase();
-      assert.equal(tab.setupReviewStage, 2);
-      nodes = render();
-      assert(nodes.some(node => node.name === "2 · 建议规则与文件追踪"));
-      tab.confirmSetupRules();
-      assert.equal(tab.setupReviewStage, 2, "tracked exclusions require an explicit tracking decision");
-      tab.confirmSetupRules("rebuild");
-      assert.equal(tab.setupReviewStage, 3);
+      assert(!nodes.some(node => node.name?.includes("忽略规则基准")));
+      assert.equal(tracking, "rebuild", "default rules apply silently");
       assert.equal(tab.setupRebuildConfirmed, true);
-      nodes = render();
-      assert(nodes.some(node => node.name === "3 · 确认文件差异"));
+      for (const label of ["仅本机", "仅 GitHub", "文件变化"]) {
+        const card = nodes.find(node => node.tag === "button" && node.children.some(child => child.text === label));
+        assert(card, `${label} is an interactive filter`);
+        card.events.click();
+      }
+      assert(nodes.some(node => node.text === "下一步：完成接入"));
       await tab.advanceSetupAfterPreview();
-      assert.equal(confirmed, 0, "unresolved file differences block completion");
+      assert.equal(confirmed, 0, "unresolved file versions block completion");
       choices["note.md"] = "remote";
-      tab.updateSetupPreviewSelection();
-      assert.equal(confirmed, 0, "choosing files must not auto-confirm the whole review");
       await tab.advanceSetupAfterPreview();
       assert.equal(confirmed, 1);
       assert.equal(tab.setupViewStep, 4);
-      preview = { ...preview };
+      preview = { ...preview, trackedExcludedLocal: [], trackedExcludedRemote: [] };
       render();
-      assert.equal(tab.setupReviewStage, 1, "a new inspection requires fresh confirmations");
-      assert.equal(tab.setupRulesConfirmed, false);
+      assert.equal(tracking, undefined, "new inspection recomputes default cleanup");
       assert.equal(tab.setupRebuildConfirmed, false);
     }
-    console.log("Desktop inspection modules: baseline/tracking/file gates and explicit final confirmation passed");
+    console.log("Desktop inspection: silent default rules, interactive filters and final version confirmation passed");
   } finally {
     GuideEngine.prototype.verifyToken = verifyToken; GuideEngine.prototype.verifyAccess = verifyAccess;
     delete globalThis.guideSetting;
@@ -1302,7 +1287,7 @@ try {
     const stagedPaths = [];
     const writePacked = packed.adapter.writeBinary;
     packed.adapter.writeBinary = async (path, bytes) => {
-      if (path.includes('link-state.json.archive/')) {
+      if (path.includes('sync-api-local.json.archive/')) {
         stagedPaths.push(path);
         assert.equal(packed.engine.allowed(path), false, 'temporary archive files never enter the sync scope');
       }
@@ -1335,7 +1320,7 @@ try {
     if (invalid === 'staging-failed') {
       const originalWrite = packed.adapter.writeBinary;
       packed.adapter.writeBinary = async (path, bytes) => {
-        if (path.includes('link-state.json.archive/')) throw new Error('staging disk failure');
+        if (path.includes('sync-api-local.json.archive/')) throw new Error('staging disk failure');
         return originalWrite(path, bytes);
       };
     }
@@ -1398,7 +1383,7 @@ try {
     assert.equal(restored.downloadTask, undefined);
     assert.equal(restored.state.baseCommitSha, original.head());
     assert.equal(original.calls.filter(call => call.path.startsWith('/zipball/') || call.path.startsWith('/git/blobs/')).length, 0);
-    assert(![...original.local.keys()].some(path => path.includes('link-state.json.archive/')), 'staged files are removed after success/failure');
+    assert(![...original.local.keys()].some(path => path.includes('sync-api-local.json.archive/')), 'staged files are removed after success/failure');
   }
   for (const scenario of ['nested-folder', 'ambiguous-folder', 'edited-local', 'changed-cloud', 'automatic']) {
     const f = await fixture({}, { 'note.md': 'cloud note' });
@@ -1486,7 +1471,7 @@ try {
     await f.engine.execute(await reviewedPreview(f),true);
     const write=f.adapter.write;
     f.adapter.write=async(path,text)=>{
-      const state=JSON.parse(text);
+      const state=JSON.parse(text).state;
       if(path===f.engine.statePath&&!state.pending&&state.baseCommitSha)throw new Error('final state disk failure');
       await write(path,text);
     };

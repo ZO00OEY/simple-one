@@ -1,6 +1,7 @@
+import { readApiLocal, writeApiLocal } from "./storage";
 import { DataAdapter } from "obsidian";
 import { githubResponse } from "./githubApi";
-import { blobSha, syncBytes, sameContent, FileEntry, identityPaths, included, linkDiff, LocalState, Manifest, MobileOptions, newLocalState, newPathRecords, normalizePaths, PathRecords, noteChange, safePath, scanCurrent } from "./linkDiff";
+import { SYNC_HASH_VERSION, blobSha, syncBytes, sameContent, FileEntry, identityPaths, included, linkDiff, LocalState, Manifest, MobileOptions, newLocalState, newPathRecords, normalizePaths, PathRecords, noteChange, safePath, scanCurrent } from "./linkDiff";
 import { parseGithubRepoUrl } from "./onboarding";
 import { directoryEntries, extractRepositoryArchive, type ArchiveSource, type ImportFile } from "./repositoryArchive";
 
@@ -77,7 +78,7 @@ export class MobileGithub {
   constructor(private adapter: DataAdapter, private configDir: string, private pluginId: string,
     private getOptions: () => MobileOptions, private progress: (message: string) => void) {}
 
-  private get statePath(): string { return `${this.configDir}/plugins/${this.pluginId}/link-state.json`; }
+  private get statePath(): string { return `${this.configDir}/plugins/${this.pluginId}/sync-api-local.json`; }
   private get recoveryPath(): string { return `${this.statePath}.recovery`; }
   get downloadTask(): DownloadTask | undefined { return this.state.pending?.transfer; }
   get initialSync(): boolean { return !this.state.baseCommitSha || !!this.state.rejoinReview; }
@@ -100,19 +101,21 @@ export class MobileGithub {
   private async readState(): Promise<void> {
     let parsed: StoredState | undefined;
     let recovered = false;
-    for (const path of [this.statePath, this.recoveryPath]) {
+    for (const path of [this.statePath, this.recoveryPath, this.statePath.replace("sync-api-local", "link-state"), this.recoveryPath.replace("sync-api-local", "link-state")]) {
       if (!await this.adapter.exists(path)) continue;
       try {
-        const candidate = JSON.parse(await this.adapter.read(path)) as StoredState;
+        const raw = JSON.parse(await this.adapter.read(path)) as Record<string, unknown>;
+        if (path.includes("sync-api-local") && !raw.state) continue;
+        const candidate = (raw.state ?? raw) as StoredState;
         if (candidate.schema !== 1 || !candidate.base || !candidate.cache || !candidate.paths || !candidate.dirty) {
           throw new Error("Invalid state");
         }
-        parsed = candidate; recovered = path === this.recoveryPath; break;
+        parsed = candidate; recovered = path !== this.statePath; break;
       } catch {
         if (path === this.recoveryPath) throw new Error("本机 Link 状态与恢复副本均无法读取，已停止同步；请保留文件后检查。");
       }
     }
-    if (!parsed && await this.adapter.exists(this.statePath)) {
+    if (!parsed && ((await readApiLocal(this.adapter, this.configDir, this.pluginId)).state || await this.adapter.exists(this.statePath.replace("sync-api-local", "link-state")))) {
       throw new Error("本机 Link 状态无法读取且没有恢复副本，已停止同步；请保留文件后检查。");
     }
     if (parsed) {
@@ -150,8 +153,7 @@ export class MobileGithub {
         const snapshot = JSON.stringify(this.state);
         // Write the recovery copy first: an interrupted primary write then has
         // a complete snapshot of the transaction that preceded cloud mutation.
-        await this.adapter.write(this.recoveryPath, snapshot);
-        await this.adapter.write(this.statePath, snapshot);
+        await writeApiLocal(this.adapter, this.configDir, this.pluginId, { state: JSON.parse(snapshot) });
       } while (this.saveRequested);
     });
     this.savePromise = write;
@@ -348,11 +350,11 @@ export class MobileGithub {
           (entry.mode === "100644" || entry.mode === "100755"));
       if (!this.loaded) {
         previous = newLocalState();
-        for (const path of [this.statePath, this.recoveryPath]) {
+        for (const path of [this.statePath, this.recoveryPath, this.statePath.replace("sync-api-local", "link-state"), this.recoveryPath.replace("sync-api-local", "link-state")]) {
           if (!await this.adapter.exists(path)) continue;
           const source = await this.adapter.read(path);
           let candidate: StoredState;
-          try { candidate = JSON.parse(source) as StoredState; }
+          try { const raw = JSON.parse(source) as Record<string, unknown>; candidate = (raw.state ?? raw) as StoredState; }
           catch (error) { if (error instanceof SyntaxError) continue; throw error; }
           if (complete(candidate)) { previous = candidate; break; }
         }
@@ -564,7 +566,7 @@ export class MobileGithub {
         localDeletes: Object.keys(local).filter((p) => !desired[p] && !conflictedLocal.has(p)),
         remoteDeletes: Object.keys(remote.files).filter((p) => !desired[p] && !conflictedRemote.has(p)) };
       const count = new Set([...plan.uploads, ...plan.downloads, ...plan.localDeletes, ...plan.remoteDeletes]).size;
-      this.progress(`已整理同步计划 · 待同步 ${count} 个文件 · 待准备上传 ${plan.uploads.length} 个 · 待确认差异 ${conflicts.length} 项`);
+      this.progress(`待同步 ${count} 个文件 · 准备上传 ${plan.uploads.length} 个${conflicts.length ? ` · 待确认差异 ${conflicts.length} 项` : ""}`);
       return plan;
     } finally { this.running = false; }
   }
@@ -617,9 +619,9 @@ export class MobileGithub {
       const remoteRemaining = new Set([...plan.uploads, ...plan.remoteDeletes]);
       const localRemaining = new Set([...plan.downloads, ...plan.localDeletes]);
       let prepared = 0;
-      const report = (stage: string): void => {
+      const report = (_stage: string): void => {
         const remaining = new Set([...remoteRemaining, ...localRemaining]).size;
-        this.progress(`${stage} · 待同步 ${remaining} 个文件 · 待准备上传 ${plan.uploads.length - prepared} 个 · 已准备 ${prepared}/${plan.uploads.length}`);
+        this.progress(`待同步 ${remaining} 个文件 · 准备上传 ${plan.uploads.length - prepared} 个`);
       };
       report("正在核对同步计划");
       if (plan.scope !== this.scope()) throw new Error("同步范围或仓库设置已变化，请重新预览。");
@@ -975,25 +977,36 @@ export class MobileGithub {
     } finally { await archived.cleanup(); }
     if (this.state.downloadVerification) this.state.downloadVerification.phase = "verifying";
     await this.save();
-    this.progress(`正在验证下载结果 · 0/${pending.actions.length} 个文件 · 验证通过后确认基准`);
+    const verified = new Map<string, { mtime: number; ctime: number; size: number; dirty?: number } | null>();
     for (let i = 0; i < pending.actions.length; i++) {
       const action = pending.actions[i];
-      if (await this.liveSha(action.path) !== action.sha) {
-        throw new Error(`下载结果验证未通过：${action.path}。已保留未完成状态和原共同基准，请重新预览恢复同步。`);
+      const before = await this.adapter.stat(action.path);
+      const dirty = this.state.dirty[action.path];
+      if (action.sha === null) {
+        if (before) throw new Error("删除结果验证未通过，原基准已保留。");
+        delete this.state.cache[action.path]; verified.set(action.path, null);
+      } else {
+        if (!before || before.type !== "file") throw new Error("下载文件缺失，原基准已保留。");
+        const bytes = new Uint8Array(await this.adapter.readBinary(action.path));
+        const rawSha = await blobSha(bytes);
+        const canonical = syncBytes(bytes);
+        const sha = canonical === bytes ? rawSha : await blobSha(canonical);
+        const after = await this.adapter.stat(action.path);
+        if (rawSha !== action.sha || !after || before.mtime !== after.mtime || before.ctime !== after.ctime || before.size !== after.size || dirty !== this.state.dirty[action.path]) throw new Error("下载结果验证未通过，原共同基准已保留。");
+        this.state.cache[action.path] = { sha, rawSha, mode: pending.base[action.path]?.mode ?? "100644", mtime: after.mtime, ctime: after.ctime, size: after.size, verifiedAt: Date.now(), hashVersion: SYNC_HASH_VERSION };
+        if (this.state.dirty[action.path] === dirty) delete this.state.dirty[action.path];
+        verified.set(action.path, { mtime: after.mtime, ctime: after.ctime, size: after.size, dirty: this.state.dirty[action.path] });
       }
-      this.progress(`正在验证下载结果 · ${i + 1}/${pending.actions.length} 个文件 · 验证通过后确认基准`);
+      this.progress(`正在验证下载结果 · ${i + 1}/${pending.actions.length} 个文件`);
       if (i % 25 === 0) await new Promise<void>(resolve => window.setTimeout(resolve, 0));
     }
-    // A failed cache refresh must leave the download transaction recoverable.
-    this.progress("下载验证通过 · 正在更新本地哈希缓存，尚未确认新基准…");
     await scanCurrent(this.adapter, this.state, this.getOptions(), this.allowed, false,
-      message => this.progress(`正在完成下载验证 · ${message}`));
-    // Recheck after the asynchronous scan: user edits during verification must
-    // not be accepted as part of the downloaded baseline.
+      message => this.progress(`正在完成下载验证 · ${message}`), new Set(verified.keys()));
     for (const action of pending.actions) {
-      if (await this.liveSha(action.path) !== action.sha) {
-        throw new Error(`验证期间本地文件发生变化：${action.path}。原共同基准已保留，请重新预览。`);
-      }
+      const snapshot = verified.get(action.path);
+      const stat = await this.adapter.stat(action.path);
+      const stable = snapshot ? stat && stat.type === "file" && stat.mtime === snapshot.mtime && stat.ctime === snapshot.ctime && stat.size === snapshot.size && this.state.cache[action.path]?.rawSha === action.sha && this.state.dirty[action.path] === snapshot.dirty : !stat;
+      if (!stable && await this.liveSha(action.path) !== action.sha) throw new Error(`验证期间本地文件发生变化：${action.path}。原共同基准已保留，请重新预览。`);
     }
     const moveOrigins = new Set([...Object.keys(this.state.paths.moves), ...Object.keys(pending.paths.moves)]);
     const outstanding = [...moveOrigins].filter((path) => this.state.paths.moves[path] !== pending.paths.moves[path])

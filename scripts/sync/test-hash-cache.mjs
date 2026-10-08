@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+import { webcrypto } from 'node:crypto';
+globalThis.crypto ??= webcrypto; globalThis.window = globalThis;
+const bundle = await build({entryPoints:['src/features/sync/linkDiff.ts'],bundle:true,format:'esm',platform:'node',write:false});
+const {scanCurrent,newLocalState}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+let reads=0; const now=Date.now(); let stat={type:'file',mtime:now-10000,ctime:now-10000,size:3}; let bytes=new TextEncoder().encode('abc');
+const adapter={list:async()=>({files:['note.md'],folders:[]}),stat:async()=>({...stat}),readBinary:async()=>{reads++;return bytes.buffer;}};
+const state=newLocalState(); const options={cacheEnabled:true};
+await scanCurrent(adapter,state,options,()=>true,false); const original=reads;
+await scanCurrent(adapter,state,options,()=>true,false);assert.equal(reads,original,'stable cache avoids reads');
+state.cache['note.md'].verifiedAt=stat.mtime+100;await scanCurrent(adapter,state,options,()=>true,false);assert.equal(reads,original,'old near-write cache becomes reusable');
+stat.mtime=Date.now();state.dirty['note.md']=1;await scanCurrent(adapter,state,options,()=>true,false);const verified=reads;
+await scanCurrent(adapter,state,options,()=>true,false,undefined,new Set(['note.md']));assert.equal(reads,verified,'just-verified download is reused');
+state.dirty['note.md']=2;bytes=new TextEncoder().encode('xyz');await scanCurrent(adapter,state,options,()=>true,false,undefined,new Set(['note.md']));assert.equal(reads,verified+1,'dirty event overrides verified cache');
+console.log('Hash cache reuse, expired write window and dirty-event checks passed');

@@ -47,7 +47,7 @@ assert.match(leaf.containerEl.textContent,/云端 1 个文件，本地 1 个文�
 assert.equal(await choice,'remote');
 const confirmation=view.confirmLightweightPlan(plan);
 assert.match(leaf.containerEl.textContent,/删除本地 1 个/);
-[...leaf.containerEl.querySelectorAll('button')].find(button=>button.textContent==='返回，重新预览').click();
+[...leaf.containerEl.querySelectorAll('button')].find(button=>button.textContent==='返回预览').click();
 assert.equal(await confirmation,false);
 const cancelled=view.chooseStrategy(plan);await view.onClose();assert.equal(await cancelled,null);
 view.closed=false;
@@ -65,3 +65,30 @@ await new Promise(resolve=>setTimeout(resolve,0));
 assert(!leaf.containerEl.querySelector('.simple-one-sync-transfer'));assert(leaf.containerEl.querySelector('.simple-one-sync-download-alert'));
 taskEngine.downloadTask=undefined;await view.render();assert(!leaf.containerEl.querySelector('.simple-one-sync-download-alert'));
 console.log('Sync flow panel: strategy/deletion confirmation, cancelled steps, persistent download badge, fixed link and resume page passed.');
+assert.equal(view.getDisplayText(), '同步与分享');
+let shareSwitches = 0, settingsOpens = 0;
+plugin.host = { share: { open: async () => { shareSwitches++; } } };
+plugin.openPluginSettings = () => { settingsOpens++; };
+plugin.settings.enabled = false;
+const readsBeforeDisabled = reads;
+await view.render();
+assert.equal(reads, readsBeforeDisabled, 'disabled sync panel must not read repository changes');
+assert.match(leaf.containerEl.textContent, /同步已关闭/);
+leaf.containerEl.querySelector('[aria-label="切换到分享"]').click();
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.equal(shareSwitches, 1, 'sharing remains reachable when sync is disabled');
+[...leaf.containerEl.querySelectorAll('button')].find(button => button.textContent === '打开同步设置').click();
+assert.equal(settingsOpens, 1);
+let switchedType, revealed = 0;
+const restoredShareLeaf = { setViewState: async state => { switchedType = state.type; } };
+await Sync.prototype.openSyncView.call({
+  settings: { enabled: false },
+  app: { workspace: {
+    getLeavesOfType: type => type === 'simple-one-share' ? [restoredShareLeaf] : [],
+    getRightLeaf: () => { throw Error('must reuse the shared tab'); },
+    revealLeaf: async () => { revealed++; },
+  } },
+}, false, false);
+assert.equal(switchedType, 'simple-one-sync-view', 'default entry replaces a restored sharing page with sync');
+assert.equal(revealed, 0, 'startup must preserve the active workspace pane');
+console.log('Shared panel: unified title, sync default, disabled sync entry and sharing switch passed.');

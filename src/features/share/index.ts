@@ -7,7 +7,7 @@ import { registerMarkdownAction } from "../../shared/markdownAction";
 import { ID_PATTERN, SHARE_FOLDER, emptyManifest, DEFAULT_SHARE_COPY_CONTENT, formatShareContent, newShareId, normalizeShareDirectory, parseManifest, parsePublishState, serializeManifest, shareNotePath, siteUrl, type ShareCopyContent, type ShareManifest, type PublishState } from "./model";
 import { exportNote } from "./export";
 import { ShareRepository, websiteFiles } from "./repository";
-import { ApiShareRepository } from "./apiRepository";
+import { ApiShareRepository, FallbackShareRepository, canFallbackToApi } from "./apiRepository";
 import { githubJson } from "../sync/githubApi";
 import { shareAppearance } from "./appearance";
 import { DEFAULT_TEMPLATE_FILE, TEMPLATE_SELECTION_FILE, bundledReaderFiles, templateAppearance, validateShareTemplate } from "./template";
@@ -216,24 +216,52 @@ export default class ShareFeature extends Component {
   private templateMessage = "";
   private templateBusy = false;
   private token = "";
-  private cliAvailable?: boolean;
   private backend: "cli" | "api" = Platform.isMobile ? "api" : "cli";
+  private async hasCli(): Promise<boolean> {
+    if (Platform.isMobile) return false;
+    return this.host.sync.exec("gh", ["--version"]).then(() => true, () => false);
+  }
   private async useCli(): Promise<boolean> {
     if (Platform.isMobile) return false;
-    if (this.cliAvailable === undefined) {
-      this.cliAvailable = await this.host.sync.exec("gh", ["--version"]).then(() => true, () => false);
+    try {
+      await this.host.sync.exec("gh", ["auth", "status", "--active", "--hostname", "github.com"]);
+      if (!(await this.host.sync.exec("gh", ["api", "user", "--jq", ".login"])).trim()) throw new Error("GitHub CLI 未返回账号信息。");
+      this.backend = "cli";
+      return true;
+    } catch {
+      this.backend = "api";
+      return false;
     }
-    return this.cliAvailable;
   }
   private secretId(): string { return `${this.host.manifest.id}-share-github`; }
   private savedToken(): string { return requireApiVersion("1.11.4") ? this.host.app.secretStorage?.getSecret(this.secretId()) ?? "" : ""; }
+  private async fallbackToken(): Promise<string> {
+    const saved = this.savedToken();
+    if (saved || Platform.isMobile) return saved;
+    try { return (await this.host.sync.exec("gh", ["auth", "token", "--hostname", "github.com"])).trim(); }
+    catch { return ""; }
+  }
   private async github(path: string, method = "GET", body?: unknown): Promise<string> {
-    if (await this.useCli()) return this.host.sync.exec("gh", ["api", path, ...(method === "GET" ? [] : ["--method", method]), ...(body === undefined ? [] : ["--input", "-"])], false, true, 120000, undefined, body === undefined ? undefined : JSON.stringify(body));
-    return JSON.stringify(await githubJson(this.savedToken(), `/${path}`, method, body));
+    let token = "";
+    if (await this.useCli()) {
+      try {
+        const result = await this.host.sync.exec("gh", ["api", path, ...(method === "GET" ? [] : ["--method", method]), ...(body === undefined ? [] : ["--input", "-"])], false, true, 120000, undefined, body === undefined ? undefined : JSON.stringify(body));
+        this.backend = "cli";
+        return result;
+      } catch (error) {
+        if (!canFallbackToApi(error, method)) throw error;
+        token = await this.fallbackToken();
+        if (!token) throw error;
+      }
+    }
+    this.backend = "api";
+    return JSON.stringify(await githubJson(token || await this.fallbackToken(), `/${path}`, method, body));
   }
   private async repository(site = this.manifest.site): Promise<ShareRepository> {
-    const cli = await this.useCli(); this.backend = cli ? "cli" : "api";
-    return cli ? new ShareRepository(this.host, site) : new ApiShareRepository(this.host, site, this.savedToken());
+    const token = await this.fallbackToken();
+    if (await this.useCli()) return new FallbackShareRepository(this.host, site, token, () => { this.backend = "api"; });
+    this.backend = "api";
+    return new ApiShareRepository(this.host, site, token);
   }
   private published: PublishState = { version: 1, notes: {}, files: [] };
   constructor(readonly host: SimplePlugin) {
@@ -1051,13 +1079,12 @@ export default class ShareFeature extends Component {
       const auth = content.createDiv({ cls: "simple-one-sync-setup-detail simple-one-sync-setup-auth" });
       new Setting(auth).setName("选择 GitHub 授权方式").setHeading();
       const verify = async () => {
-        if (await this.useCli()) { await this.host.sync.exec("gh", ["auth", "status", "--active", "--hostname", "github.com"]); }
         const account = JSON.parse(await this.github("user")) as { login: string };
         await this.change(manifest => { manifest.site.guideProgress = Math.max(manifest.site.guideProgress ?? (manifest.site.initialized ? 5 : 1), 2); }, false);
         this.authorized = true; this.status = `已验证 GitHub 账号：${account.login}`; this.guideStep = 2; this.guideAvailableStep = Math.max(this.guideAvailableStep, 2);
       };
       const browserLogin = async () => {
-        if (!await this.useCli()) throw new Error("当前设备使用 API 分享，请选择 Token 授权。");
+        if (!await this.hasCli()) throw new Error("当前设备没有可用的 GitHub CLI，请选择 Token 授权。");
         this.authController = new AbortController(); this.deviceCode = ""; let output = "";
         await this.host.sync.exec("gh", ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web", "--clipboard"], false, true, 300000, chunk => {
           output += chunk; const code = output.match(/\b[A-Z0-9]{4}-[A-Z0-9]{4}\b/)?.[0];
@@ -1071,7 +1098,7 @@ export default class ShareFeature extends Component {
           cls: `simple-one-sync-setup-option${this.authMode === mode ? " is-selected" : ""}`,
           attr: { type: "button", "aria-pressed": String(this.authMode === mode) }
         });
-        button.disabled = this.setupBusy || this.busy || (mode === "browser" && (Platform.isMobile || this.cliAvailable === false));
+        button.disabled = this.setupBusy || this.busy || (mode === "browser" && Platform.isMobile);
         button.addEventListener("click", () => {
           if (this.setupBusy || this.busy) return;
           this.authMode = mode; this.authorized = false; this.token = ""; this.error = ""; this.status = ""; this.deviceCode = "";
@@ -1095,7 +1122,7 @@ export default class ShareFeature extends Component {
         refresh.addEventListener("click", () => run(browserLogin));
         if (this.setupBusy) new Setting(auth).addButton(button => button.setButtonText("取消授权等待").onClick(() => this.authController?.abort()));
       } else if (this.authMode === "token") {
-        auth.createEl("p", { text: "Token 用于核验与发布。电脑 CLI 路径交给 GitHub CLI 保存；API 路径保存在本机 Obsidian 密钥存储中，不上传到任何仓库。" });
+        auth.createEl("p", { text: "Token 会保存在本机 Obsidian 密钥存储，作为 API 兜底；电脑端若 GitHub CLI 验证可用，仍优先使用 CLI。token 不写入同步仓库。" });
         const tokenHint = auth.createDiv({ cls: "simple-one-sync-setup-token-hint" });
         setIcon(tokenHint.createSpan({ cls: "simple-one-sync-setup-token-hint__icon", attr: { "aria-hidden": "true" } }), "circle-alert");
         tokenHint.createSpan({ text: "使用具有公开仓库写入与 Pages 管理权限的 GitHub Token，核验后继续连接分享仓库。" });
@@ -1113,12 +1140,16 @@ export default class ShareFeature extends Component {
             if (!token) return;
             this.token = "";
             run(async () => {
-              if (await this.useCli()) await this.host.sync.exec("gh", ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--with-token"], false, true, 120000, undefined, token + "\n");
-              else {
-                await githubJson(token, "/user");
-                if (requireApiVersion("1.11.4")) this.host.app.secretStorage.setSecret(this.secretId(), token);
-                else throw new Error("API 授权需要 Obsidian 1.11.4 或以上版本，请升级后重试。");
+              if (!requireApiVersion("1.11.4")) throw new Error("API 兜底授权需要 Obsidian 1.11.4 或以上版本，请升级后重试。");
+              let cliVerified = false;
+              if (await this.hasCli()) {
+                try {
+                  await this.host.sync.exec("gh", ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--with-token"], false, true, 120000, undefined, token + "\n");
+                  cliVerified = await this.useCli();
+                } catch { /* Preserve the verified API fallback attempt below. */ }
               }
+              if (!cliVerified) await githubJson(token, "/user");
+              if (requireApiVersion("1.11.4")) this.host.app.secretStorage.setSecret(this.secretId(), token);
               await verify();
             });
           });
@@ -1207,7 +1238,7 @@ export default class ShareFeature extends Component {
     this.takenRepository = undefined;
     if (!/^[A-Za-z0-9._-]{1,100}$/.test(name) || [".", ".."].includes(name)) throw new Error("仓库名只能包含字母、数字、点、下划线和连字符。");
     this.reportRepository("正在确认 GitHub 账号…");
-    const owner = (await this.useCli()) ? (await this.host.sync.exec("gh", ["api", "user", "--jq", ".login"])).trim() : (JSON.parse(await this.github("user")) as { login:string }).login;
+    const owner = (JSON.parse(await this.github("user")) as { login: string }).login;
     if (this.manifest.site.repo && (this.manifest.site.repo.toLowerCase() !== name.toLowerCase() || this.manifest.site.owner.toLowerCase() !== owner.toLowerCase())) throw new Error("已绑定分享仓库；第一版不支持直接迁移，请继续原仓库。");
     const taken = () => {
       this.takenRepository = { owner, name };
@@ -1255,7 +1286,7 @@ export class ShareView extends ItemView {
   private selected = new Set<string>();
   constructor(leaf: WorkspaceLeaf, private feature: ShareFeature) { super(leaf); }
   getViewType(): string { return VIEW; }
-  getDisplayText(): string { return "分享管理"; }
+  getDisplayText(): string { return "同步与分享"; }
   getIcon(): string { return "refresh-cw"; }
   getState(): Record<string, unknown> { return { ...super.getState(), ...this.feature.display, collapsed: [...this.collapsed] }; }
   async setState(state: Record<string, unknown>, result: ViewStateResult): Promise<void> {

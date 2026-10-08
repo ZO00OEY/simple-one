@@ -100,17 +100,21 @@ export default class SimplePlugin extends Plugin {
   private ownsFloatingButtonOptOut = false;
 
   async onload() {
+    let loadCancelled = false;
+    this.register(() => { loadCancelled = true; });
     document.body.classList.add("simple-one-active");
     this.register(() => document.body.classList.remove("simple-one-active"));
     await this.loadSettings();
+    if (loadCancelled) return;
     if (this.needsPlatformSwitchSave) await this.saveSettings();
+    if (loadCancelled) return;
     applyQuickFormatStyles(this);
     this.applyReadableLineWidth();
     this.applyImageHeightLimit();
     this.applyMobileHeaderButtons();
     this.registerEvent(this.app.workspace.on("css-change", () => this.applyMobileHeaderButtons()));
     this.register(() => {
-      document.body.classList.remove("simple-mobile-header-size", "simple-mobile-native-header");
+      document.body.classList.remove("simple-mobile-header-size", "simple-mobile-native-header", "simple-mobile-compact-bottom");
       document.body.style.removeProperty("--simple-mobile-header-button-size");
       if (this.ownsFloatingButtonOptOut) document.body.classList.remove("floating-button-off");
     });
@@ -193,26 +197,26 @@ export default class SimplePlugin extends Plugin {
 
     this.sync = this.addChild(new SyncFeature(this));
     await this.sync.initialize().catch(reportError);
+    if (loadCancelled) return;
     this.share = this.addChild(new ShareFeature(this));
     await this.share.initialize().catch(reportError);
+    if (loadCancelled) return;
     this.addRibbonIcon("refresh-cw", "同步与分享", () => {
-      void (this.app.workspace.getLeavesOfType("simple-one-share").length || !this.sync.settings.enabled
-        ? this.share.open() : this.sync.openSyncView()).catch(reportError);
+      void this.sync.openSyncView().catch(reportError);
     });
     this.addSettingTab(new SimpleSettingTab(this.app, this));
     let sidebarTimer: number | undefined, unloaded = false;
     this.register(() => { unloaded = true; if (sidebarTimer !== undefined) window.clearTimeout(sidebarTimer); });
     this.app.workspace.onLayoutReady(() => {
       if (unloaded) return;
-      // Restore the current page before creating the shared sidebar tab.
+      // The shared sidebar always starts on sync; sharing is opened from its switch.
       sidebarTimer = window.setTimeout(() => {
         void (async () => {
           if (unloaded) return;
-          if (this.app.workspace.getLeavesOfType("simple-one-share").length) {
-            for (const leaf of this.app.workspace.getLeavesOfType("simple-one-sync-view")) leaf.detach();
-            await this.share.open();
-          } else if (this.sync.settings.enabled) await this.sync.openSyncView(false);
-          else if (!unloaded && this.share.manifest.enabled) await this.share.open();
+          if (this.sync.settings.enabled || this.share.manifest.enabled
+            || this.app.workspace.getLeavesOfType("simple-one-share").length) {
+            await this.sync.openSyncView(false, false);
+          }
         })().catch(reportError);
       }, 0);
     });
@@ -226,6 +230,7 @@ export default class SimplePlugin extends Plugin {
     if (profile.headerButtonSize) body.style.setProperty("--simple-mobile-header-button-size", `${profile.headerButtonSize}px`);
     else body.style.removeProperty("--simple-mobile-header-button-size");
     body.classList.toggle("simple-mobile-native-header", profile.disableThemeHeaderButtons);
+    body.classList.toggle("simple-mobile-compact-bottom", profile.compactBottomBar);
     if (profile.disableThemeHeaderButtons) {
       if (!body.classList.contains("floating-button-off")) {
         body.classList.add("floating-button-off");

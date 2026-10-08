@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 const output = await build({ entryPoints: ["src/features/sync/storage.ts"], bundle: true, format: "esm", platform: "node", write: false });
-const { migrateLinkFiles, readLocalSyncSettings, legacySyncRunning } = await import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString("base64")}`);
+const { migrateLinkFiles, readLocalSyncSettings, legacySyncRunning, writeApiLocal, readApiLocal } = await import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString("base64")}`);
 const root = ".custom/plugins/", legacy = root + "simple-link/", current = root + "simple-one/";
 const files = new Map([
   [current + "data.json", JSON.stringify({ diary: { enabled: true }, token: "parent-private" })],
@@ -51,3 +51,11 @@ const established = new Map([
 await migrateLinkFiles({ exists: async path => established.has(path), read: async path => established.get(path), write: async (path, text) => established.set(path, text) }, ".custom", "simple-one", true, keys);
 assert(!established.has(current + "link-state.json.recovery"), "an established primary must not receive a stale legacy recovery copy");
 assert.deepEqual(JSON.parse(established.get(current + "link-state.json")), { current: "keep" });
+
+await Promise.all([writeApiLocal(adapter, ".custom", "simple-one", { state: { base: { preserved: true } } }), writeApiLocal(adapter, ".custom", "simple-one", { settings: { mobile: { token: "local" } } })]);
+const combined = await readApiLocal(adapter, ".custom", "simple-one");
+assert.equal(combined.state.base.preserved, true);
+assert.equal(combined.settings.mobile.token, "local");
+files.set(current + "sync-api-local.json", "broken");
+assert.deepEqual(await readApiLocal(adapter, ".custom", "simple-one"), combined);
+console.log("API local: concurrent settings/state writes and recovery passed");

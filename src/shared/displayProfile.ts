@@ -16,6 +16,7 @@ export function loadMobileDisplayProfile(value: Partial<SimplePluginSettings["mo
     popupWindowScale: normalizePopupScalePercent(value?.popupWindowScale, "0"),
     headerButtonSize: value?.headerButtonSize === "" ? "" : String(Math.min(64, Math.max(20, Number(positivePixels(value?.headerButtonSize)) || 29))),
     disableThemeHeaderButtons: value?.disableThemeHeaderButtons !== false,
+    compactBottomBar: value?.compactBottomBar !== false,
   };
 }
 
