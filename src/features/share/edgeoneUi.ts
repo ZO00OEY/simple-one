@@ -30,9 +30,10 @@ export function renderEdgeOneRow(parent: HTMLElement, connection: EdgeOneConnect
 }
 
 export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConnection, enabled: boolean,
-  publishing: boolean, back: () => void, shareGuide: () => void): void {
+  publishing: boolean, back: () => void, shareGuide: () => void, embedded = false): void {
   const blocked = !enabled || publishing || connection.busy;
   const completed = connection.completed;
+  if (!embedded) {
   const status = parent.createDiv({ cls: `simple-one-sync-setup-status is-${connection.error ? "error" : completed ? "success" : "disconnected"}`, attr: { role: "status" } });
   setIcon(status.createSpan({ cls: "simple-one-sync-setup-status__icon" }), connection.error ? "triangle-alert" : completed ? "check" : "unplug");
   const copy = status.createDiv({ cls: "simple-one-sync-setup-status__copy" });
@@ -40,8 +41,10 @@ export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConne
   copy.createEl("p", { text: connection.error || (completed
     ? "当前分享仓库已关联腾讯项目，最近一次分享已部署到正式网站。"
     : "核验腾讯授权，关联分享仓库，然后初始化网站。") });
+  }
   const available = connection.hasToken ? connection.linked ? 3 : 2 : 1;
   const step = Math.min(connection.state.step, available);
+  if (!embedded) {
   const nav = parent.createDiv({ cls: "simple-one-sync-setup-nav simple-share-edgeone-nav" });
   ["注册与授权", "关联分享仓库", "初始化并完成"].forEach((title, index) => {
     const target = index + 1;
@@ -55,6 +58,7 @@ export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConne
       else { connection.state.step = target; connection.refresh(); }
     });
   });
+  }
   const body = parent.createDiv({ cls: "simple-one-sync-card simple-one-sync-setup-body simple-share-guide-body simple-share-edgeone-guide" });
   if (step === 1) {
     new Setting(body).setName("选择授权方式").setHeading();
@@ -92,7 +96,7 @@ export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConne
     }
   } else if (step === 2) {
     const site = connection.site();
-    const ready = !!site.initialized && !!site.owner && !!site.repo;
+    const ready = !!site.owner && !!site.repo;
     if (!ready) {
       body.createEl("p", { text: "请先完成笔记分享引导，创建并初始化专用的公开分享仓库。" });
       const button = body.createEl("button", { text: "前往笔记分享引导", attr: { type: "button" } });
@@ -105,18 +109,22 @@ export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConne
         : "当前分享仓库尚未关联腾讯项目，请选择已有项目或创建并关联。若提示 GitHub 尚未授权，请在腾讯控制台选择「导入 Git 仓库 → GitHub」，完成授权后返回重试。" });
       const links = body.createDiv({ cls: "simple-share-provider-links" });
       shareExternalLink(links, "打开腾讯项目页并授权 GitHub ↗", EDGEONE_PROJECTS_URL);
-      if (connection.linked) {
+      if (connection.linked && !embedded) {
         new Setting(body).addButton(button => button.setButtonText("继续初始化或检查网站").setCta().setDisabled(blocked)
           .onClick(() => { connection.state.step = 3; connection.refresh(); }));
-      } else {
+      } else if (!connection.linked) {
       new Setting(body).setName("腾讯项目名称").setDesc("可使用建议名称，也可以填写自己的名称。")
         .addText(text => {
           text.setValue(connection.draftName || site.repo.toLowerCase().replace(/[^a-z0-9-]/g, "-")).onChange(value => { connection.draftName = value; });
           text.inputEl.disabled = blocked;
         });
-      new Setting(body).setName("访问区域").setDesc("中国大陆区域或全球区域请按腾讯要求完成域名备案。")
+      new Setting(body).setName("访问区域").setDesc("选择网站部署的加速区域。")
         .addDropdown(dropdown => dropdown.addOptions({ overseas: "全球（不含中国大陆）", mainland: "中国大陆", global: "全球（含中国大陆）" })
           .setValue(connection.area).setDisabled(blocked).onChange(value => { connection.area = value as typeof connection.area; }));
+      const domainHint = body.createEl("p", { cls: "simple-one-sync-setup-helper" });
+      domainHint.append("Page One 支持自定义域名，请在");
+      shareExternalLink(domainHint, "腾讯网页工作台", EDGEONE_PROJECTS_URL);
+      domainHint.append("中绑定，并按指引配置域名解析。插件不代办域名绑定或备案。");
       if (connection.candidates.length) new Setting(body).setName("已有腾讯项目")
         .addDropdown(dropdown => dropdown.addOptions(Object.fromEntries(connection.candidates.map(project => [project.ProjectId, project.Name])))
           .setValue(connection.selectedProject).setDisabled(blocked).onChange(value => { connection.selectedProject = value; }));
@@ -126,6 +134,8 @@ export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConne
           .onClick(() => { void connection.run(() => connection.connectProject()); }));
       }
     }
+  } else if (embedded) {
+    body.createEl("p", { text: `已关联项目 ${connection.state.projectName ?? ""}，继续验证仓库属性后初始化网站。` });
   } else {
     body.createEl("h3", { text: completed ? "接入已完成" : "初始化腾讯分享网站" });
     body.createEl("p", { text: `项目：${connection.state.projectName ?? ""}` });

@@ -25,7 +25,7 @@ export class ShareRepository {
     if (!/^[A-Za-z0-9-]+$/.test(owner) || !/^[A-Za-z0-9._-]{1,100}$/.test(repo) || [".", ".."].includes(repo) ||
         !branch || /[\s~^:?*[\\]|\.\.|@\{|^\/|\/$|\/\//.test(branch) || branch.split("/").some(part => part.startsWith(".") || part.endsWith(".") || part.endsWith(".lock"))) throw new Error("分享仓库或分支配置不正确。");
     const value = await this.request<{ private: boolean; permissions?: { push?: boolean }; archived?: boolean; disabled?: boolean }>(this.prefix);
-    if (value.private || value.permissions?.push !== true || value.archived || value.disabled) throw new Error("分享仓库必须公开、未归档，并具有写入权限。");
+    if (value.permissions?.push !== true || value.archived || value.disabled) throw new Error("分享仓库必须可写入、未归档且未禁用。");
   }
   private async readRef(): Promise<string> {
     const ref = await this.request<{ object: { sha: string } }>(this.prefix + "/git/ref/heads/" + encodeURIComponent(this.site.branch));

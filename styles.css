@@ -7183,7 +7183,21 @@ body.simple-one-active.is-mobile.simple-mobile-native-header .view-header :is(.v
 .simple-share-copy-option input[type="checkbox"] { flex-shrink: 0; margin: 0; }
 .simple-one-sync-setup-page .simple-share-guide-body > :first-child,
 .simple-one-sync-mobile-guide-page .simple-one-sync-mobile-guide__card > :first-child { margin-top: 0; }
-.simple-one-sync-setup-page .simple-share-guide-body p,
+.simple-one-sync-setup-page .simple-share-guide-body p { font-size: var(--font-ui-medium); line-height: 1.6; margin: 12px 0; }
+.simple-share-guide-action .setting-item-info { display: none; }
+.simple-share-guide-action .setting-item-control { width: 100%; justify-content: flex-end; }
+.simple-share-guide-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.simple-share-guide-footer .setting-item { border: 0; padding: 0; }
+.simple-share-library-selector .setting-item-control { flex-wrap: wrap; justify-content: flex-end; }
+.simple-share-library-selector select { max-width: 100%; }
+.simple-share-library-selector .simple-share-library-guide-controls { flex-wrap: nowrap; gap: 8px; }
+.simple-share-library-guide-controls select { min-width: 0; flex-shrink: 1; }
+.simple-share-library-guide-controls button { flex-shrink: 0; white-space: nowrap; }
+.simple-share-guide-body .simple-share-edgeone-guide { padding: 16px; margin-top: 16px; }
+.simple-one-sync-setup-page .simple-share-setup-nav { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 640px) {
+  .simple-one-sync-setup-page .simple-share-setup-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 .simple-share-settings-card.is-disabled { opacity: 0.42; pointer-events: none; }
 .simple-share-settings-card > .simple-share-settings-dependent,
 .simple-share-settings-card .simple-share-settings-dependent > .setting-item + .setting-item { border-top: 1px dashed var(--background-modifier-border); }

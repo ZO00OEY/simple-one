@@ -1,3 +1,4 @@
+import { libraryManifest, validateLibraries, type ShareLibraries } from "./libraries";
 export const SHARE_FOLDER = ".gitshare";
 export const ID_PATTERN = /^[a-z0-9]{12}$/;
 export interface ShareCopyContent { title: boolean; github: boolean; pageOne: boolean }
@@ -24,10 +25,11 @@ export interface ShareEntry {
 }
 export interface ShareManifest {
   version: 1;
+  libraries?: ShareLibraries;
   enabled: boolean;
   defaultPath?: "root" | "source";
   copyContent?: ShareCopyContent;
-  site: { owner: string; repo: string; branch: string; initialized?: boolean; guideProgress?: number };
+  site: { owner: string; repo: string; branch: string; initialized?: boolean; guideProgress?: number; hosting?: "github" | "edgeone" };
   notes: Record<string, ShareEntry>;
   directories?: Record<string, string>;
 }
@@ -54,7 +56,7 @@ export function parseManifest(source: string): ShareManifest {
   if (value.copyContent !== undefined && (!value.copyContent || ["title", "github", "pageOne"].some(key => typeof value.copyContent![key as keyof ShareCopyContent] !== "boolean"))) throw new Error("复制内容设置不正确。");
   if (typeof value.site.owner !== "string" || typeof value.site.repo !== "string" || !/^[A-Za-z0-9._/-]+$/.test(value.site.branch) || value.site.branch.includes("..")) throw new Error("分享仓库配置不正确。");
   if (value.site.initialized !== undefined && typeof value.site.initialized !== "boolean") throw new Error("分享网站初始化记录不正确。");
-  if (value.site.guideProgress !== undefined && (!Number.isInteger(value.site.guideProgress) || value.site.guideProgress < 1 || value.site.guideProgress > 5)) throw new Error("分享引导进度不正确。");
+  if (value.site.guideProgress !== undefined && (!Number.isInteger(value.site.guideProgress) || value.site.guideProgress < 1 || value.site.guideProgress > 7)) throw new Error("分享引导进度不正确。");
   if (value.directories !== undefined) {
     if (!value.directories || typeof value.directories !== "object" || Array.isArray(value.directories)) throw new Error("分享目录映射不正确。");
     for (const [code, path] of Object.entries(value.directories)) {
@@ -62,6 +64,8 @@ export function parseManifest(source: string): ShareManifest {
       value.directories[code] = normalizeShareDirectory(path);
     }
   }
+  if (value.libraries) validateLibraries(value.libraries);
+  if (value.site.hosting !== undefined && !["github", "edgeone"].includes(value.site.hosting)) throw new Error("分享网站类型不正确。");
   for (const [id, entry] of Object.entries(value.notes)) {
     if (!ID_PATTERN.test(id) || !entry || typeof entry.enabled !== "boolean" || typeof entry.sourcePath !== "string" || typeof entry.category !== "string" || !Number.isSafeInteger(entry.revision) || entry.revision < 1) throw new Error("分享清单记录不正确。");
     // Migrate old publishing baselines; the manifest now describes only desired content.
@@ -77,7 +81,8 @@ export function parseManifest(source: string): ShareManifest {
   return value;
 }
 export function serializeManifest(value: ShareManifest): string {
-  return JSON.stringify({ ...value, notes: Object.fromEntries(Object.entries(value.notes).sort(([a], [b]) => a.localeCompare(b))) }, null, 2) + "\n";
+  const libraries = value.libraries ? { ...value.libraries, entries: { ...value.libraries.entries, [value.libraries.active]: libraryManifest(value) } } : undefined;
+  return JSON.stringify({ ...value, ...(libraries ? { libraries } : {}), notes: Object.fromEntries(Object.entries(value.notes).sort(([a], [b]) => a.localeCompare(b))) }, null, 2) + "\n";
 }
 export function newShareId(existing: ReadonlySet<string>): string {
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";

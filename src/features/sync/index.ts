@@ -36,6 +36,7 @@ import { describeGitError, isMissingRemoteRefError, isTransientGitNetworkError, 
 import { LiveReview, ZoeySyncConflictPreviewModal } from "./conflictPreview";
 import { SetupDifferencesModal } from "./setupDifferences";
 import { GitSetup, OverlapChoice, SetupOverlapContent, SetupPreview, VerifiedRepo, setupGitIgnore, missingSetupIgnoreRules, pathBatches, explainSetupError, parseGithubRepoUrl, applySetupIgnoreBase } from "./onboarding";
+import { repairIgnoredPluginData } from "./dataTracking";
 import { findNestedRepos, nestedGitIgnoreRules, nestedRepoFiles, rebuildNestedRepoTracking } from "./nestedRepos";
 
 import { DEFAULT_MOBILE_OPTIONS, MobileOptions, newPathRecords } from "./linkDiff";
@@ -2202,6 +2203,7 @@ export default class SyncFeature extends Component {
     await this.ensureDesktopGit();
     await this.ensureNormalGitState();
     assertNoPrivateSyncFiles((await this.gitRaw(["ls-files", "--cached", "--others", "--exclude-standard", "-z"])).split("\0").filter(Boolean), this.app.vault.configDir);
+    await this.repairPluginDataTracking();
     await this.prepareNestedRepositories();
     const changes = parseGitStatus(await this.gitRaw(["status", "--porcelain=v1", "-z"]));
     if (changes.length === 0) {
@@ -2222,6 +2224,19 @@ export default class SyncFeature extends Component {
     this.setStatus(committed ? `已保存本机修改 · ${changes.length} 个文件` : "本机没有待同步修改");
     await this.refreshSyncView();
     return { committed };
+  }
+
+  private async repairPluginDataTracking(): Promise<string | null> {
+    return repairIgnoredPluginData(this.vaultBasePath(), this.app.vault.configDir,
+      args => this.gitRaw(args), async () => {
+        const url = (await this.gitRaw(["remote", "get-url", "origin"])).trim();
+        let repo: { owner: string; name: string };
+        try { repo = parseGithubRepoUrl(url); } catch { return false; }
+        try {
+          const value = await this.exec("gh", ["repo", "view", `${repo.owner}/${repo.name}`, "--json", "isPrivate", "--jq", ".isPrivate"]);
+          return value.trim() === "true";
+        } catch { return false; }
+      });
   }
 
   private async prepareNestedRepositories(): Promise<void> {
@@ -2249,6 +2264,11 @@ export default class SyncFeature extends Component {
     this.setSyncActivity("正在检查云端更新…", "checking");
     await this.ensureDesktopGit();
     await this.ensureNormalGitState();
+    const repairedData = await this.hasDesktopHead() ? await this.repairPluginDataTracking() : null;
+    if (repairedData) {
+      await this.git(["commit", "--only", "-m", "Preserve Simple One settings in private vault", "--", repairedData]);
+      this.desktopGitTrace.push("已补齐私人主库的 Simple One 配置追踪，并保存本机版本");
+    }
     this.setSyncActivity("正在下载云端更新…", "fetch");
     try {
       await this.traceDesktopGitStep("Git fetch（连接并下载远端分支）", () =>

@@ -1,6 +1,6 @@
 {
   "name": "simple-one",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "description": "A collection of practical Obsidian tools",
   "main": "main.js",
   "scripts": {

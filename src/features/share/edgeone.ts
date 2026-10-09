@@ -109,8 +109,9 @@ export class EdgeOneConnection {
   private stopped = false;
   constructor(private host: SimplePlugin, readonly site: () => Site,
     private latestCommit: () => Promise<string>, readonly refresh: () => void,
-    private transport: EdgeOneTransport = edgeOneRequest) {}
-  private get path(): string { return `${this.host.app.vault.configDir}/plugins/${this.host.manifest.id}/share-local.json.edgeone`; }
+    private transport: EdgeOneTransport = edgeOneRequest,
+    private libraryId: () => string = () => "legacy") {}
+  private get path(): string { return `${this.host.app.vault.configDir}/plugins/${this.host.manifest.id}/share-local.json.edgeone${this.libraryId() === "legacy" ? "" : "." + this.libraryId()}`; }
   get linked(): boolean { return !!this.state.projectId && this.state.repo === repoKey(this.site()) && this.state.branch === this.site().branch; }
   get completed(): boolean { return this.linked && this.state.completed === true; }
   get website(): string { return this.linked ? this.state.website ?? "" : ""; }
@@ -120,6 +121,8 @@ export class EdgeOneConnection {
   }
   get hasToken(): boolean { return !!this.secretId && !!this.secrets()?.getSecret(this.secretId); }
   async load(): Promise<void> {
+    this.state = { version: 1, step: 1 }; this.error = ""; this.message = "";
+    this.candidates = []; this.selectedProject = ""; this.draftName = "";
     const adapter = this.host.app.vault.adapter;
     const desktopAdapter = adapter as typeof adapter & { getBasePath?: () => string };
     const identity = desktopAdapter.getBasePath?.() ?? this.host.app.vault.getName();
@@ -202,7 +205,7 @@ export class EdgeOneConnection {
   }
   requireShareReady(): Site {
     const site = this.site();
-    if (!site.owner || !site.repo || !site.initialized) throw new Error("请先完成笔记分享引导，创建并初始化分享专用仓库。");
+    if (!site.owner || !site.repo) throw new Error("请先选择并验证分享仓库。");
     return { ...site };
   }
   async findProjects(): Promise<void> {
@@ -304,6 +307,7 @@ export class EdgeOneConnection {
     return result;
   }
   async initializeWebsite(): Promise<void> {
+    this.stopped = false;
     if (!this.linked) throw new Error("请先关联腾讯项目。");
     const commit = await this.latestCommit();
     await this.project(this.state.projectId!);
