@@ -12,6 +12,7 @@ export interface NodeFiles {
   lstat(path: string): Promise<NodeStat>;
   realpath(path: string): Promise<string>;
   access(path: string): Promise<void>;
+  rename(from: string, to: string): Promise<void>;
 }
 export interface NodeFs { promises: NodeFiles; createReadStream(path: string): AsyncIterable<unknown> }
 export interface NodePath { sep: string; dirname(path: string): string; join(...parts: string[]): string; resolve(...parts: string[]): string; relative(from: string, to: string): string; isAbsolute(path: string): boolean }

@@ -36,7 +36,7 @@ import { describeGitError, isMissingRemoteRefError, isTransientGitNetworkError, 
 import { LiveReview, ZoeySyncConflictPreviewModal } from "./conflictPreview";
 import { SetupDifferencesModal } from "./setupDifferences";
 import { GitSetup, OverlapChoice, SetupOverlapContent, SetupPreview, VerifiedRepo, setupGitIgnore, missingSetupIgnoreRules, pathBatches, explainSetupError, parseGithubRepoUrl, applySetupIgnoreBase } from "./onboarding";
-import { repairIgnoredPluginData } from "./dataTracking";
+import { preserveUntrackedFiles } from "./untrackedFiles";
 import { findNestedRepos, nestedGitIgnoreRules, nestedRepoFiles, rebuildNestedRepoTracking } from "./nestedRepos";
 
 import { DEFAULT_MOBILE_OPTIONS, MobileOptions, newPathRecords } from "./linkDiff";
@@ -2203,7 +2203,6 @@ export default class SyncFeature extends Component {
     await this.ensureDesktopGit();
     await this.ensureNormalGitState();
     assertNoPrivateSyncFiles((await this.gitRaw(["ls-files", "--cached", "--others", "--exclude-standard", "-z"])).split("\0").filter(Boolean), this.app.vault.configDir);
-    await this.repairPluginDataTracking();
     await this.prepareNestedRepositories();
     const changes = parseGitStatus(await this.gitRaw(["status", "--porcelain=v1", "-z"]));
     if (changes.length === 0) {
@@ -2224,19 +2223,6 @@ export default class SyncFeature extends Component {
     this.setStatus(committed ? `已保存本机修改 · ${changes.length} 个文件` : "本机没有待同步修改");
     await this.refreshSyncView();
     return { committed };
-  }
-
-  private async repairPluginDataTracking(): Promise<string | null> {
-    return repairIgnoredPluginData(this.vaultBasePath(), this.app.vault.configDir,
-      args => this.gitRaw(args), async () => {
-        const url = (await this.gitRaw(["remote", "get-url", "origin"])).trim();
-        let repo: { owner: string; name: string };
-        try { repo = parseGithubRepoUrl(url); } catch { return false; }
-        try {
-          const value = await this.exec("gh", ["repo", "view", `${repo.owner}/${repo.name}`, "--json", "isPrivate", "--jq", ".isPrivate"]);
-          return value.trim() === "true";
-        } catch { return false; }
-      });
   }
 
   private async prepareNestedRepositories(): Promise<void> {
@@ -2264,11 +2250,6 @@ export default class SyncFeature extends Component {
     this.setSyncActivity("正在检查云端更新…", "checking");
     await this.ensureDesktopGit();
     await this.ensureNormalGitState();
-    const repairedData = await this.hasDesktopHead() ? await this.repairPluginDataTracking() : null;
-    if (repairedData) {
-      await this.git(["commit", "--only", "-m", "Preserve Simple One settings in private vault", "--", repairedData]);
-      this.desktopGitTrace.push("已补齐私人主库的 Simple One 配置追踪，并保存本机版本");
-    }
     this.setSyncActivity("正在下载云端更新…", "fetch");
     try {
       await this.traceDesktopGitStep("Git fetch（连接并下载远端分支）", () =>
@@ -2298,7 +2279,7 @@ export default class SyncFeature extends Component {
       this.desktopGitTrace.push("合并检查：远端有新提交");
     }
     const mergeBase = (await this.gitRaw(["merge-base", "HEAD", "FETCH_HEAD"])).trim();
-    const localChanges = parseGitStatus(await this.gitRaw(["status", "--porcelain=v1", "-z"]));
+    const localChanges = parseGitStatus(await this.gitRaw(["status", "--porcelain=v1", "--untracked-files=no", "-z"]));
     const remoteChanges = parseGitNameStatus(
       await this.gitRaw(["diff", "--name-status", "-z", "--find-renames", mergeBase, "FETCH_HEAD"])
     );
@@ -2310,12 +2291,17 @@ export default class SyncFeature extends Component {
       throw new SyncDeferredError(message);
     }
     this.deferredMergePaths = [];
+    const backup = await preserveUntrackedFiles(this.vaultBasePath(), args => this.gitRaw(args), mergeBase);
+    if (backup) {
+      this.desktopGitTrace.push(`已移开 ${backup.files.length} 个阻挡合并的本机未追踪文件，继续 Git merge。本机副本：${backup.directory}`);
+      new Notice(`同步：已移开 ${backup.files.length} 个阻挡合并的本机未追踪文件，继续合并云端版本。本机副本：${backup.directory}`, 15000);
+    }
     this.setSyncActivity("正在合并云端更新…", "merge");
     try {
       await this.traceDesktopGitStep("Git merge（合并远端提交）", () => this.git(["merge", "--no-edit", "FETCH_HEAD"]));
     } catch (error) {
       const conflicts = await this.getUnmergedPaths();
-      if (conflicts.length === 0) throw error;
+      if (conflicts.length === 0) { await backup?.restore(); throw error; }
       if (pushAfterResolve) {
         this.settings.pendingMergePushAfterResolve = true;
         await this.saveSettings();
