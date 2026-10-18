@@ -24,6 +24,8 @@ Simple One 将常用工具集中在一个插件里，按需开启，适应自己
 
 安装、配置与日常操作请查看 [中文使用说明](USAGE.zh-CN.md) 或 [English user guide](USAGE.md)。
 
+从源码开发时，运行 `npm install` 会在独立 Git 仓库中生成仅供本机使用的 `.gitignore`，保护依赖、凭据和个人配置；该文件不会提交到插件仓库。已有本机规则不会被覆盖。
+
 ## 反馈与许可
 
 遇到问题或有新的想法，欢迎通过 [GitHub Issues](https://github.com/ZO00OEY/simple-one/issues) 反馈。

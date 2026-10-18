@@ -35,7 +35,7 @@ import { applyConflictResolutions, ConflictBlock, parseConflictBlocks } from "./
 import { describeGitError, isMissingRemoteRefError, isTransientGitNetworkError, isUncertainGitAuthError } from "./gitError";
 import { LiveReview, ZoeySyncConflictPreviewModal } from "./conflictPreview";
 import { SetupDifferencesModal } from "./setupDifferences";
-import { GitSetup, OverlapChoice, SetupOverlapContent, SetupPreview, VerifiedRepo, setupGitIgnore, missingSetupIgnoreRules, pathBatches, explainSetupError, parseGithubRepoUrl, applySetupIgnoreBase } from "./onboarding";
+import { GitSetup, OverlapChoice, SetupOverlapContent, SetupPreview, VerifiedRepo, setupGitIgnore, missingSetupIgnoreRules, pathBatches, explainSetupError, parseGithubRepoUrl } from "./onboarding";
 import { preserveUntrackedFiles } from "./untrackedFiles";
 import { hasCaseInsensitivePathCollisions, isInvalidGitPathError, repairRemoteFilenames } from "./remoteFilenameRepair";
 import { findNestedRepos, nestedGitIgnoreRules, nestedRepoFiles, rebuildNestedRepoTracking } from "./nestedRepos";
@@ -1834,25 +1834,13 @@ export default class SyncFeature extends Component {
   getSetupChoices(): Record<string, OverlapChoice> { return { ...this.setupChoices }; }
   setSetupChoice(path: string, choice: OverlapChoice): void {
     this.setupChoices[path] = choice;
-    if (path === ".gitignore" && this.setupPreview) {
-      this.setupPreview.customIgnore = undefined;
-      applySetupIgnoreBase(this.setupPreview, choice, this.app.vault.configDir);
-      this.setupTrackingChoice = undefined;
-    }
-  }
-  setSetupIgnoreMerge(text: string): void {
-    if (!this.setupPreview) throw new Error("请先检查两端文件。");
-    this.setupPreview.customIgnore = text;
-    this.setupChoices[".gitignore"] = "local";
-    applySetupIgnoreBase(this.setupPreview, "local", this.app.vault.configDir);
-    this.setupTrackingChoice = undefined;
   }
   getSetupTrackingChoice(): "keep" | "rebuild" | undefined { return this.setupTrackingChoice; }
   setSetupTrackingChoice(choice: "keep" | "rebuild" | undefined): void { this.setupTrackingChoice = choice; }
   getVaultBasePath(): string { return this.vaultBasePath(); }
   async readSetupOverlap(path: string): Promise<SetupOverlapContent> {
     if (!this.settings.setupVerified || !this.setupPreview) throw new Error("请先检查本地与远端文件");
-    return this.setup().readOverlap(this.settings.setupVerified, this.setupPreview, path);
+    return this.setup().readOverlap(this.setupPreview, path);
   }
 
   private setup(): GitSetup {
@@ -3380,7 +3368,6 @@ export class SyncSettingsTab extends PluginSettingTab {
   private setupBrowserRequest = 0;
   private setupTokenInput = "";
   private setupAuthVerified = false;
-  private setupOverlapContent?: SetupOverlapContent;
   private setupBusy = false;
   private setupRebuildConfirmed = false;
   private setupReviewPreview?: SetupPreview;
@@ -4486,7 +4473,6 @@ export class SyncSettingsTab extends PluginSettingTab {
       const check = action.createEl("button", { text: this.setupBusy ? "正在检查…" : actionLabel, cls: "mod-cta", attr: { type: "button" } });
       check.disabled = this.setupBusy;
       check.addEventListener("click", () => void this.runSetup(async () => {
-        this.setupOverlapContent = undefined;
         this.setupRebuildConfirmed = false;
         const started = Date.now();
         let stage = "正在开始检查…";

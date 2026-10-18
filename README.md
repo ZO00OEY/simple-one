@@ -24,6 +24,8 @@ Find **Simple One** in Obsidian's community plugins, or download it from [Releas
 
 See the [English user guide](USAGE.md) or [中文使用说明](USAGE.zh-CN.md) for setup and everyday use.
 
+For source development, `npm install` creates a local `.gitignore` in the standalone Git repository to protect dependencies, credentials, and personal settings. This file is not committed, and existing local rules are preserved.
+
 ## Access and privacy
 
 Sync requires GitHub authorization; sharing publishes selected notes publicly. Web capture contacts the requested website. Sync and attachment tools scan vault files, copy actions use the clipboard, and desktop Git uses local files and commands. No telemetry. See [review notes](docs/automated-review-notes.md) for technical details.

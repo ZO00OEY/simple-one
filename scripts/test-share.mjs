@@ -152,7 +152,6 @@ try {
     const host = { manifest: { id: 'fixture' }, app: { secretStorage: { getSecret: () => 'fixture-token' } }, sync: { exec: async (_program, args) => { probes++; return args[0] === 'api' ? 'fixture-user' : 'gh version'; } } };
     const desktop = new combined.ShareFeature(host);
     assert(await desktop.repository() instanceof combined.FallbackShareRepository);
-    assert.equal(desktop.backend, 'cli');
     assert.equal(probes, 2, 'desktop probes CLI authentication and GitHub API access');
     await desktop.repository(); assert.equal(probes, 4, 'CLI availability is verified again for each repository operation');
     combined.Platform.isMobile = true;
@@ -163,7 +162,6 @@ try {
     } finally { combined.Platform.isMobile = false; }
     const missing = new combined.ShareFeature({ ...host, sync: { exec: async () => { throw new Error('CLI not installed'); } } });
     assert(await missing.repository() instanceof combined.ApiShareRepository);
-    assert.equal(missing.backend, 'api');
   }
   // Exercise authorization selection through DOM events, without real credentials.
   const dom = new JSDOM("<body><main></main></body>");
@@ -193,7 +191,6 @@ try {
     const interval = globalThis.window.setInterval;
     globalThis.window.setInterval = () => 1;
     try { await feature.initialize(); } finally { globalThis.window.setInterval = interval; }
-    assert.equal(feature.template, '', 'startup does not load or parse HTML');
     assert.equal(feature.templateFile, 'custom-test.html', 'saved selection remains visible');
     assert.equal(feature.templateFiles['custom-test.html'], 'custom-test.html');
     assert.deepEqual(calls, [selection], 'startup reads only lightweight template metadata');
@@ -287,7 +284,7 @@ try {
     ui.host.app.metadataCache = { getFileCache: () => undefined };
     const scanTimer = globalThis.window.setTimeout;
     globalThis.window.setTimeout = () => { throw new Error("Repository scanning must not wait for a throttled timer."); };
-    try { assert.equal((await ui.scanIndex()).size, 0); }
+    try { assert.equal(ui.index(true).size, 0); }
     finally { globalThis.window.setTimeout = scanTimer; ui.manifest.notes = {}; }
     const rootEl = dom.window.document.querySelector("main");
     ui.change = async edit => { edit(ui.manifest); };
@@ -894,6 +891,12 @@ try {
     assert(!rootEl.querySelectorAll('.simple-share-library-detail__section')[1].querySelector('.simple-share-library-detail__notice'), 'overseas-only area has no mainland preview warning');
     assert.equal(detailCalls.length, callsBeforeCachedOpen, 'a cached opening does not request GitHub');
     assert.equal(domainCalls, domainCallsBeforeCachedOpen, 'a cached opening does not request EdgeOne again');
+    ui.manifest.edgeOneDomains = { projectId: 'makers-test-project', domains: [{ domain: 'updated.example.com', status: 'online' }] };
+    assert.equal(ui.backFromShareLibraryManagement(), true);
+    [...rootEl.querySelectorAll('button')].find(button => button.textContent === '管理').click();
+    for (let attempt = 0; rootEl.textContent.includes('正在读取') && attempt < 100; attempt++) await new Promise(resolve => setTimeout(resolve, 0));
+    assert(rootEl.querySelector('a[href="https://updated.example.com"]'), 'the current manifest wins over an older local details cache');
+    assert.equal(domainCalls, domainCallsBeforeCachedOpen, 'showing updated manifest domains does not require an API request');
     edgeArea = 'global';
     domainResult = [{ domain: 'notes.example.com', status: 'online' }, { domain: 'backup.example.com', status: 'online' }, { domain: 'preview.example.com', status: 'pending' }];
     [...rootEl.querySelectorAll('button')].find(button => button.textContent === '重新检查').click();
@@ -1007,7 +1010,7 @@ try {
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(ui.checkingDeployment, true);
     finishDeployment(JSON.stringify({ commit: "fixture-commit", status: "built" })); await check;
-    assert.equal(ui.githubDeploymentStatus, "网站已更新");
+    assert.equal(ui.status, "网站已更新");
     assert.deepEqual(deploymentCalls, [["auth", "status", "--active", "--hostname", "github.com"], ["api", "user", "--jq", ".login"], ["api", "repos/fixture/notes-share/pages/builds/latest"]], "deployment verifies local CLI access, then only reads build status");
   } finally { delete globalThis.shareSetting; dom.window.close(); }
   console.log("Share authorization UI: method selection, token handoff, device code cancellation and shared title preservation passed.");

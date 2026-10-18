@@ -1702,16 +1702,6 @@ export class SimpleSettingTab extends PluginSettingTab {
     this.renderSettingCard(container, render);
   }
 
-  private renderIconGroup(container: HTMLElement, icon: string, title: string, render: (card: HTMLElement) => void): void {
-    const label = createFragment();
-    const iconEl = createSpan();
-    iconEl.className = "simple-section-title-icon";
-    setIcon(iconEl, icon);
-    label.append(iconEl, document.createTextNode(title));
-    this.renderSectionHeading(container, label, "simple-icon-section-title");
-    this.renderSettingCard(container, render);
-  }
-
   private renderSectionHeading(container: HTMLElement, title: string | DocumentFragment, extraClass?: string): Setting {
     const heading = new Setting(container).setName(title).setHeading().setClass("simple-section-title");
     if (extraClass) heading.setClass(extraClass);

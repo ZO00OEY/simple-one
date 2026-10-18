@@ -222,19 +222,15 @@ export default class ShareFeature extends Component {
   private takenRepository?: { owner: string; name: string };
   private repositoryFeedback = "";
   private checkingDeployment = false;
-  private githubDeploymentStatus = "";
-  private githubDeploymentError = "";
   private edgeOneGuideOpen = false;
   readonly edgeone: EdgeOneConnection;
   display: ShareDisplaySettings = { showPaths: false, layout: "list", descending: false };
   private displayStored = false;
-  private template = "";
   private templateFile = DEFAULT_TEMPLATE_FILE;
   private templateFiles: Record<string, string> = { [DEFAULT_TEMPLATE_FILE]: "默认模板" };
   private templateMessage = "";
   private templateBusy = false;
   private token = "";
-  private backend: "cli" | "api" = Platform.isMobile ? "api" : "cli";
   private async hasCli(): Promise<boolean> {
     if (Platform.isMobile) return false;
     return this.host.sync.exec("gh", ["--version"]).then(() => true, () => false);
@@ -244,10 +240,8 @@ export default class ShareFeature extends Component {
     try {
       await this.host.sync.exec("gh", ["auth", "status", "--active", "--hostname", "github.com"]);
       if (!(await this.host.sync.exec("gh", ["api", "user", "--jq", ".login"])).trim()) throw new Error("GitHub CLI 未返回账号信息。");
-      this.backend = "cli";
       return true;
     } catch {
-      this.backend = "api";
       return false;
     }
   }
@@ -264,7 +258,6 @@ export default class ShareFeature extends Component {
     if (await this.useCli()) {
       try {
         const result = await this.host.sync.exec("gh", ["api", path, ...(method === "GET" ? [] : ["--method", method]), ...(body === undefined ? [] : ["--input", "-"])], false, true, 120000, undefined, body === undefined ? undefined : JSON.stringify(body));
-        this.backend = "cli";
         return result;
       } catch (error) {
         if (!canFallbackToApi(error, method)) throw error;
@@ -272,13 +265,11 @@ export default class ShareFeature extends Component {
         if (!token) throw error;
       }
     }
-    this.backend = "api";
     return JSON.stringify(await githubJson(token || await this.fallbackToken(), `/${path}`, method, body));
   }
   private async repository(site = this.manifest.site): Promise<ShareRepository> {
     const token = await this.fallbackToken();
-    if (await this.useCli()) return new FallbackShareRepository(this.host, site, token, () => { this.backend = "api"; });
-    this.backend = "api";
+    if (await this.useCli()) return new FallbackShareRepository(this.host, site, token);
     return new ApiShareRepository(this.host, site, token);
   }
   private published: PublishState = { version: 1, notes: {}, files: [] };
@@ -428,7 +419,7 @@ export default class ShareFeature extends Component {
     await this.change(manifest => selectLibrary(manifest, id), false);
     this.guideNewLibrarySelected = false;
     await this.edgeone.load(); this.published = { version: 1, notes: {}, files: [] };
-    this.error = ""; this.status = ""; this.githubDeploymentError = ""; this.githubDeploymentStatus = "";
+    this.error = ""; this.status = "";
     this.draftRepo = ""; this.repoMode = null; this.hostingMode = null; this.draftName = ""; this.repositoryFeedback = "";
     this.edgeOneGuideAttemptFailed = false; this.edgeOneDeploymentFailed = false;
     const progress = this.manifest.site.guideProgress ?? (this.manifest.site.initialized ? 7 : this.manifest.site.repo ? 3 : 1);
@@ -735,8 +726,7 @@ export default class ShareFeature extends Component {
           visibility = value.private; pages = nextPages; pagesError = nextPagesError; checkedAt = Date.now();
           try {
             await this.host.app.vault.adapter.write(cachePath, JSON.stringify({ version: 1, repo: name.toLowerCase(), branch: site.branch,
-              visibility, pages, pagesError, checkedAt, edgeoneProjectId: edgeone?.projectId,
-              edgeoneDomains: edgeoneDomainsChecked ? edgeoneDomains : undefined }));
+              visibility, pages, pagesError, checkedAt }));
           } catch { actionError = "已完成检查，但无法保存本机检查记录。"; }
         } catch (error) { githubError = `无法读取 GitHub 仓库状态：${error instanceof Error ? error.message : String(error)}`; }
       }
@@ -751,7 +741,6 @@ export default class ShareFeature extends Component {
           const value = JSON.parse(await adapter.read(cachePath)) as {
             version?: number; repo?: string; branch?: string; visibility?: unknown;
             pages?: { url?: unknown; status?: unknown }; pagesError?: unknown; checkedAt?: unknown;
-            edgeoneProjectId?: unknown; edgeoneDomains?: unknown;
           };
           if (value.version === 1 && value.repo === name.toLowerCase() && value.branch === site.branch && typeof value.visibility === "boolean" && typeof value.checkedAt === "number" && Number.isFinite(value.checkedAt)) {
             visibility = value.visibility;
@@ -760,16 +749,6 @@ export default class ShareFeature extends Component {
             pagesError = typeof value.pagesError === "string" ? value.pagesError : "";
             checkedAt = value.checkedAt;
             cached = true;
-            if (edgeone?.projectId && value.edgeoneProjectId === edgeone.projectId && Array.isArray(value.edgeoneDomains) &&
-              value.edgeoneDomains.every((item: unknown) => {
-                if (!item || typeof item !== "object") return false;
-                const domain = item as Record<string, unknown>;
-                return typeof domain.domain === "string" && typeof domain.status === "string";
-              })) {
-              edgeoneDomains = value.edgeoneDomains as EdgeOneCustomDomain[];
-              edgeoneDomainsChecked = true;
-              domainsProjectId = edgeone.projectId;
-            }
           }
         }
       } catch { /* An unreadable cache is replaced by a fresh check. */ }
@@ -958,18 +937,9 @@ export default class ShareFeature extends Component {
       refresh: () => this.inspectGuideRepositoryVisibility()
     };
   }
-  private async scanIndex(): Promise<Map<string, TFile[]>> {
+  private index(skipWhenNoNotes = false): Map<string, TFile[]> {
     const index = new Map<string, TFile[]>();
-    if (!Object.keys(this.manifest.notes).length) return index;
-    for (const file of this.host.app.vault.getMarkdownFiles()) {
-      if (file.path.startsWith(SHARE_FOLDER + "/") || file.path.startsWith(this.host.app.vault.configDir + "/")) continue;
-      const id: unknown = this.host.app.metadataCache.getFileCache(file)?.frontmatter?.share_id;
-      if (typeof id === "string" && ID_PATTERN.test(id)) index.set(id, [...(index.get(id) || []), file]);
-    }
-    return index;
-  }
-  private index(): Map<string, TFile[]> {
-    const index = new Map<string, TFile[]>();
+    if (skipWhenNoNotes && !Object.keys(this.manifest.notes).length) return index;
     for (const file of this.host.app.vault.getMarkdownFiles()) {
       if (file.path.startsWith(SHARE_FOLDER + "/") || file.path.startsWith(this.host.app.vault.configDir + "/")) continue;
       const id: unknown = this.host.app.metadataCache.getFileCache(file)?.frontmatter?.share_id;
@@ -1171,7 +1141,7 @@ export default class ShareFeature extends Component {
     const local = await this.local();
     const key = `${this.manifest.site.owner}/${this.manifest.site.repo}`;
     this.published = local.site === key && local.published ? local.published : { version: 1, notes: {}, files: [] };
-    const index = await this.scanIndex(), rows: Row[] = [], moved: Record<string, string> = {};
+    const index = this.index(true), rows: Row[] = [], moved: Record<string, string> = {};
     for (const [id, entry] of Object.entries(this.manifest.notes)) {
       if (request !== this.scanRequest || this.busy) return;
       const files = index.get(id) || [], old = this.published.notes[id];
@@ -1237,7 +1207,7 @@ export default class ShareFeature extends Component {
       const files = websiteFiles(template, readerTemplate, await adapter.exists(licensePath) ? await adapter.read(licensePath) : bundledReaderFiles().licenses);
       const appearance = shareAppearance(this.host);
       files.set("reader/appearance.css", appearance); files.set("index.html", templateAppearance(template, appearance));
-      const index = await this.scanIndex();
+      const index = this.index(true);
       // Identity writes can precede Obsidian's metadata-cache refresh.
       for (const [id, entry] of Object.entries(this.manifest.notes)) {
         if (!entry.enabled || index.get(id)?.length) continue;
@@ -1284,12 +1254,10 @@ export default class ShareFeature extends Component {
           this.status = this.edgeone.message;
           if (_initialize && !this.edgeone.completed) throw new Error(this.edgeone.error || "EdgeOne Makers 部署尚未完成，请稍后重试。");
         } else { await this.validateHosting(); await repository.configurePages(); this.status = await repository.deployment(commit); }
-        this.githubDeploymentStatus = this.status; this.githubDeploymentError = "";
         this.manifest.site.initialized = true; this.manifest.site.guideProgress = guideProgressOnSuccess;
         await adapter.write(this.path("share-manifest.json"), serializeManifest(this.manifest));
       } catch (error) {
         this.status = "仓库内容已确认；网站部署需要检查"; this.error = error instanceof Error ? error.message : String(error);
-        this.githubDeploymentStatus = this.status; this.githubDeploymentError = this.error;
       }
       new Notice("笔记分享：" + this.status, 8000);
     } finally { this.busy = false; await this.scan().catch(error => this.fail(error)); this.renderViews(); }
@@ -1297,16 +1265,15 @@ export default class ShareFeature extends Component {
   async checkDeployment(): Promise<void> {
     if (this.checkingDeployment || this.isPublishing) throw new Error("已有分享任务正在运行，请稍后检查。");
     this.checkingDeployment = true; this.error = ""; this.status = "正在检查网站部署…";
-    this.githubDeploymentError = ""; this.githubDeploymentStatus = this.status; this.renderViews();
+    this.renderViews();
     try {
       const local = await this.local(); if (!local.commit) throw new Error("尚未完成推送，请先初始化网站或点击「推送新分享」。");
       if (local.site !== `${this.manifest.site.owner}/${this.manifest.site.repo}`) throw new Error("最近一次推送属于其他仓库，请重新检查分享仓库配置。");
       const repository = await this.repository();
       this.status = await repository.deployment(local.commit);
-      this.githubDeploymentStatus = this.status;
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
-      this.githubDeploymentError = this.error; throw error;
+      throw error;
     } finally { this.checkingDeployment = false; this.renderViews(); }
   }
   async open(closeSettings = false, reveal = true): Promise<void> {
@@ -1412,7 +1379,7 @@ export default class ShareFeature extends Component {
     const filename = await this.readTemplateSelection();
     const source = filename === DEFAULT_TEMPLATE_FILE ? await this.readDefaultTemplate() : await this.host.app.vault.adapter.read(this.path(filename));
     if (filename !== DEFAULT_TEMPLATE_FILE) validateShareTemplate(source);
-    this.template = source; return source;
+    return source;
   }
   private async refreshTemplateFiles(): Promise<void> {
     const entries = await this.host.app.vault.adapter.list(this.path("").replace(/\/$/, ""));
@@ -1430,7 +1397,7 @@ export default class ShareFeature extends Component {
       const source = filename === DEFAULT_TEMPLATE_FILE ? await this.readDefaultTemplate() : await this.host.app.vault.adapter.read(this.path(filename));
       validateShareTemplate(source);
       await this.host.app.vault.adapter.write(this.path(TEMPLATE_SELECTION_FILE), JSON.stringify({ file: filename }, null, 2));
-      this.templateFile = filename; this.template = source;
+      this.templateFile = filename;
     } finally { this.templateBusy = false; this.renderViews(); }
   }
   private async saveTemplate(source: string, message: string, name = "template.html"): Promise<void> {
@@ -1445,16 +1412,16 @@ export default class ShareFeature extends Component {
       await adapter.write(this.path(filename), source);
       await adapter.write(this.path(TEMPLATE_SELECTION_FILE), JSON.stringify({ file: filename }, null, 2));
       await this.refreshTemplateFiles();
-      this.templateFile = filename; this.template = source; this.templateMessage = message;
+      this.templateFile = filename; this.templateMessage = message;
     } finally { this.templateBusy = false; this.renderViews(); }
   }
   private async restoreDefaultTemplate(): Promise<void> {
     if (this.isPublishing || this.templateBusy || this.host.sync.isSyncing()) throw new Error("请等待分享或主库同步任务完成后再更换模板。");
     this.templateBusy = true; this.renderViews();
     try {
-      const source = await this.readDefaultTemplate();
+      await this.readDefaultTemplate();
       await this.host.app.vault.adapter.write(this.path(TEMPLATE_SELECTION_FILE), JSON.stringify({ file: DEFAULT_TEMPLATE_FILE }, null, 2));
-      this.templateFile = DEFAULT_TEMPLATE_FILE; this.template = source;
+      this.templateFile = DEFAULT_TEMPLATE_FILE;
       this.templateMessage = "已恢复默认模板，点击「推送新分享」后网站生效。";
     } finally { this.templateBusy = false; this.renderViews(); }
   }

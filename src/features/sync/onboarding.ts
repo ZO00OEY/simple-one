@@ -42,7 +42,6 @@ export interface SetupPreview {
   trackedLocalFiles: string[];
   additionalIgnoredLocal: string[];
   optimizedIgnore: string;
-  customIgnore?: string;
 }
 
 export interface SetupOverlapContent {
@@ -141,7 +140,7 @@ export function organizedSetupIgnore(base: string, repos: readonly NestedRepo[],
   return sections.join(eol + eol) + eol;
 }
 
-export function applySetupIgnoreBase(preview: SetupPreview, choice: OverlapChoice, configDir: string): void {
+export function applySetupIgnoreBase(preview: SetupPreview, configDir: string): void {
   // Preserve custom rules from both ends in one file; local overrides come last.
   const base = `${preview.remoteIgnore}\n${preview.localIgnore}`;
   const lines = base.split(/\r?\n/);
@@ -516,12 +515,12 @@ export class GitSetup {
       localIgnore: existingIgnore, remoteIgnore, trackedLocalFiles: trackedLocal, optimizedIgnore: "",
       additionalIgnoredLocal: [], trackedExcludedLocal: [], trackedExcludedRemote: []
     };
-    applySetupIgnoreBase(result, "local", this.configDir);
+    applySetupIgnoreBase(result, this.configDir);
     onProgress?.(`✓ 检查完成：本地 ${localFiles.length} 个文件，云端 ${remoteFiles.length} 个文件，同名差异 ${overlaps.length} 个。`);
     return result;
   }
 
-  async readOverlap(repo: VerifiedRepo, preview: SetupPreview, file: string): Promise<SetupOverlapContent> {
+  async readOverlap(preview: SetupPreview, file: string): Promise<SetupOverlapContent> {
     if (!preview.overlaps.includes(file)) throw new Error("该文件不在同名文件列表中，请重新检查第 3 步。");
     const absolute = nodePath!.resolve(this.vaultPath, file);
     const vault = nodePath!.resolve(this.vaultPath);
@@ -607,8 +606,7 @@ export class GitSetup {
     if (latest.localIgnore !== prior.localIgnore || latest.remoteIgnore !== prior.remoteIgnore) {
       throw new Error(".gitignore 在预览后发生变化，请重新检查两端规则。");
     }
-    latest.customIgnore = prior.customIgnore;
-    applySetupIgnoreBase(latest, choices[".gitignore"] || "local", this.configDir);
+    applySetupIgnoreBase(latest, this.configDir);
     if (verified.branch !== prior.branch || latest.alreadyLinked !== prior.alreadyLinked ||
         latest.relatedHistory !== prior.relatedHistory ||
         JSON.stringify(latest.remoteFiles) !== JSON.stringify(prior.remoteFiles) ||

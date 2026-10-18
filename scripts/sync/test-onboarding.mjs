@@ -22,7 +22,7 @@ try {
   const { parseGithubRepoUrl, explainSetupError } = onboarding;
   class GitSetup extends onboarding.GitSetup { constructor(path, run, configDir = ".obsidian") { super(path, run, configDir); } }
   const missingSetupIgnoreRules = (existing) => onboarding.missingSetupIgnoreRules(existing, ".obsidian");
-  const applySetupIgnoreBase = (preview, choice) => onboarding.applySetupIgnoreBase(preview, choice, ".obsidian");
+  const applySetupIgnoreBase = preview => onboarding.applySetupIgnoreBase(preview, ".obsidian");
   assert.equal(parseGithubRepoUrl("https://github.com/example/vault.git").name, "vault");
   assert.throws(() => parseGithubRepoUrl("https://gitee.com/example/vault"));
   assert.match(explainSetupError(new Error("repository not found")), /地址错误|无权访问/);
@@ -115,21 +115,21 @@ try {
   assert.match(previewProgress.at(-1), /^✓ 检查完成/);
   assert(!gitCalls.some(args => args[0] === "merge"));
   assert.deepEqual(preview.overlaps, ["identical.md", "shared.md"]);
-  applySetupIgnoreBase(preview, "remote");
+  applySetupIgnoreBase(preview);
   assert(preview.optimizedIgnore.includes("remote-only/"));
   assert(preview.optimizedIgnore.includes("custom/"));
-  applySetupIgnoreBase(preview, "local");
+  applySetupIgnoreBase(preview);
   assert(preview.optimizedIgnore.includes("custom/\r\n"));
 
   assert(preview.overlaps.includes("identical.md"));
   assert.equal(preview.identicalCount, 0);
   assert.deepEqual(preview.localOnly, ["local.md"]);
   assert.deepEqual(preview.remoteOnly, ["remote.md"]);
-  const content = await setup.readOverlap(repo, preview, "shared.md");
+  const content = await setup.readOverlap(preview, "shared.md");
   assert.equal(content.local.trim(), "local version");
   assert.equal(content.remote.trim(), "remote version");
 
-  applySetupIgnoreBase(preview, "local");
+  applySetupIgnoreBase(preview);
   assert(preview.optimizedIgnore.includes("remote-only/"));
   const finishProgress = [];
   await setup.finish(repo, preview, { "identical.md": "local", "shared.md": "remote" }, { name: "Test", email: "test@example.com" }, undefined, new Set(), false, message => finishProgress.push(message));
@@ -396,8 +396,7 @@ try {
   const unversionedPreview = await unversionedSetup.preview(unversionedRepo);
   assert.equal(unversionedPreview.localRoot, null);
   assert.deepEqual(unversionedPreview.overlaps, ["shared.md"]);
-  unversionedPreview.customIgnore = unversionedPreview.remoteIgnore + "\nnew-local.md\n";
-  applySetupIgnoreBase(unversionedPreview, "remote");
+  applySetupIgnoreBase(unversionedPreview);
   await unversionedSetup.finish(unversionedRepo, unversionedPreview, { ".gitignore": "remote", "shared.md": "local" }, { name: "Test", email: "test@example.com" });
   assert.equal((await readFile(join(unversionedVault, "shared.md"), "utf8")).trim(), "new local version");
   assert.equal((await readFile(join(unversionedVault, "remote.md"), "utf8")).trim(), "remote only");

@@ -23,7 +23,7 @@ export class ApiShareRepository extends ShareRepository {
 /** Use CLI first, then switch this publish job to the local token on auth or transport failures. */
 export class FallbackShareRepository extends ShareRepository {
   private useApi = false;
-  constructor(host: SimplePlugin, site: ShareManifest["site"], private token: string, private onFallback: () => void) { super(host, site); }
+  constructor(host: SimplePlugin, site: ShareManifest["site"], private token: string, private onFallback: () => void = () => {}) { super(host, site); }
   async api(args: string[], input?: string): Promise<string> {
     if (this.useApi) return apiRequest(this.token, args, input);
     try { return await super.api(args, input); }
