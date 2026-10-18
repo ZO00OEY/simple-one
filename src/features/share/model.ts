@@ -2,16 +2,25 @@ import { libraryManifest, validateLibraries, type ShareLibraries } from "./libra
 export const SHARE_FOLDER = ".gitshare";
 export const ID_PATTERN = /^[a-z0-9]{12}$/;
 export interface ShareCopyContent { title: boolean; github: boolean; pageOne: boolean }
-export const DEFAULT_SHARE_COPY_CONTENT: ShareCopyContent = { title: true, github: true, pageOne: false };
-export function formatShareContent(title: string, github: string, pageOne: string, selected: ShareCopyContent): string {
+export interface ShareDomain { id: string; name: string; baseUrl: string }
+export interface ShareEdgeOneDomains { projectId: string; domains: Array<{ domain: string; status: string }>; selected?: string[] }
+export const DEFAULT_SHARE_COPY_CONTENT: ShareCopyContent = { title: true, github: true, pageOne: true };
+export function normalizeShareDomainUrl(value: string): string {
+  const url = new URL(value.trim());
+  if (url.protocol !== "https:" || !url.hostname || url.username || url.password || url.search || url.hash) throw new Error("请输入以 https:// 开头、不含参数或 # 的分享站点网址。");
+  return `${url.origin}${url.pathname.replace(/\/+$/, "")}/`;
+}
+export function shareDomainNoteUrl(baseUrl: string, noteId: string): string {
+  return `${baseUrl}#/notes/${encodeURIComponent(noteId)}`;
+}
+export function formatShareContent(title: string, github: string, pageOne: string, selected: ShareCopyContent, domains: ReadonlyArray<{ name: string; url: string }> = []): string {
   if (!selected.title && !selected.github && !selected.pageOne) throw new Error("请在复制内容设置中至少勾选一项。");
-  if (selected.github && !github) throw new Error("尚未配置 GitHub 分享网站。");
-  if (selected.pageOne && !pageOne) throw new Error("尚未关联 Page One 分享网站，请先完成腾讯接入引导。");
   const lines: string[] = [];
-  if (selected.title) lines.push(title.replace(/\r?\n/g, " "));
-  const both = selected.github && selected.pageOne;
-  if (selected.github) lines.push(`${both ? "GitHub 链接：" : ""}${github}`);
-  if (selected.pageOne) lines.push(`${both ? "Page One 链接：" : ""}${pageOne}`);
+  if (selected.title) lines.push(`《${title.replace(/\r?\n/g, " ")}》`);
+  const links = [selected.github && github ? { name: "GitHub 链接", url: github } : undefined,
+    selected.pageOne && pageOne ? { name: "EdgeOne Makers 链接", url: pageOne } : undefined,
+    ...domains].filter((link): link is { name: string; url: string } => !!link?.url);
+  for (const link of links) lines.push(`${links.length > 1 ? `${link.name}：` : ""}${link.url}`);
   return lines.join("\n");
 }
 export interface ShareEntry {
@@ -29,6 +38,8 @@ export interface ShareManifest {
   enabled: boolean;
   defaultPath?: "root" | "source";
   copyContent?: ShareCopyContent;
+  customDomains?: ShareDomain[];
+  edgeOneDomains?: ShareEdgeOneDomains;
   site: { owner: string; repo: string; branch: string; initialized?: boolean; guideProgress?: number; hosting?: "github" | "edgeone" };
   notes: Record<string, ShareEntry>;
   directories?: Record<string, string>;
@@ -54,6 +65,20 @@ export function parseManifest(source: string): ShareManifest {
   if (!value || value.version !== 1 || typeof value.enabled !== "boolean" || !value.site || !value.notes || typeof value.notes !== "object" || Array.isArray(value.notes)) throw new Error("分享清单版本或格式不正确；已停止覆盖。");
   if (value.defaultPath !== undefined && value.defaultPath !== "root" && value.defaultPath !== "source") throw new Error("默认分享路径设置不正确。");
   if (value.copyContent !== undefined && (!value.copyContent || ["title", "github", "pageOne"].some(key => typeof value.copyContent![key as keyof ShareCopyContent] !== "boolean"))) throw new Error("复制内容设置不正确。");
+  if (value.customDomains !== undefined) {
+    if (!Array.isArray(value.customDomains) || new Set(value.customDomains.map(domain => domain.id)).size !== value.customDomains.length) throw new Error("分享域名记录格式不正确。");
+    for (const domain of value.customDomains) {
+      if (!domain || typeof domain.id !== "string" || !/^[a-zA-Z0-9-]{1,64}$/.test(domain.id) || typeof domain.name !== "string" || !domain.name.trim() || domain.name.length > 50 || /[\r\n：]/.test(domain.name) || typeof domain.baseUrl !== "string" || normalizeShareDomainUrl(domain.baseUrl) !== domain.baseUrl) throw new Error("分享域名名称或网址格式不正确。");
+    }
+  }
+  if (value.edgeOneDomains !== undefined) {
+    const settings = value.edgeOneDomains;
+    if (!settings || typeof settings.projectId !== "string" || !settings.projectId || !Array.isArray(settings.domains) ||
+      settings.domains.some(item => !item || typeof item.domain !== "string" || !item.domain || typeof item.status !== "string") ||
+      settings.selected !== undefined && (!Array.isArray(settings.selected) || settings.selected.some(domain => typeof domain !== "string") || new Set(settings.selected).size !== settings.selected.length)) {
+      throw new Error("EdgeOne 自定义域名记录格式不正确。");
+    }
+  }
   if (typeof value.site.owner !== "string" || typeof value.site.repo !== "string" || !/^[A-Za-z0-9._/-]+$/.test(value.site.branch) || value.site.branch.includes("..")) throw new Error("分享仓库配置不正确。");
   if (value.site.initialized !== undefined && typeof value.site.initialized !== "boolean") throw new Error("分享网站初始化记录不正确。");
   if (value.site.guideProgress !== undefined && (!Number.isInteger(value.site.guideProgress) || value.site.guideProgress < 1 || value.site.guideProgress > 7)) throw new Error("分享引导进度不正确。");

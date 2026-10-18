@@ -16,12 +16,12 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 const hash = bytes => createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
 try {
   const bundle = join(folder, "mobile.cjs");
-  await esbuild.build({ stdin: { contents: 'export { MobileGithub } from "./src/features/sync/mobileGithub"; export { downloadSummary, mirrorPlan, strategyChoices } from "./src/features/sync/syncPlan";', resolveDir: process.cwd() }, bundle: true, platform: "node", format: "cjs", outfile: bundle,
+  await esbuild.build({ stdin: { contents: 'export { MobileGithub } from "./src/features/sync/mobileGithub"; export { mirrorPlan, strategyChoices } from "./src/features/sync/syncPlan";', resolveDir: process.cwd() }, bundle: true, platform: "node", format: "cjs", outfile: bundle,
     plugins: [{ name: "mock-obsidian", setup(build) {
       build.onResolve({ filter: /^obsidian$/ }, () => ({ path: "obsidian", namespace: "mock" }));
       build.onLoad({ filter: /.*/, namespace: "mock" }, () => ({ contents: "export const requestUrl = request => globalThis.githubRequest(request);" }));
     } }] });
-  const { MobileGithub, downloadSummary, mirrorPlan, strategyChoices } = require(bundle);
+  const { MobileGithub, mirrorPlan, strategyChoices } = require(bundle);
   async function fixture(localTexts, remoteTexts) {
     let clock = 100, head = "c0", root = "t0", commitIndex = 0, treeIndex = 0;
     const local = new Map(), blobs = new Map(), trees = new Map(), commits = new Map(), calls = [];
@@ -488,8 +488,8 @@ try {
   assert.equal(f.local.get("note.md").bytes.toString(), "cloud");
   assert.equal(f.engine.state.baseCommitSha, f.head());
   assert.equal(f.engine.state.cache["note.md"].sha, f.engine.state.base["note.md"].sha);
-  assert.equal(f.calls.filter(c => c.path.startsWith("/zipball/")).length, 1, "empty vault imports one archive");
-  assert.equal(f.calls.filter(c => c.path.startsWith("/git/blobs/")).length, 0, "archive supplies verified duplicate bytes");
+  assert.equal(f.calls.filter(c => c.path.startsWith("/zipball/")).length, 0, "first sync does not request an archive");
+  assert.equal(f.calls.filter(c => c.path.startsWith("/git/blobs/")).length, 1, "duplicate content is downloaded once");
   assert(!f.local.has('.obsidian/app.json'), 'excluded settings never reach the vault');
   assert.equal(f.calls.filter(c => c.path === "/git/commits").length, 0, "import creates no unnecessary commit");
   const saved = (await readStoredState(f.adapter, f.engine.statePath));
@@ -941,6 +941,7 @@ try {
     createDiv(options = {}) { return this.createEl('div', options); }
     createSpan(options = {}) { return this.createEl('span', options); }
     setAttr() {}
+    setAttribute() {}
     addEventListener(event, handler) { this.events ??= {}; this.events[event] = handler; }
     toggleClass() {}
     addClass(name) { this.cls += ' ' + name; }
@@ -999,6 +1000,7 @@ try {
       tab.renderSettings = () => { renders++; host.empty(); };
       const page = host.createDiv();
       tab.displayLightweightGuideStep(page);
+      assert.equal(page.querySelectorAll("*").find(node => node.name)?.name, step === 2 ? "核验 GitHub Token" : "选择 GitHub 仓库");
       const button = page.querySelectorAll("button, input").find(node => node.text === (step === 2 ? "核验连接" : "检查仓库"));
       assert(button);
       button.events.click();
@@ -1279,149 +1281,15 @@ try {
   await guide(false);
   await guide("fail");
   {
-    const cloud = Object.fromEntries(Array.from({ length: 2000 }, (_, index) => [`cloud/${index}.md`, `cloud ${index}`]));
-    const packed = await fixture({ 'local-only.md': 'keep local' }, { ...cloud,
-      '.obsidian/plugins/unselected/main.js': 'do not install', '.obsidian/plugins/simple-link/data.json': 'private' });
-    const plan = await reviewedPreview(packed);
-    const snapshot = plan.remote.commit;
-    const stagedPaths = [];
-    const writePacked = packed.adapter.writeBinary;
-    packed.adapter.writeBinary = async (path, bytes) => {
-      if (path.includes('sync-api-local.json.archive/')) {
-        stagedPaths.push(path);
-        assert.equal(packed.engine.allowed(path), false, 'temporary archive files never enter the sync scope');
-      }
-      return writePacked(path, bytes);
-    };
-    await packed.engine.execute(plan);
-    assert.equal(stagedPaths.length, 2000, 'archive files are staged individually instead of retained in memory');
-    assert(stagedPaths.every(path => !packed.local.has(path)), 'staged data is cleaned after applying');
-    assert(packed.progress.some(text => text.includes('正在从远端下载云端压缩包')));
-    assert(packed.progress.some(text => text.includes('云端压缩包下载成功')));
-    assert.equal(packed.calls.filter(c => c.path.startsWith('/zipball/')).length, 1);
-    assert(packed.calls.some(c => c.path === `/zipball/${snapshot}`), 'archive is pinned to the reviewed snapshot');
-    assert.equal(packed.calls.filter(c => c.path.startsWith('/git/blobs/')).length, 0);
-    assert.equal(packed.local.get('local-only.md').bytes.toString(), 'keep local');
-    for (const path of Object.keys(cloud)) assert(packed.local.has(path));
-    assert(!packed.local.has('.obsidian/plugins/unselected/main.js'));
-    assert(!packed.local.has('.obsidian/plugins/simple-link/data.json'));
-    assert(packed.remote()['.obsidian/plugins/unselected/main.js'], 'unselected plugins stay in the cloud');
+    const cloud = Object.fromEntries(Array.from({ length: 120 }, (_, i) => [`cloud/${i}.md`, `cloud ${i}`]));
+    const f = await fixture({}, cloud);
+    await f.engine.execute(await reviewedPreview(f));
+    assert.equal(f.calls.filter(c => c.path.startsWith('/zipball/')).length, 0);
+    assert.equal(f.calls.filter(c => c.path.startsWith('/git/blobs/')).length, 120);
+    assert.equal(f.engine.downloadTask, undefined);
+    for (const path of Object.keys(cloud)) assert(f.local.has(path));
   }
-  for (const invalid of ['broken-zip', 'wrong-hash', 'download-failed', 'staging-failed']) {
-    const packed = await fixture({}, { 'note.md': 'original cloud' });
-    const upstream = globalThis.githubRequest;
-    globalThis.githubRequest = async request => {
-      if (!request.url.includes('/zipball/')) return upstream(request);
-      if (invalid === 'download-failed') return { status: 503, headers: {}, json: {} };
-      const bytes = invalid === 'broken-zip' ? new Uint8Array([1, 2, 3])
-        : zipSync({ 'vault/note.md': new TextEncoder().encode(invalid === 'staging-failed' ? 'original cloud' : 'incorrect archive content') });
-      return { status: 200, headers: { 'content-type': 'application/zip' }, arrayBuffer: bytes.buffer };
-    };
-    if (invalid === 'staging-failed') {
-      const originalWrite = packed.adapter.writeBinary;
-      packed.adapter.writeBinary = async (path, bytes) => {
-        if (path.includes('sync-api-local.json.archive/')) throw new Error('staging disk failure');
-        return originalWrite(path, bytes);
-      };
-    }
-    await packed.engine.execute(await reviewedPreview(packed));
-    assert.equal(packed.local.get('note.md').bytes.toString(), 'original cloud');
-    assert(packed.calls.some(c => c.path.startsWith('/git/blobs/')), 'bad archive safely falls back to an original blob');
-    assert(packed.progress.some(text => text.includes('改用逐文件下载')), 'fallback remains visible during local application');
-    if (invalid === 'download-failed') assert(packed.progress.some(text => text.includes('压缩包下载失败：GitHub HTTP 503')));
-    if (invalid === 'broken-zip') assert(packed.progress.some(text => text.includes('下载成功，但解压或暂存未完成')));
-  }
-  console.log('Repository archives: 2000 files in one request, empty vault, keep both sides, snapshot pinning, plugin exclusions and corrupt archive fallback passed');
-  // The download task survives a restart and never falls back to networking during a local import.
-  {
-    assert.equal(downloadSummary(1000, 3000).recommend, false);
-    assert.equal(downloadSummary(1001, 3000).recommend, true);
-    assert.equal(downloadSummary(100, 200).recommend, true);
-    assert.equal(downloadSummary(99, 100).recommend, false);
-    const original = await fixture({ 'local.md': 'local', '.obsidian/workspace.json': 'private local' },
-      { 'remote.md': 'remote', '.obsidian/workspace.json': 'cloud workspace', '.obsidian/plugins/unselected/main.js': 'unselected' });
-    const plan = await original.engine.preview();
-    const merged = await original.engine.preview(strategyChoices(plan, 'merge'));
-    assert.equal(merged.conflicts.length, 0);
-    assert(merged.desired['local.md'] && merged.desired['remote.md']);
-    const cloudOnly = mirrorPlan(plan, 'remote');
-    assert.deepEqual(cloudOnly.localDeletes, ['local.md']);
-    assert(!cloudOnly.desired['.obsidian/workspace.json']);
-    const localOnly = mirrorPlan(plan, 'local');
-    assert.deepEqual(localOnly.remoteDeletes, ['remote.md']);
-    await original.engine.execute(merged, true);
-    assert.equal(original.engine.state.baseCommitSha, null, 'upload confirmation does not advance the baseline');
-    assert(original.remote()['local.md'], 'local uploads finish before the download choice');
-    assert.equal(original.local.has('remote.md'), false);
-    assert.equal(original.calls.filter(call => call.path.startsWith('/zipball/') || call.path.startsWith('/git/blobs/')).length, 0);
-    assert.equal(original.engine.downloadUrl, `https://github.com/example/vault/archive/${original.head()}.zip`);
-    const restored = new MobileGithub(original.adapter, '.obsidian', 'simple-link', () => original.options, () => {});
-    await restored.load();
-    assert.equal(restored.downloadTask.mode, 'choice');
-    assert.equal(restored.downloadUrl, original.engine.downloadUrl);
-    await assert.rejects(restored.preview(), /整库下载待办/);
-    const asSource = bytes => ({ size: bytes.length, slice: (start, end) => ({ arrayBuffer: async () => {
-      assert(end - start <= 65536, 'ZIP reads stay bounded'); return Uint8Array.from(bytes.subarray(start, end)).buffer;
-    } }) });
-    const callsBefore = original.calls.length;
-    await assert.rejects(restored.importDownload(asSource(zipSync({ 'root/remote.md': Buffer.from('wrong') }))), /不一致/);
-    assert.equal(original.local.has('remote.md'), false);
-    assert.equal(original.calls.length, callsBefore, 'a wrong archive makes no network requests');
-    await assert.rejects(restored.importDownload(asSource(zipSync({ 'root/other.md': Buffer.from('other') }))), /缺少/);
-    assert(restored.downloadTask);
-    const good = zipSync({ 'root/remote.md': Buffer.from('remote'), 'root/local.md': Buffer.from('local'),
-      'root/.obsidian/workspace.json': Buffer.from('cloud workspace'), 'root/.obsidian/plugins/unselected/main.js': Buffer.from('unselected') });
-    original.fail('remote.md');
-    await assert.rejects(restored.importDownload(asSource(good)), /disk failure/);
-    assert.equal(restored.state.baseCommitSha, null);
-    assert(restored.downloadTask, 'disk failure preserves the task');
-    original.fail('');
-    await restored.importDownload(asSource(good));
-    assert.equal(original.local.get('remote.md').bytes.toString(), 'remote');
-    assert.equal(original.local.get('.obsidian/workspace.json').bytes.toString(), 'private local');
-    assert.equal(original.local.has('.obsidian/plugins/unselected/main.js'), false);
-    assert.equal(restored.downloadTask, undefined);
-    assert.equal(restored.state.baseCommitSha, original.head());
-    assert.equal(original.calls.filter(call => call.path.startsWith('/zipball/') || call.path.startsWith('/git/blobs/')).length, 0);
-    assert(![...original.local.keys()].some(path => path.includes('sync-api-local.json.archive/')), 'staged files are removed after success/failure');
-  }
-  for (const scenario of ['nested-folder', 'ambiguous-folder', 'edited-local', 'changed-cloud', 'automatic']) {
-    const f = await fixture({}, { 'note.md': 'cloud note' });
-    await f.engine.execute(await reviewedPreview(f), true);
-    const baseline = f.engine.state.baseCommitSha;
-    const file = path => ({ name: 'note.md', webkitRelativePath: path, size: 10,
-      slice: () => ({ arrayBuffer: async () => Uint8Array.from(Buffer.from('cloud note')).buffer }) });
-    if (scenario === 'automatic') {
-      await f.engine.resumeAutomaticDownload();
-      assert.equal(f.engine.downloadTask, undefined);
-      assert.equal(f.local.get('note.md').bytes.toString(), 'cloud note');
-    } else if (scenario === 'ambiguous-folder') {
-      await assert.rejects(f.engine.importDownload([file('outer/one/note.md'), file('outer/two/note.md')]), /多个可能/);
-      assert.equal(f.local.has('note.md'), false);
-      assert.equal(f.engine.state.baseCommitSha, baseline);
-    } else if (scenario === 'edited-local') {
-      await f.adapter.write('note.md', 'new local edit');
-      await assert.rejects(f.engine.importDownload([file('root/note.md')]), /本机又被修改/);
-      assert.equal(f.local.get('note.md').bytes.toString(), 'new local edit');
-      assert.equal(f.engine.state.baseCommitSha, baseline);
-      assert(f.engine.downloadTask, 'local edits do not silently dismiss the task');
-      assert.equal(f.engine.downloadTask.reviewRequired, true);
-      const editedReload = new MobileGithub(f.adapter, '.obsidian', 'simple-link', () => f.options, () => {});
-      await editedReload.load();
-      assert(editedReload.downloadTask.reviewRequired);
-      await editedReload.resetDownloadProgress();
-      assert.equal(editedReload.downloadTask, undefined);
-      assert.equal(f.local.get('note.md').bytes.toString(), 'new local edit');
-    } else {
-      if (scenario === 'changed-cloud') f.cloudEdit('note.md', 'newer cloud note');
-      const fixedCommit = f.engine.state.pending.commit;
-      await f.engine.importDownload([file('outer/archive/root/note.md')]);
-      assert.equal(f.local.get('note.md').bytes.toString(), 'cloud note');
-      assert.equal(f.engine.state.baseCommitSha, fixedCommit, 'only the reviewed snapshot becomes baseline');
-      assert(!f.calls.some(call => call.path.startsWith('/git/blobs/')));
-    }
-  }
-  console.log('Manual download: deferred uploads, durable tasks, bounded ZIP reads, root detection, protected settings, wrong/missing data, write failures and local edits passed');
+  console.log('First sync uses per-file API downloads without an archive');
   for (const strategy of ['merge', 'local', 'remote', 'custom', 'cancel', 'cancel-confirm']) {
     const f = await fixture({ 'local.md':'local', 'same.md':'local version' }, { 'remote.md':'remote', 'same.md':'remote version' });
     const stages=[];
@@ -1443,44 +1311,38 @@ try {
     }
   }
   {
-    const f=await fixture({},Object.fromEntries(Array.from({length:101},(_,i)=>[`note-${i}.md`,String(i)])));
-    const stages=[];
-    const review=new MobileSyncModal({},f.engine,await f.engine.preview(),false,undefined,{
-      strategy:async()=>{stages.push('strategy');return 'merge';},confirm:async()=>{stages.push('confirm');return true;},
-      transfer:async()=>{stages.push('transfer');}
+    const f = await fixture({}, Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`note-${i}.md`, String(i)])));
+    const stages = [];
+    const review = new MobileSyncModal({}, f.engine, await f.engine.preview(), false, undefined, {
+      strategy: async () => { stages.push('strategy'); return 'merge'; },
+      confirm: async () => { stages.push('confirm'); return true; },
+      transfer: async () => { stages.push('transfer'); }
     });
-    assert.equal(await mobileFlowWait.call(review),false);
-    assert.deepEqual(stages,['strategy','confirm','transfer']);
-    assert(f.engine.downloadTask);assert.equal(f.engine.state.baseCommitSha,null);
-    assert(!f.calls.some(call=>call.path.startsWith('/git/blobs/')||call.path.startsWith('/zipball/')));
+    assert.equal(await mobileFlowWait.call(review), true);
+    assert.deepEqual(stages, ['strategy', 'confirm']);
+    assert.equal(f.engine.downloadTask, undefined);
+    assert.equal(f.calls.filter(c => c.path.startsWith('/git/blobs/')).length, 101);
+    assert.equal(f.calls.filter(c => c.path.startsWith('/zipball/')).length, 0);
   }
-  console.log('Sync workflow: four strategies, safe cancellation, deletion review and large-download deferral passed');
+  console.log('Sync workflow and large API downloads passed');
   {
-    const f=await fixture({'base.md':'base'},{'base.md':'base'});await align(f);
-    const baseline=f.engine.state.baseCommitSha;
-    f.cloudEdit('new.md','new');
-    await f.engine.execute(await f.engine.preview(),true);
-    await f.engine.resetDownloadProgress();
-    assert.equal(f.engine.state.baseCommitSha,baseline,'reset preserves the completed baseline');
-    assert(f.remote()['new.md'],'reset never undoes cloud content');
-    assert.equal(f.engine.initialSync,true,'reset reopens initial review');
-    assert.equal(f.options.bound,true);
-  }
-  {
-    const f=await fixture({},{'note.md':'cloud note'});
-    await f.engine.execute(await reviewedPreview(f),true);
-    const write=f.adapter.write;
-    f.adapter.write=async(path,text)=>{
-      const state=JSON.parse(text).state;
-      if(path===f.engine.statePath&&!state.pending&&state.baseCommitSha)throw new Error('final state disk failure');
-      await write(path,text);
+    const f = await fixture({}, { 'note.md': 'cloud note' });
+    await f.engine.execute(await reviewedPreview(f));
+    const completed = f.engine.state.baseCommitSha;
+    f.engine.state.pending = {
+      commit: completed, parent: completed, base: f.engine.state.base,
+      actions: [], revision: f.engine.state.revision, paths: f.engine.state.paths,
+      scope: f.engine.state.baseScope,
+      transfer: { mode: 'manual', downloads: 1, total: 1, createdAt: Date.now() }
     };
-    await assert.rejects(f.engine.resumeAutomaticDownload(),/final state disk failure/);
-    assert(f.engine.downloadTask,'failed completion persistence keeps the task visible');
-    assert.equal(f.engine.state.baseCommitSha,null);
-    f.adapter.write=write;
-    await f.engine.resumeAutomaticDownload();
-    assert.equal(f.engine.downloadTask,undefined);
+    f.engine.state.baseCommitSha = null;
+    await f.engine.save();
+    const restored = new MobileGithub(f.adapter, '.obsidian', 'simple-link', () => f.options, () => {});
+    await restored.load();
+    await restored.resumeAutomaticDownload();
+    assert.equal(restored.downloadTask, undefined);
+    assert.equal(restored.state.baseCommitSha, completed);
+    assert.equal(f.calls.filter(c => c.path.startsWith('/zipball/')).length, 0);
   }
   {
     const f=await fixture({'base.md':'base'},{'base.md':'base'});await align(f);

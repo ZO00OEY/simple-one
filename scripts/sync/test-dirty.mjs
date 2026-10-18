@@ -177,8 +177,16 @@ assert.equal(link.included(".custom/plugins/simple-ai/data.json", { ...aiOptions
 assert.equal(link.included(".custom/plugins/other/data.json", { ...aiOptions, plugins: ["other"] }, ".custom", "simple-one"), true);
 
 const oneOptions = { ...link.DEFAULT_MOBILE_OPTIONS, syncPlugins: true, plugins: ["simple-one", "simple-link"], ignorePatterns: ["!.custom/plugins/simple-one/**", "!.custom/plugins/simple-link/**"] };
+for (const configDir of [".obsidian", ".custom"]) {
+  const path = `${configDir}/plugins/simple-one/data.json`;
+  assert.equal(raw.shouldIgnore(path, raw.defaultSyncIgnorePatterns(configDir), configDir), false);
+  assert.equal(raw.shouldIgnore(path, [path], configDir), true);
+  raw.assertNoPrivateSyncFiles([path], configDir);
+}
+assert.equal(link.included(".custom/plugins/simple-one/data.json", oneOptions, ".custom", "simple-one"), true);
 for (const plugin of ["simple-one", "simple-link"]) {
   for (const file of ["data.json", "sync-local.json", "link-state.json", "link-state.json.recovery", "data.json.bak", "sync-local.json_copy", "mobile-ignore.json"]) {
+    if (plugin === "simple-one" && file === "data.json") continue;
     const path = `.custom/plugins/${plugin}/${file}`;
     if (plugin === "simple-one" && file === "data.json") {
       assert.equal(link.included(path, { ...oneOptions, syncPlugins: false }, ".custom", "simple-one"), true);

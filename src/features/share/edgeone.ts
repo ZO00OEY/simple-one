@@ -7,8 +7,10 @@ export const EDGEONE_PROJECTS_URL = "https://console.cloud.tencent.com/edgeone/m
 type Site = ShareManifest["site"];
 export interface EdgeOneProject {
   ProjectId: string; Name: string; Provider?: string; RepoUrl?: string;
-  RepoOwner?: string; RepoName?: string; RepoBranch?: string; PresetDomain?: string;
+  RepoOwner?: string; RepoName?: string; RepoBranch?: string; PresetDomain?: string; Area?: string;
+  CustomDomains?: Array<{ Domain?: string; Status?: string }>;
 }
+export interface EdgeOneCustomDomain { domain: string; status: string }
 export interface EdgeOneDeployment {
   DeploymentId: string; Status: string; Env: string; RepoBranch: string;
   RepoCommitHash?: string; UsedInProd?: boolean; CreatedOn?: string;
@@ -20,6 +22,7 @@ export interface EdgeOneResult {
 interface EdgeOneState {
   version: 1; step: number; repo?: string; branch?: string;
   projectId?: string; projectName?: string; website?: string;
+  area?: "overseas" | "mainland" | "global";
   creationName?: string; completed?: boolean;
   lastCheck?: EdgeOneResult & { commit: string; checkedAt: number };
 }
@@ -76,11 +79,12 @@ export function edgeOneWebsite(domain: string | undefined): string {
 }
 
 /** A successful preview or a superseded production build is not the live website. */
-export function edgeOneDeploymentResult(deployments: EdgeOneDeployment[], commit: string, branch: string): EdgeOneResult {
+export function edgeOneDeploymentResult(deployments: EdgeOneDeployment[], commit: string, branch: string, deploymentId?: string): EdgeOneResult {
   const production = deployments.filter(item => item.Env === "Production" && item.RepoBranch === branch);
   const matchingVersions = production.filter(item => item.RepoCommitHash === commit);
-  const matching = matchingVersions.find(item => item.Status === "Success" && item.UsedInProd === true)
-    ?? matchingVersions.sort((a, b) => (b.CreatedOn ?? "").localeCompare(a.CreatedOn ?? ""))[0];
+  const matching = deploymentId ? matchingVersions.find(item => item.DeploymentId === deploymentId)
+    : matchingVersions.find(item => item.Status === "Success" && item.UsedInProd === true)
+      ?? matchingVersions.sort((a, b) => (b.CreatedOn ?? "").localeCompare(a.CreatedOn ?? ""))[0];
   if (!matching) return { kind: "pending", text: "最近一次分享尚未找到对应的正式部署记录。" };
   if (["Failed", "Timeout", "Cancelled", "Invalid"].includes(matching.Status)) {
     return { kind: "error", text: "最近一次分享部署失败、已取消或已失效，请在腾讯项目页查看原因。" };
@@ -100,11 +104,13 @@ export class EdgeOneConnection {
   message = "";
   error = "";
   draftToken = "";
-  draftName = "";
-  authMode: "verify" | "create" = "create";
+  authMode: "verify" | "create" | null = null;
+  tokenVerified = false;
+  projectCheckDone = false;
+  projectCreationFailed = false;
   candidates: EdgeOneProject[] = [];
   selectedProject = "";
-  area: "overseas" | "mainland" | "global" = "overseas";
+  area: "overseas" | "mainland" | "global" = "global";
   private secretId = "";
   private stopped = false;
   constructor(private host: SimplePlugin, readonly site: () => Site,
@@ -122,11 +128,13 @@ export class EdgeOneConnection {
   get hasToken(): boolean { return !!this.secretId && !!this.secrets()?.getSecret(this.secretId); }
   async load(): Promise<void> {
     this.state = { version: 1, step: 1 }; this.error = ""; this.message = "";
-    this.candidates = []; this.selectedProject = ""; this.draftName = "";
+    this.candidates = []; this.selectedProject = ""; this.projectCheckDone = false;
     const adapter = this.host.app.vault.adapter;
     const desktopAdapter = adapter as typeof adapter & { getBasePath?: () => string };
     const identity = desktopAdapter.getBasePath?.() ?? this.host.app.vault.getName();
     this.secretId = `simple-one-edgeone-${(await sha256(identity)).slice(0, 16)}`;
+    this.authMode = null;
+    this.tokenVerified = false;
     if (!await adapter.exists(this.path)) return;
     const value = object(JSON.parse(await adapter.read(this.path)));
     if (value.version !== 1 || !Number.isInteger(value.step) || Number(value.step) < 1 || Number(value.step) > 3) {
@@ -135,15 +143,28 @@ export class EdgeOneConnection {
     for (const key of ["repo", "branch", "projectId", "projectName", "creationName", "website"]) {
       if (value[key] !== undefined && typeof value[key] !== "string") throw new Error("腾讯接入记录格式不正确，已保留原文件。");
     }
+    if (value.area !== undefined && value.area !== "overseas" && value.area !== "mainland" && value.area !== "global")
+      throw new Error("腾讯接入记录中的访问区域格式不正确，已保留原文件。");
     this.state = value as unknown as EdgeOneState;
     this.state.website = edgeOneWebsite(this.state.website);
     if (this.state.lastCheck && (!this.state.lastCheck.text || !["success", "pending", "error", "unknown"].includes(this.state.lastCheck.kind))) delete this.state.lastCheck;
-    this.draftName = this.state.creationName ?? this.state.projectName ?? "";
   }
   stop(): void { this.stopped = true; this.draftToken = ""; }
+  async resetGuide(): Promise<void> {
+    if (this.busy) throw new Error("请等待腾讯操作完成后重新运行引导。");
+    const state: EdgeOneState = { version: 1, step: 1 };
+    await this.host.app.vault.adapter.write(this.path, JSON.stringify(state, null, 2));
+    this.stop();
+    this.state = state;
+    this.error = ""; this.message = "";
+    this.candidates = []; this.selectedProject = ""; this.projectCheckDone = false;
+    this.authMode = null;
+    this.tokenVerified = false;
+    this.area = "global";
+  }
   private token(): string {
     const token = this.secretId && this.secrets()?.getSecret(this.secretId);
-    if (!token) throw new Error("请先填写并核验腾讯 API Token。");
+    if (!token) throw new Error("请先填写并核验 EdgeOne Makers API Token。");
     return token;
   }
   private save(): Promise<void> {
@@ -169,23 +190,32 @@ export class EdgeOneConnection {
     finally { this.busy = false; this.refresh(); }
   }
   async verifyToken(useSaved = false): Promise<void> {
-    const token = this.draftToken.trim() || (useSaved && this.hasToken ? this.token() : "");
-    if (!token || /\s/.test(token)) throw new Error("请粘贴完整的腾讯 API Token。");
+    this.projectCheckDone = false;
+    this.tokenVerified = false;
+    const token = useSaved ? (this.hasToken ? this.token() : "") : this.draftToken.trim();
+    if (!token || /\s/.test(token)) throw new Error("请粘贴完整的 EdgeOne Makers API Token。");
     const secrets = this.secrets();
     if (!secrets?.setSecret) throw new Error("保存腾讯授权需要 Obsidian 1.11.4 或以上版本，请升级后接入。");
     this.report("正在核验腾讯授权…");
     const response = await this.transport(token, "DescribePagesProjects", { Offset: 0, Limit: 1 });
     if (!Array.isArray(response.Projects)) throw new Error("腾讯没有返回项目列表，授权尚未核验成功。");
+    this.tokenVerified = true;
+    this.authMode = "verify";
     if (!this.secretId) await this.load();
     secrets.setSecret(this.secretId, token);
     this.draftToken = "";
     this.state.step = 2;
-    await this.save(); this.report("腾讯授权已核验，请关联当前笔记分享仓库。");
+    await this.save(); this.report("EdgeOne Makers API Token 已核验，正在查找当前分享仓库的项目…");
+    if (!this.site().owner || !this.site().repo) return;
     await this.enterRepositoryStep();
+    this.projectCheckDone = true;
+    this.report(this.linked ? `已关联 EdgeOne Makers 项目 ${this.state.projectName}，项目记录中的仓库与分支匹配。`
+      : this.candidates.length ? "找到多个匹配项目，请选择要关联的项目。"
+      : "未找到匹配项目，请在下方新建项目。");
   }
   async enterRepositoryStep(): Promise<void> {
     this.state.step = 2;
-    if (!this.site().initialized || !this.site().owner || !this.site().repo) { this.refresh(); return; }
+    if (!this.site().owner || !this.site().repo) { this.refresh(); return; }
     await this.findProjects();
     const existing = this.candidates.find(project => project.ProjectId === this.state.projectId)
       ?? (this.candidates.length === 1 ? this.candidates[0] : undefined);
@@ -209,6 +239,7 @@ export class EdgeOneConnection {
     return { ...site };
   }
   async findProjects(): Promise<void> {
+    this.projectCreationFailed = false;
     const site = this.requireShareReady();
     this.report("正在查找关联当前分享仓库的腾讯项目…");
     const token = this.token();
@@ -230,15 +261,29 @@ export class EdgeOneConnection {
     const projects = Array.isArray(response.Projects) ? response.Projects as EdgeOneProject[] : [];
     const project = projects.find(item => item.ProjectId === id);
     if (!project) throw new Error("腾讯项目尚未返回，请稍后重试；已创建的项目不会重复创建。");
-    if (!matchesEdgeOneRepository(project, this.requireShareReady())) throw new Error("腾讯项目关联的仓库或分支与当前分享仓库不一致，请在控制台完成 GitHub 授权并确认项目配置。");
+    if (!matchesEdgeOneRepository(project, this.requireShareReady())) throw new Error("腾讯项目记录中的仓库或分支与当前分享仓库不一致，请在腾讯控制台确认项目配置。");
     return project;
+  }
+  async customDomainsForProject(id: string, site: Site): Promise<EdgeOneCustomDomain[]> {
+    const response = await this.transport(this.token(), "DescribePagesProjects", { ProjectIds: [id], Offset: 0, Limit: 1 });
+    const projects = Array.isArray(response.Projects) ? response.Projects as EdgeOneProject[] : [];
+    const project = projects.find(item => item.ProjectId === id);
+    if (!project || !matchesEdgeOneRepository(project, site)) throw new Error("腾讯项目与当前分享仓库或分支不匹配。");
+    if (!Array.isArray(project.CustomDomains)) throw new Error("腾讯未返回自定义域名列表。");
+    return project.CustomDomains.flatMap(item => {
+      const domain = typeof item?.Domain === "string" ? item.Domain.trim() : "";
+      if (!domain || !/^https:\/\/[^/]+\/?$/.test(edgeOneWebsite(domain))) return [];
+      return [{ domain, status: typeof item.Status === "string" ? item.Status.toLowerCase() : "" }];
+    });
   }
   private async adopt(project: EdgeOneProject): Promise<void> {
     this.state = { version: 1, step: 3, repo: repoKey(this.site()), branch: this.site().branch,
-      projectId: project.ProjectId, projectName: project.Name, website: edgeOneWebsite(project.PresetDomain) };
+      projectId: project.ProjectId, projectName: project.Name, website: edgeOneWebsite(project.PresetDomain),
+      area: project.Area === "overseas" || project.Area === "mainland" || project.Area === "global" ? project.Area : undefined };
     await this.save();
   }
   async connectProject(): Promise<void> {
+    this.projectCreationFailed = false;
     this.requireShareReady();
     if (this.selectedProject) {
       await this.adopt(await this.project(this.selectedProject));
@@ -249,8 +294,8 @@ export class EdgeOneConnection {
       await this.adopt(await this.project(this.state.projectId!));
       this.report("已恢复腾讯项目，继续初始化网站。"); return;
     }
-    const name = (this.draftName || this.site().repo.toLowerCase().replace(/[^a-z0-9-]/g, "-")).trim();
-    if (!/^[a-z0-9][a-z0-9-]{3,61}[a-z0-9]$/.test(name)) throw new Error("项目名需为 5–63 位小写字母、数字或连字符，不能以连字符开头或结尾。");
+    const name = this.site().repo.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    if (!/^[a-z0-9][a-z0-9-]{3,61}[a-z0-9]$/.test(name)) throw new Error("分享仓库名无法用作 EdgeOne 项目名（需为 5–63 位小写字母、数字或连字符）。请调整分享仓库名称，或在腾讯控制台创建项目后重新查找。");
     // Always reconcile before a write. An interrupted create is looked up by name on retry.
     await this.findProjects();
     if (this.candidates.length) {
@@ -260,7 +305,7 @@ export class EdgeOneConnection {
     if (!Array.isArray(named.Projects)) throw new Error("无法确认项目名称，请稍后重试。");
     const existing = (named.Projects as EdgeOneProject[]).find(item => item.Name === name);
     if (existing) {
-      if (!matchesEdgeOneRepository(existing, this.site())) throw new Error("项目名称已被其他仓库使用，请更换名称。");
+      if (!matchesEdgeOneRepository(existing, this.site())) throw new Error("自动生成的项目名称已被其他仓库使用。请在腾讯控制台用其他名称创建项目，再返回重新查找。");
       await this.adopt(existing); this.report("已恢复此前创建的项目，继续初始化网站。"); return;
     }
     const site = this.requireShareReady();
@@ -268,17 +313,20 @@ export class EdgeOneConnection {
     await this.save();
     this.report("正在创建项目并关联当前分享仓库…");
     // Source/Channel follow Tencent's official SDK; Git fields follow the Pages v1 contract.
-    const response = await this.transport(this.token(), "CreatePagesProject", {
-      Name: name, Channel: "Custom", Source: "sdk", Provider: "Github",
-      RepoUrl: `https://github.com/${site.owner}/${site.repo}`, RepoOwner: site.owner,
-      RepoName: site.repo, RepoBranch: site.branch, Framework: "other", RootDir: ".",
-      OutputDir: ".", BuildCmd: "", InstallCmd: "", Area: this.area
-    });
+    let response: JsonObject;
+    try {
+      response = await this.transport(this.token(), "CreatePagesProject", {
+        Name: name, Channel: "Custom", Source: "sdk", Provider: "Github",
+        RepoUrl: `https://github.com/${site.owner}/${site.repo}`, RepoOwner: site.owner,
+        RepoName: site.repo, RepoBranch: site.branch, Framework: "other", RootDir: ".",
+        OutputDir: ".", BuildCmd: "", InstallCmd: "", Area: this.area
+      });
+    } catch (error) { this.projectCreationFailed = true; throw error; }
     if (typeof response.ProjectId !== "string" || !response.ProjectId) throw new Error("腾讯未返回项目编号，请刷新项目列表确认后重试。");
     this.state.projectId = response.ProjectId; this.state.projectName = name; this.state.step = 3;
     await this.save();
     await this.adopt(await this.project(response.ProjectId));
-    this.report("腾讯项目已创建并关联分享仓库，继续初始化网站。");
+    this.report("EdgeOne Makers 项目已创建并关联分享仓库；下一步部署时验证能否拉取仓库内容。");
   }
   private async deployments(): Promise<EdgeOneDeployment[]> {
     const results: EdgeOneDeployment[] = [];
@@ -294,19 +342,19 @@ export class EdgeOneConnection {
     }
     throw new Error("部署记录过多，请在腾讯项目页确认。");
   }
-  async checkDeployment(): Promise<EdgeOneResult> {
+  async checkDeployment(deploymentId?: string): Promise<EdgeOneResult> {
     if (!this.linked) throw new Error("请先关联当前分享仓库的腾讯项目。");
     const commit = await this.latestCommit();
     this.report("正在检查最近一次分享的腾讯部署…");
     const project = await this.project(this.state.projectId!);
-    const result = edgeOneDeploymentResult(await this.deployments(), commit, this.site().branch);
+    const result = edgeOneDeploymentResult(await this.deployments(), commit, this.site().branch, deploymentId);
     this.state.website = edgeOneWebsite(project.PresetDomain);
     this.state.lastCheck = { ...result, commit, checkedAt: Date.now() };
     this.state.completed = result.kind === "success";
     await this.save(); this.report(result.text);
     return result;
   }
-  async initializeWebsite(): Promise<void> {
+  async initializeWebsite(forceFreshDeployment = false): Promise<void> {
     this.stopped = false;
     if (!this.linked) throw new Error("请先关联腾讯项目。");
     const commit = await this.latestCommit();
@@ -314,15 +362,21 @@ export class EdgeOneConnection {
     this.report("正在确认腾讯初始化进度…");
     const records = await this.deployments();
     const existing = records.find(item => item.Env === "Production" && item.RepoBranch === this.site().branch && item.RepoCommitHash === commit);
-    if (!existing) {
-      this.report("正在请求腾讯部署最近一次分享…");
-      await this.transport(this.token(), "CreatePagesDeployment", { ProjectId: this.state.projectId,
+    let deploymentId: string | undefined;
+    if (forceFreshDeployment || !existing) {
+      this.report(forceFreshDeployment ? "正在发起新的 Git 部署，以验证 EdgeOne 当前能否拉取私有分享仓库…" : "正在请求腾讯部署最近一次分享…");
+      const response = await this.transport(this.token(), "CreatePagesDeployment", { ProjectId: this.state.projectId,
         ViaMeta: "Api", Provider: "Github", Env: "Production", RepoBranch: this.site().branch,
         RepoCommitHash: commit, RepoCommitMsg: "Initialize shared notes website" });
+      if (forceFreshDeployment) {
+        if (typeof response.DeploymentId !== "string" || !response.DeploymentId)
+          throw new Error("EdgeOne 未返回本次部署编号，无法确认私有仓库的当前拉取权限。请在项目页检查最新部署记录。");
+        deploymentId = response.DeploymentId;
+      }
     }
     // Query progress instead of inventing a percentage. Returning to settings stops polling.
     for (let attempt = 0; attempt < 24 && !this.stopped; attempt++) {
-      const result = await this.checkDeployment();
+      const result = await this.checkDeployment(deploymentId);
       if (result.kind === "success") { this.state.step = 3; await this.save(); return; }
       if (result.kind === "error" || result.kind === "unknown") return;
       await new Promise<void>(resolve => window.setTimeout(resolve, 5000));

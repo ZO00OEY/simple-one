@@ -3,7 +3,6 @@ import { DataAdapter } from "obsidian";
 import { githubResponse } from "./githubApi";
 import { SYNC_HASH_VERSION, blobSha, syncBytes, sameContent, FileEntry, identityPaths, included, linkDiff, LocalState, Manifest, MobileOptions, newLocalState, newPathRecords, normalizePaths, PathRecords, noteChange, safePath, scanCurrent } from "./linkDiff";
 import { parseGithubRepoUrl } from "./onboarding";
-import { directoryEntries, extractRepositoryArchive, type ArchiveSource, type ImportFile } from "./repositoryArchive";
 
 export interface RemoteSnapshot { commit: string; tree: string; files: Manifest; plugins: string[]; branch: string; renames: Record<string, string> }
 interface Side extends FileEntry { path: string; source: "local" | "remote" }
@@ -32,7 +31,6 @@ interface PendingTransaction {
   commit: string; parent: string; base: Manifest; actions: LocalAction[];
   revision: number; paths: PathRecords;
   scope: string;
-  archive?: { commit: string; files: Manifest };
   transfer?: DownloadTask;
 }
 interface StoredState extends LocalState {
@@ -82,11 +80,6 @@ export class MobileGithub {
   private get recoveryPath(): string { return `${this.statePath}.recovery`; }
   get downloadTask(): DownloadTask | undefined { return this.state.pending?.transfer; }
   get initialSync(): boolean { return !this.state.baseCommitSha || !!this.state.rejoinReview; }
-  get downloadUrl(): string | undefined {
-    if (!this.downloadTask || !this.state.pending) return undefined;
-    const repository = this.state.binding.split("#")[0];
-    return `https://github.com/${repository}/archive/${encodeURIComponent(this.state.pending.commit)}.zip`;
-  }
   allowed = (path: string): boolean => included(path, this.getOptions(), this.configDir, this.pluginId);
 
   async load(): Promise<void> {
@@ -433,7 +426,7 @@ export class MobileGithub {
     if (this.running) throw new Error("本地缓存正在检查，请稍后重试。");
     this.running = true;
     try {
-      if (this.downloadTask) throw new Error("还有整库下载待办，请从同步面板上方的红色提醒继续处理。");
+      if (this.downloadTask) throw new Error("还有下载待办，请从同步面板上方的红色提醒继续处理。");
       await this.recover();
       if (this.state.downloadVerification && this.state.downloadVerification.scope !== this.scope()) {
         throw new Error("下载验证尚未完成，请恢复原同步范围后继续；不会将缺失文件视为删除。");
@@ -610,7 +603,7 @@ export class MobileGithub {
       ["main.js", "manifest.json", "styles.css"].some(name => path === prefix + name));
   }
 
-  async execute(plan: MobilePlan, deferDownloads = false): Promise<void> {
+  async execute(plan: MobilePlan): Promise<void> {
     if (plan.conflicts.length) throw new Error("仍有未选择的冲突，未执行同步。");
     if (this.running) throw new Error("本地缓存正在检查，请稍后重试。");
     if (this.state.pending) throw new Error("还有未完成的下载或验证，请先重新预览以恢复同步；尚未确认新基准。");
@@ -697,17 +690,6 @@ export class MobileGithub {
       if (plan.scope !== this.scope()) throw new Error("上传准备期间同步范围已变化，请重新预览。");
       this.state.pending = { commit: commitSha, parent: plan.remote.commit, base: plan.desired, actions,
         revision: plan.revision, paths: plan.paths, scope: plan.scope };
-      if (deferDownloads && plan.downloads.length) {
-        this.state.pending.transfer = { mode: "choice", downloads: plan.downloads.length,
-          total: Object.keys(plan.desired).length, createdAt: Date.now() };
-      }
-      const emptyVault = Object.keys(plan.local).every(path => path.startsWith(`${this.configDir}/`));
-      if (this.initialSync && plan.downloads.length && (emptyVault || plan.downloads.length >= 50 ||
-          Object.values(plan.pendingChoices).some(choice => choice.choice === "both"))) {
-        const wanted = new Set(plan.downloads.map(path => plan.desired[path].sha));
-        this.state.pending.archive = { commit: plan.remote.commit,
-          files: Object.fromEntries(Object.entries(plan.remote.files).filter(([, entry]) => wanted.has(entry.sha))) };
-      }
       this.state.downloadVerification = { phase: "downloading", scope: plan.scope, commit: commitSha,
         files: Object.fromEntries(plan.downloads.map(path => [path, plan.desired[path]])) };
       await this.save();
@@ -716,7 +698,7 @@ export class MobileGithub {
         "PATCH", { sha: commitSha, force: false });
       remoteRemaining.clear();
       if (this.state.pending.transfer) {
-        this.progress(`云端更新已确认 · ${plan.downloads.length} 个文件等待选择下载方式 · 待办已保存`);
+        this.progress(`云端更新已确认 · ${plan.downloads.length} 个文件待下载 · 待办已保存`);
         return;
       }
       await this.applyPending((path) => {
@@ -726,7 +708,7 @@ export class MobileGithub {
     } finally { this.running = false; }
   }
 
-  private async recover(imported?: Map<string, string>): Promise<void> {
+  private async recover(): Promise<void> {
     const pending = this.state.pending;
     if (!pending) return;
     this.progress("检测到未完成的下载或验证 · 正在恢复同步，保留原共同基准…");
@@ -740,7 +722,6 @@ export class MobileGithub {
           throw new Error("上传未被云端接受，待办已保留；请重置进度并重新检查同步。");
         }
         this.state.pending = undefined; this.state.downloadVerification = undefined; await this.save();
-        if (imported) throw new Error("上传未被云端接受，请重新预览同步后再导入。");
         return;
       }
       const diff = await this.json(`${this.repo().prefix}/compare/${pending.commit}...${remote.commit}`, readCompare);
@@ -760,20 +741,11 @@ export class MobileGithub {
         this.state.pending = undefined;
         await this.save();
         this.progress("未完成同步中发现本机新修改，已保留内容并重新预览差异…");
-        if (imported) throw new Error("待下载文件在本机又被修改，已保留修改，请重新预览同步。");
         return;
       }
     }
-    if (!imported && pending.transfer && pending.transfer.mode !== "automatic") return;
-    await this.applyPending(undefined, imported);
-  }
-
-  async chooseManualDownload(): Promise<void> {
-    await this.load();
-    if (this.running) throw new Error("正在同步或导入，请稍后再操作。");
-    if (!this.downloadTask) throw new Error("没有待处理的整库下载。");
-    this.downloadTask.mode = "manual";
-    await this.save();
+    if (pending.transfer && pending.transfer.mode !== "automatic") return;
+    await this.applyPending();
   }
 
   async resetDownloadProgress(): Promise<void> {
@@ -783,14 +755,14 @@ export class MobileGithub {
     await this.restartSetup();
     const folder = `${this.statePath}.archive`;
     try { if (await this.adapter.exists(folder)) await this.adapter.rmdir(folder, true); }
-    catch { console.warn("下载暂存区未能清理，下次导入会重试。"); }
-    this.progress("下载进度已重置 · 已上传与已导入文件保留 · 请重新预览同步");
+    catch { console.warn("旧下载暂存区未能清理。"); }
+    this.progress("下载进度已重置 · 已上传与新修改的文件保留 · 请重新预览同步");
   }
 
   async resumeAutomaticDownload(): Promise<void> {
     await this.load();
-    if (this.running) throw new Error("正在同步或导入，请稍后再操作。");
-    if (!this.downloadTask) throw new Error("没有待处理的整库下载。");
+    if (this.running) throw new Error("正在同步，请稍后再操作。");
+    if (!this.downloadTask) throw new Error("没有待处理的下载。");
     if (this.downloadTask.reviewRequired) throw new Error("两端状态已变化，请重置进度后重新检查同步。");
     this.running = true;
     const expectedCommit = this.state.pending!.commit;
@@ -804,136 +776,15 @@ export class MobileGithub {
     } finally { this.running = false; }
   }
 
-  /** Stage all needed files before touching notes; a bad/missing file never starts a network fallback. */
-  async importDownload(source: ArchiveSource | readonly ImportFile[]): Promise<void> {
-    await this.load();
-    if (this.running) throw new Error("正在同步或导入，请稍后再操作。");
-    const pending = this.state.pending;
-    if (!pending?.transfer) throw new Error("没有待导入的整库下载，请先确认同步计划。");
-    if (pending.transfer.reviewRequired) throw new Error("两端状态已变化，请重置进度后重新检查同步。");
-    if (pending.scope !== this.scope()) throw new Error("同步范围已变化，请恢复原范围再导入。");
-    this.running = true;
-    const folder = `${this.statePath}.archive/${crypto.randomUUID()}`;
-    const staged = new Map<string, string>();
-    const temporary = new Set<string>();
-    try {
-      pending.transfer.mode = "manual";
-      await this.save();
-      // Remove orphan staging from an app shutdown. This engine serializes imports.
-      const stagingRoot = `${this.statePath}.archive`;
-      if (await this.adapter.exists(stagingRoot)) await this.adapter.rmdir(stagingRoot, true);
-      const needed = new Set<string>();
-      for (const action of pending.actions) if (action.sha && await this.liveSha(action.path) !== action.sha) needed.add(action.sha);
-      const wanted = Object.fromEntries(Object.entries(pending.base).filter(([path, entry]) => this.allowed(path) && needed.has(entry.sha)));
-      const consume = async (path: string, bytes: Uint8Array): Promise<void> => {
-        if (await blobSha(bytes) !== wanted[path].sha) throw new Error(`导入文件与确认的云端版本不一致：${path}。请使用当前下载链接获取 ZIP。`);
-        const sha = wanted[path].sha;
-        if (staged.has(sha)) return;
-        const target = `${folder}/${sha}.bin`;
-        await this.ensureParent(target);
-        temporary.add(target);
-        await this.adapter.writeBinary(target, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
-        staged.set(sha, target);
-        this.progress(`正在解压、校验并暂存 · ${staged.size}/${needed.size} 个不同内容 · 尚未写入笔记`);
-      };
-      if (needed.size) {
-        if (Array.isArray(source)) {
-          const entries = directoryEntries(source, wanted);
-          for (const [path, file] of entries) {
-            // Directory imports retain the same per-file guard as ZIP extraction.
-            if (file.size > 96 * 1024 * 1024) throw new Error(`单个文件超过当前 96 MiB 处理上限：${path}。`);
-            await consume(path, new Uint8Array(await file.slice(0, file.size).arrayBuffer()));
-          }
-        } else {
-          await extractRepositoryArchive(source as ArchiveSource, wanted, message => this.progress(message), consume);
-        }
-      }
-      const missing = [...needed].filter(sha => !staged.has(sha));
-      if (missing.length) throw new Error(`导入内容缺少 ${missing.length} 个待下载文件，尚未写入笔记；请重新下载或选择正确的仓库目录。`);
-      if (this.state.pending !== pending || pending.scope !== this.scope()) throw new Error("导入期间同步范围发生变化，请重新确认。");
-      await this.recover(staged);
-      if (this.state.pending) throw new Error("导入尚未完成，原共同基准与待办已保留。");
-    } finally {
-      for (const path of temporary) {
-        try { if (await this.adapter.exists(path)) await this.adapter.remove(path); }
-        catch { console.warn("整库导入暂存文件未能清理，下次导入会重试。"); }
-      }
-      try { if (await this.adapter.exists(folder)) await this.adapter.rmdir(folder, false); }
-      catch { console.warn("整库导入暂存目录未能清理。"); }
-      this.running = false;
-    }
-  }
-
   private async ensureParent(path: string): Promise<void> {
     const parts = path.split("/"); parts.pop(); let current = "";
     for (const part of parts) { current = current ? `${current}/${part}` : part; if (!await this.adapter.exists(current)) await this.adapter.mkdir(current); }
   }
 
-  private async downloadArchive(pending: PendingTransaction): Promise<{ files: Map<string, string>; status: string; cleanup: () => Promise<void> }> {
-    const blobs = new Map<string, string>();
-    const temporary = new Set<string>();
-    const folder = `${this.statePath}.archive/${crypto.randomUUID()}`;
-    const result = { files: blobs, status: "", cleanup: async () => {
-      for (const path of temporary) {
-        try { if (await this.adapter.exists(path)) await this.adapter.remove(path); }
-        catch { console.warn("同步与分享：私人解压临时文件未能清理。"); }
-      }
-      try { if (await this.adapter.exists(folder)) await this.adapter.rmdir(folder, false); }
-      catch { console.warn("同步与分享：私人解压临时目录未能清理。"); }
-      blobs.clear();
-    } };
-    if (!pending.archive) return result;
-    const needed = new Set<string>();
-    for (let index = 0; index < pending.actions.length; index++) {
-      const action = pending.actions[index];
-      if (action.sha && await this.liveSha(action.path) !== action.sha) needed.add(action.sha);
-      if (index % 25 === 0) await new Promise<void>(resolve => window.setTimeout(resolve, 0));
-    }
-    if (!needed.size) return result;
-    const wanted = Object.fromEntries(Object.entries(pending.archive.files)
-      .filter(([path, entry]) => this.allowed(path) && needed.has(entry.sha)));
-    if (!Object.keys(wanted).length) return result;
-    let downloaded = false;
-    let folderReady = false;
-    try {
-      this.progress("正在从远端下载云端压缩包 · 下载完成后解压并按同步规则筛选…");
-      const bytes = await this.api(`${this.repo().prefix}/zipball/${encodeURIComponent(pending.archive.commit)}`, "GET", undefined, true, 180000);
-      if (!(bytes instanceof Uint8Array)) throw new Error("压缩包响应无效。");
-      downloaded = true;
-      this.progress(`云端压缩包下载成功 · ${(bytes.length / 1024 / 1024).toFixed(1)} MiB · 正在开始解压…`);
-      await new Promise<void>(resolve => window.setTimeout(resolve, 0));
-      let checked = 0;
-      await extractRepositoryArchive(bytes, wanted, message => this.progress(message), async (path, content) => {
-        if (++checked % 25 === 0) {
-          this.progress(`云端压缩包下载成功 · 正在解压、校验并暂存 · 已处理 ${checked}/${Object.keys(wanted).length} 个文件`);
-          await new Promise<void>(resolve => window.setTimeout(resolve, 0));
-        }
-        const sha = wanted[path].sha;
-        // Archive attributes can change file contents; use the original blob then.
-        if (blobs.has(sha) || await blobSha(content) !== sha) return;
-        const target = `${folder}/${sha}.bin`;
-        if (!folderReady) { await this.ensureParent(target); folderReady = true; }
-        temporary.add(target);
-        await this.adapter.writeBinary(target, content.buffer as ArrayBuffer);
-        blobs.set(sha, target);
-      });
-      const missing = [...needed].filter(sha => !blobs.has(sha)).length;
-      result.status = `整包下载成功 · 已校验并暂存 ${blobs.size} 个文件${missing ? ` · ${missing} 个文件改用逐文件下载` : ""}`;
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      result.status = `${downloaded ? "压缩包下载成功，但解压或暂存未完成" : "云端压缩包下载失败"}：${reason} · 已暂存 ${blobs.size} 个文件，其余改用逐文件下载`;
-    }
-    this.progress(result.status);
-    return result;
-  }
-
-  private async applyPending(onApplied?: (path?: string) => void, imported?: Map<string, string>): Promise<void> {
+  private async applyPending(onApplied?: (path?: string) => void): Promise<void> {
     const pending = this.state.pending!;
     if (pending.scope !== this.scope()) throw new Error("未完成同步的范围已变化，请恢复原同步范围再继续。");
-    const archived = imported ? { files: imported, status: "本地导入文件已校验 · 正在应用同步清单", cleanup: async () => {} }
-      : await this.downloadArchive(pending);
-    try {
-      if (pending.scope !== this.scope()) throw new Error("打包下载期间同步范围已变化，请重新预览。");
+    {
       // Reuse a verified local copy when multiple paths download the same blob.
       const downloaded = new Map<string, string>();
       const remaining = new Set(pending.actions.map(action => action.path));
@@ -941,7 +792,6 @@ export class MobileGithub {
         if (path) remaining.delete(path);
         if (onApplied) onApplied(path);
         else this.progress(`正在恢复本地同步结果 · 待同步 ${remaining.size} 个文件`);
-        if (archived.status) this.progress(`${archived.status}\n正在保存本地同步结果 · 待同步 ${remaining.size} 个文件`);
       };
       report();
       for (const action of pending.actions) {
@@ -958,11 +808,9 @@ export class MobileGithub {
           await this.adapter.remove(action.path);
         } else {
           const source = downloaded.get(action.sha);
-          const staged = archived.files.get(action.sha);
-          let bytes: Uint8Array | undefined = staged && await this.adapter.exists(staged) ? new Uint8Array(await this.adapter.readBinary(staged)) : (source && await this.adapter.exists(source)
-            ? new Uint8Array(await this.adapter.readBinary(source)) : undefined);
+          let bytes: Uint8Array | undefined = source && await this.adapter.exists(source)
+            ? new Uint8Array(await this.adapter.readBinary(source)) : undefined;
           if (!bytes || await blobSha(bytes) !== action.sha) {
-            if (imported) throw new Error(`暂存文件缺失或校验失败：${action.path}。请重新导入，原基准已保留。`);
             bytes = await this.getBlob(action.sha);
           }
           await this.ensureParent(action.path);
@@ -974,7 +822,7 @@ export class MobileGithub {
         report(action.path);
         if (remaining.size % 25 === 0) await new Promise<void>(resolve => window.setTimeout(resolve, 0));
       }
-    } finally { await archived.cleanup(); }
+    }
     if (this.state.downloadVerification) this.state.downloadVerification.phase = "verifying";
     await this.save();
     const verified = new Map<string, { mtime: number; ctime: number; size: number; dirty?: number } | null>();

@@ -37,13 +37,14 @@ import { LiveReview, ZoeySyncConflictPreviewModal } from "./conflictPreview";
 import { SetupDifferencesModal } from "./setupDifferences";
 import { GitSetup, OverlapChoice, SetupOverlapContent, SetupPreview, VerifiedRepo, setupGitIgnore, missingSetupIgnoreRules, pathBatches, explainSetupError, parseGithubRepoUrl, applySetupIgnoreBase } from "./onboarding";
 import { preserveUntrackedFiles } from "./untrackedFiles";
+import { hasCaseInsensitivePathCollisions, isInvalidGitPathError, repairRemoteFilenames } from "./remoteFilenameRepair";
 import { findNestedRepos, nestedGitIgnoreRules, nestedRepoFiles, rebuildNestedRepoTracking } from "./nestedRepos";
 
 import { DEFAULT_MOBILE_OPTIONS, MobileOptions, newPathRecords } from "./linkDiff";
 import { ConflictChoice, MobileGithub, RemoteSnapshot } from "./mobileGithub";
 import { MobileHost, MobileSyncModal, renderMobileSettings, renderMobileSyncRules, type MobileSyncFlow } from "./mobileUi";
 import { renderDownloadTask, renderPlanConfirmation, renderStrategy } from "./syncFlowUi";
-import { downloadSummary, type SyncStrategy } from "./syncPlan";
+import type { SyncStrategy } from "./syncPlan";
 
 type ViewStatusTone = "success" | "pending" | "error" | "checking" | "commit" | "fetch" | "merge" | "push";
 
@@ -306,6 +307,8 @@ export default class SyncFeature extends Component {
   private automaticPushQueued = false;
   private automaticBackupQueued = false;
   private startupPullScheduled = false;
+  private desktopStartupTimer?: number;
+  private desktopStartupGeneration = 0;
   private desktopGitQueue: Promise<void> = Promise.resolve();
   private setupGitPaused = false;
   private desktopGitTrace: string[] = [];
@@ -493,7 +496,7 @@ export default class SyncFeature extends Component {
       this.setStatus("正在检查首次同步差异…");
       const plan = await engine.preview();
       if (!await new MobileSyncModal(this.app, engine, plan, false, live => this.reviewLightweightDifferences(live), this.lightweightFlow()).wait()) {
-        if (engine.downloadTask) { this.setStatus("云端更新已确认 · 整库下载待办已保存，请从红色提醒继续"); return; }
+        if (engine.downloadTask) { this.setStatus("云端更新已确认 · 下载待办已保存，请从红色提醒继续"); return; }
         this.setStatus("首次同步未完成，请继续接入或手动同步");
         throw new Error("已保存连接，但同步已取消，接入尚未完成；请重试并确认同步以建立共同基线。");
       }
@@ -555,7 +558,7 @@ export default class SyncFeature extends Component {
       await this.getMobileGithub().restartSetup(true);
       this.settings.lightweightGuideProgress = undefined;
       await this.saveSettings();
-      this.setStatus("已清除所有同步基准 · 等待全库导入确认");
+      this.setStatus("已清除所有同步基准 · 等待重新配对确认");
     } finally { this.switchingSyncMode = false; }
     await this.syncNow(true);
   }
@@ -584,8 +587,7 @@ export default class SyncFeature extends Component {
       }
     } else if (this.nativeGitEnabled()) {
       this.configureDesktopAutomation();
-      this.scheduleStartupPull();
-      void this.resumeDesktopDirtyState(false);
+      this.scheduleDesktopStartup();
       this.setStatus(this.settings.setupComplete ? "桌面端 · Git 模式" : "等待首次 Git 配置");
     } else this.setStatus("电脑同步已关闭");
   }
@@ -608,6 +610,9 @@ export default class SyncFeature extends Component {
   }
 
   private clearDesktopTimeouts(): void {
+    this.desktopStartupGeneration++;
+    if (this.desktopStartupTimer !== undefined) window.clearTimeout(this.desktopStartupTimer);
+    this.desktopStartupTimer = undefined;
     if (this.viewRefreshTimer !== undefined) window.clearTimeout(this.viewRefreshTimer);
     if (this.idleCommitTimer !== undefined) window.clearTimeout(this.idleCommitTimer);
     if (this.maxCommitTimer !== undefined) window.clearTimeout(this.maxCommitTimer);
@@ -629,6 +634,19 @@ export default class SyncFeature extends Component {
         )
       );
     }
+  }
+
+  private scheduleDesktopStartup(): void {
+    const generation = this.desktopStartupGeneration;
+    this.app.workspace.onLayoutReady(() => {
+      if (generation !== this.desktopStartupGeneration || !this.featureActive || !this.nativeGitEnabled()) return;
+      this.desktopStartupTimer = window.setTimeout(() => {
+        this.desktopStartupTimer = undefined;
+        if (generation !== this.desktopStartupGeneration || !this.featureActive || !this.nativeGitEnabled()) return;
+        this.scheduleStartupPull();
+        void this.resumeDesktopDirtyState(false).catch(error => this.recordError("启动状态恢复", error));
+      }, 3000);
+    });
   }
 
   private scheduleStartupPull(): void {
@@ -1332,10 +1350,10 @@ export default class SyncFeature extends Component {
           branch: this.settings.mobile.branch, login: this.settings.lightweightGuideProgress?.login || "" };
         await this.saveSettings();
         this.setStatus("GitHub API · 两端已对齐");
-        await this.recordSuccess("整库下载", "文件已应用并验证，共同基准已确认。");
+        await this.recordSuccess("下载待办", "文件已应用并验证，共同基准已确认。");
       }
     } catch (error) {
-      await this.recordError("整库下载", error);
+      await this.recordError("下载待办", error);
       throw error;
     } finally {
       this.syncing = false;
@@ -1370,7 +1388,7 @@ export default class SyncFeature extends Component {
   getLightweightPendingStatus(): ViewStatusState | undefined {
     if (!this.useLightweightSync() || this.settings.mobile.mode !== "github") return undefined;
     if (!this.settings.mobile.bound) return { tone: "pending", text: "轻量同步尚未接入" };
-    if (this.mobileGithub?.downloadTask) return { tone: "pending", text: "整库下载待办未完成 · 点击上方红色提醒继续" };
+    if (this.mobileGithub?.downloadTask) return { tone: "pending", text: "下载待办未完成 · 点击上方红色提醒继续" };
     const verification = this.mobileGithub?.state.downloadVerification;
     if (verification) return { tone: "pending", text: `下载${verification.phase === "verifying" ? "验证" : "同步"}未完成 · 保留原基准 · 点击同步继续恢复` };
     if (this.needsLightweightBaseline()) return { tone: "pending", text: "尚未建立同步基准 · 需核对云端" };
@@ -1589,7 +1607,7 @@ export default class SyncFeature extends Component {
           const engine = this.getMobileGithub();
           await engine.load();
           if (engine.downloadTask) {
-            this.setStatus("整库下载待办尚未完成，请从上方红色提醒继续");
+            this.setStatus("下载待办尚未完成，请从上方红色提醒继续");
             if (showNotice) await this.openDownloadTask();
             return;
           }
@@ -1597,8 +1615,7 @@ export default class SyncFeature extends Component {
           if (showNotice) {
             if (!await new MobileSyncModal(this.app, engine, plan, false, live => this.reviewLightweightDifferences(live), this.lightweightFlow()).wait()) return;
           } else {
-            if (!engine.state.baseCommitSha || plan.conflicts.length || plan.localDeletes.length || plan.remoteDeletes.length ||
-                engine.initialSync && downloadSummary(plan.downloads.length, Object.keys(plan.desired).length).recommend) {
+            if (!engine.state.baseCommitSha || plan.conflicts.length || plan.localDeletes.length || plan.remoteDeletes.length) {
               throw new SyncDeferredError("有首次配对、冲突或删除待确认，请手动预览同步。");
             }
             await engine.execute(plan);
@@ -1927,6 +1944,7 @@ export default class SyncFeature extends Component {
     this.setupGitPaused = false;
     this.setupActivity = undefined;
     await this.restartDesktopAutomation();
+    if (!this.startupPullScheduled) this.scheduleDesktopStartup();
     this.setStatus("桌面端 · Git 模式");
     await this.refreshSyncView();
   }
@@ -2246,7 +2264,7 @@ export default class SyncFeature extends Component {
     await rebuildNestedRepoTracking(vaultPath, repos, (args) => this.gitRaw(args), this.app.vault.configDir);
   }
 
-  private async desktopFetchAndMerge(pushAfterResolve = false): Promise<boolean> {
+  private async desktopFetchAndMerge(pushAfterResolve = false, allowFilenameRepair = true): Promise<boolean> {
     this.setSyncActivity("正在检查云端更新…", "checking");
     await this.ensureDesktopGit();
     await this.ensureNormalGitState();
@@ -2290,6 +2308,16 @@ export default class SyncFeature extends Component {
       if (pushAfterResolve) await this.scheduleDesktopPushRetry(message);
       throw new SyncDeferredError(message);
     }
+    if (allowFilenameRepair && hasCaseInsensitivePathCollisions(
+      (await this.gitRaw(["ls-tree", "-r", "--name-only", "-z", "FETCH_HEAD"])).split("\0").filter(Boolean)
+    )) {
+      this.setSyncActivity("正在修复云端大小写重名文件…", "checking");
+      const repairedNames = await repairRemoteFilenames((args, authenticated = false, stdin) =>
+        this.exec("git", args, authenticated, false, 120000, undefined, stdin), this.settings.gitBranch);
+      this.desktopGitTrace.push(`已提交并推送云端文件名修复 · ${repairedNames.length} 项`, ...repairedNames);
+      new Notice(`同步：已在云端提交 ${repairedNames.length} 项文件名修复，重试下载并合并`, 10000);
+      return await this.desktopFetchAndMerge(pushAfterResolve, false);
+    }
     this.deferredMergePaths = [];
     const backup = await preserveUntrackedFiles(this.vaultBasePath(), args => this.gitRaw(args), mergeBase);
     if (backup) {
@@ -2301,7 +2329,21 @@ export default class SyncFeature extends Component {
       await this.traceDesktopGitStep("Git merge（合并远端提交）", () => this.git(["merge", "--no-edit", "FETCH_HEAD"]));
     } catch (error) {
       const conflicts = await this.getUnmergedPaths();
-      if (conflicts.length === 0) { await backup?.restore(); throw error; }
+      if (conflicts.length === 0) {
+        await backup?.restore();
+        if (allowFilenameRepair && isInvalidGitPathError(error)) {
+          await this.ensureNormalGitState();
+          this.setSyncActivity("正在修复云端非法文件名…", "checking");
+          const repairedNames = await repairRemoteFilenames((args, authenticated = false, stdin) =>
+            this.exec("git", args, authenticated, false, 120000, undefined, stdin), this.settings.gitBranch);
+          if (repairedNames.length) {
+            this.desktopGitTrace.push(`已提交并推送云端文件名修复 · ${repairedNames.length} 项`, ...repairedNames);
+            new Notice(`同步：已在云端提交 ${repairedNames.length} 项文件名修复，重试下载并合并`, 10000);
+            return await this.desktopFetchAndMerge(pushAfterResolve, false);
+          }
+        }
+        throw error;
+      }
       if (pushAfterResolve) {
         this.settings.pendingMergePushAfterResolve = true;
         await this.saveSettings();
@@ -3078,7 +3120,7 @@ class ZoeySyncView extends ItemView {
     const downloadEngine = this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github" ? this.plugin.getMobileGithub() : undefined;
     if (downloadEngine?.downloadTask) {
       const reminder = actions.createEl("button", { cls: "clickable-icon nav-action-button simple-one-sync-download-alert",
-        attr: { type: "button", "aria-label": "整库下载待办尚未完成", title: "继续选择下载方式或导入文件" } });
+        attr: { type: "button", "aria-label": "下载待办尚未完成", title: "继续逐文件下载" } });
       setIcon(reminder, "triangle-alert");
       reminder.addEventListener("click", () => void this.showDownloadTask());
     }
@@ -3322,6 +3364,7 @@ export class SyncSettingsTab extends PluginSettingTab {
   private lightweightGuideLogin = "";
   private lightweightGuideVerified?: RemoteSnapshot;
   private lightweightGuideRepoMode: "existing" | "create" = "existing";
+  private lightweightGuideTokenMode: "acquire" | "existing" = "acquire";
   private lightweightGuideRepoName = "";
   private lightweightGuideBusy = false;
   private lightweightGuideStateChecked = false;
@@ -3376,7 +3419,7 @@ export class SyncSettingsTab extends PluginSettingTab {
       "beginner-server": "笔记分享引导",
       "desktop-settings": "电脑端 Git 同步设置",
       mobile: "轻量 Git 同步设置",
-      server: this.plugin.host?.share?.isEdgeOneGuideOpen ? "腾讯 EdgeOne 接入引导" : "笔记分享设置"
+      server: this.plugin.host?.share?.isEdgeOneGuideOpen ? "腾讯 EdgeOne 接入引导" : this.plugin.host?.share?.isLibraryManagementOpen ? "分享库管理" : "笔记分享设置"
     };
     return titles[this.desktopPage];
   }
@@ -3403,6 +3446,7 @@ export class SyncSettingsTab extends PluginSettingTab {
 
   backToOverview(): boolean {
     if (this.desktopPage === "server" && this.plugin.host?.share?.backFromEdgeOneGuide()) return true;
+    if (this.desktopPage === "server" && this.plugin.host?.share?.backFromShareLibraryManagement?.()) return true;
     if (this.desktopPage === "root") return false;
     this.stopSetupBrowserAuthorization();
     this.lightweightGuideController?.abort();
@@ -3597,7 +3641,7 @@ export class SyncSettingsTab extends PluginSettingTab {
   private displayBeginnerMobile(containerEl: HTMLElement): void {
     containerEl.addClass("simple-one-sync-setup-page");
     const page = containerEl.createDiv({ cls: "simple-one-sync-setup-layout" });
-    this.displayDevicePreview(page, "轻量同步引导", "按四步完成 Token 授权、仓库核验与同步规则设置。");
+    this.displayDevicePreview(page, "轻量同步引导", "按四步获取并核验 Token、选择私人仓库、设置同步规则。首次同步前需确认文件预览。");
     if (!this.lightweightGuideDraft) {
       const options = this.plugin.settings.mobile;
       const progress = this.plugin.settings.lightweightGuideProgress;
@@ -3660,9 +3704,25 @@ export class SyncSettingsTab extends PluginSettingTab {
       });
     });
     if (this.lightweightGuideStep !== 1) { this.displayLightweightGuideStep(page); return; }
-    const card = page.createDiv({ cls: "simple-one-sync-mobile-guide__card" });
+    const guideCard = page.createDiv({ cls: "simple-one-sync-mobile-guide__card" });
+    new Setting(guideCard).setName("获取 GitHub token").setHeading();
+    guideCard.createEl("p", { text: "电脑端可从已登录的 GitHub CLI 获取；已有 token 可直接填入并核验。", cls: "simple-one-sync-setup-step-desc" });
+    const methods = guideCard.createDiv({ cls: "simple-one-sync-setup-options" });
+    for (const mode of ["acquire", "existing"] as const) {
+      const selected = mode === this.lightweightGuideTokenMode;
+      const button = methods.createEl("button", { text: mode === "acquire" ? "在电脑端获取 Token" : "已有 Token，直接填入",
+        cls: `simple-one-sync-setup-option${selected ? " is-selected" : ""}`, attr: { type: "button", "aria-pressed": String(selected) } });
+      button.addEventListener("click", () => { this.lightweightGuideTokenMode = mode; this.renderSettings(); });
+    }
+    const card = guideCard.createDiv({ cls: "simple-one-sync-lightweight-choice-content" });
+    if (this.lightweightGuideTokenMode === "existing") {
+      card.createEl("p", { text: "将已保存的 GitHub token 填入下一步。token 仅保存在本机，不写入共享配置。" });
+      const next = card.createEl("button", { text: "填入并核验 token", cls: "mod-cta", attr: { type: "button" } });
+      next.addEventListener("click", () => { this.lightweightGuideStep = 2; this.renderSettings(); });
+      return;
+    }
     const ready = !!this.lightweightGuideToken;
-    card.createEl("p", { text: "建议先在电脑端完成浏览器登录授权，再在本引导内一键获取 token。手机端可选择「已有 token，直接填入」核验连接。", cls: "simple-one-sync-section-desc" });
+    card.createEl("p", { text: "先在电脑端登录 GitHub CLI，再一键获取 token。请保存 token，以便在手机端或新设备使用。", cls: "simple-one-sync-section-desc" });
     const loginStatus = card.createDiv({ cls: "simple-one-sync-setup-status", attr: { role: "status", "aria-live": "polite" } });
     const loginIcon = loginStatus.createSpan({ cls: "simple-one-sync-setup-status__icon" });
     setIcon(loginIcon, "loader-circle");
@@ -3677,7 +3737,6 @@ export class SyncSettingsTab extends PluginSettingTab {
     });
     const actions = card.createDiv({ cls: "simple-one-sync-mobile-guide__actions" });
     const acquire = actions.createEl("button", { text: "一键获取 token（pc 端）", cls: Platform.isMobile ? "" : "mod-cta", attr: { type: "button" } });
-    const fill = actions.createEl("button", { text: "已有 token，直接填入", cls: Platform.isMobile ? "mod-cta" : "", attr: { type: "button" } });
     let loginReady = false;
     let acquiring = false;
     acquire.disabled = true;
@@ -3692,7 +3751,8 @@ export class SyncSettingsTab extends PluginSettingTab {
     tokenBox.createDiv({ text: "GitHub Token", cls: "simple-one-sync-mobile-guide__token-label" });
     const row = tokenBox.createDiv({ cls: "simple-one-sync-mobile-guide__token-row" });
     row.createEl("code", { text: this.lightweightGuideToken, cls: "simple-one-sync-mobile-guide__token-text" });
-    const copy = row.createEl("button", { text: "复制 token", attr: { type: "button" } });
+    const copy = row.createEl("button", { cls: "simple-one-sync-mobile-guide__copy", attr: { type: "button", "aria-label": "复制 token", title: "复制 token" } });
+    setIcon(copy, "copy");
     const copyStatus = tokenBox.createEl("p", { cls: "simple-one-sync-mobile-guide__result", attr: { role: "status", "aria-live": "polite" } });
     const reportCopy = (text: string, error = false) => {
       copyStatus.setText(text); copyStatus.toggleClass("simple-one-sync-setup-done", !error); copyStatus.toggleClass("simple-one-sync-setup-error", error);
@@ -3709,7 +3769,6 @@ export class SyncSettingsTab extends PluginSettingTab {
       if (!valid()) return;
       this.renderSettings();
     };
-    fill.addEventListener("click", () => { this.lightweightGuideStep = 2; this.renderSettings(); });
     const updateLoginStatus = (loggedIn: boolean, description: string, needsPrerequisites = !loggedIn): void => {
       if (!valid()) return;
       loginReady = loggedIn && !Platform.isMobile;
@@ -3738,7 +3797,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     }
     acquire.addEventListener("click", () => void (async () => {
       if (acquire.disabled) return;
-      acquiring = true; acquire.disabled = true; fill.disabled = true;
+      acquiring = true; acquire.disabled = true;
       const login = new AbortController(); this.lightweightGuideController = login;
       try {
         report("正在检查 GitHub 登录状态…");
@@ -3760,7 +3819,7 @@ export class SyncSettingsTab extends PluginSettingTab {
       } finally {
         if (this.lightweightGuideController === login) this.lightweightGuideController = undefined;
         acquiring = false;
-        if (valid()) { acquire.disabled = !loginReady; fill.disabled = false; }
+        if (valid()) acquire.disabled = !loginReady;
       }
     })());
     if (ready) {
@@ -3809,10 +3868,9 @@ export class SyncSettingsTab extends PluginSettingTab {
         if (!valid() && sameGuide()) this.renderSettings();
       }
     };
-    new Setting(body).setName("").setHeading();
+    new Setting(body).setName(["核验 GitHub Token", "选择 GitHub 仓库", "设置同步规则"][step - 2]).setHeading();
     if (step === 2) {
-      body.createEl("p", { text: "填入 token，核验是否能成功连接 GitHub。连接成功后自动进入选择仓库。" });
-      body.createEl("p", { text: "Token 仅保存在本机，不写入共享配置。" });
+      body.createEl("p", { text: "填入 token 并核验 GitHub 连接；成功后自动进入选择仓库。token 仅保存在本机。", cls: "simple-one-sync-setup-step-desc" });
       const tokenSetting = new Setting(body).setName("GitHub token").addText((text) => {
         text.inputEl.type = "password";
         text.setPlaceholder("粘贴 GitHub token").setValue(options.token).onChange((value) => {
@@ -3837,9 +3895,7 @@ export class SyncSettingsTab extends PluginSettingTab {
       if (this.lightweightGuideLogin) report(`✓ Token 有效，当前账号：${this.lightweightGuideLogin}。`);
     } else if (step === 3) {
       body.addClass("simple-one-sync-setup-intro", "simple-one-sync-setup-repository", "simple-one-sync-setup-body");
-      body.createEl("p", { text: "可以核验已有仓库，也可以由插件创建一个新的私人仓库。", cls: "simple-one-sync-setup-step-desc" });
-      body.createEl("p", { text: this.lightweightGuideLogin ? `✓ GitHub 连接成功，当前账号：${this.lightweightGuideLogin}。` : "正在回看已保存的仓库设置；重新接入时会再次核验授权与仓库。", cls: "simple-one-sync-setup-done" });
-      body.createEl("p", { text: "优先读取共享配置中的同步仓库地址；没有记录时，可手动填写或新建 GitHub 私人仓库。" });
+      body.createEl("p", { text: "核验已有私人仓库或新建私人仓库。", cls: "simple-one-sync-setup-step-desc" });
       const modes = body.createDiv({ cls: "simple-one-sync-setup-options" });
       for (const mode of ["existing", "create"] as const) {
         const selected = mode === this.lightweightGuideRepoMode;
@@ -3851,7 +3907,7 @@ export class SyncSettingsTab extends PluginSettingTab {
       const checkRepository = async () => {
         this.lightweightGuideVerified = undefined;
         options.branch = "";
-        report("正在检查仓库默认分支与读写权限…");
+        report("正在检查仓库…");
         const remote = await engine.verifyAccess();
         if (!valid()) return;
         options.repoUrl = parseGithubRepoUrl(options.repoUrl).url; options.branch = remote.branch;
@@ -3862,9 +3918,7 @@ export class SyncSettingsTab extends PluginSettingTab {
         this.renderSettings();
       };
       if (this.lightweightGuideRepoMode === "create") {
-        const heading = card.createDiv({ cls: "simple-one-sync-setup-section-header" });
-        new Setting(heading).setName("创建 GitHub 新仓库").setHeading();
-        card.createEl("p", { text: "填写仓库名称后，在当前 GitHub 账号下创建 private（私人）仓库，并初始化 README 和默认分支。此时不会推送本地文件。" });
+        card.createEl("p", { text: "填写仓库名称后，会自动在当前 GitHub 账号下创建私人仓库，并初始化 README 和默认分支。" });
         new Setting(card).setName("新仓库名称").addText((text) => text.setPlaceholder("例如 my-Obsidian-vault").setValue(this.lightweightGuideRepoName)
           .onChange((value) => { this.lightweightGuideRepoName = value.trim(); })).settingEl.addClass("simple-one-sync-setup-repo-name");
         card.appendChild(status);
@@ -3882,22 +3936,22 @@ export class SyncSettingsTab extends PluginSettingTab {
           }
         }))).settingEl.addClass("simple-one-sync-setup-action");
       } else {
-        new Setting(card).setName("核验已有 GitHub 仓库").setHeading();
-        card.createEl("p", { text: "在已有 GitHub 仓库页面点击「code」，复制 HTTPS 地址并填入下方。" });
-        card.createEl("p", { text: "核验仓库私人状态、默认主分支以及当前 token 的读写权限，通过后自动进入同步规则。", cls: "simple-one-sync-setup-helper" });
+        card.createEl("p", { text: "在已有仓库页面点击 code → copy，复制 HTTPS 地址并粘贴到下方输入框。", cls: "simple-one-sync-setup-helper" });
         const invalidate = () => { this.lightweightGuideVerified = undefined; status.empty(); updateNext(); };
-        const repoSetting = new Setting(card).setName("GitHub 仓库地址").addText((text) => text.setPlaceholder("https://github.com/用户名/仓库.git").setValue(options.repoUrl)
-          .onChange((value) => { options.repoUrl = value.trim(); invalidate(); }));
+        const repoSetting = new Setting(card).addText((text) => {
+          text.inputEl.setAttribute("aria-label", "GitHub 仓库地址");
+          text.setPlaceholder("https://github.com/用户名/仓库.git").setValue(options.repoUrl)
+            .onChange((value) => { options.repoUrl = value.trim(); invalidate(); });
+        });
         repoSetting.settingEl.addClass("simple-one-sync-setup-repo-url");
         card.appendChild(status);
         new Setting(card).addButton((button) => button.setButtonText("检查仓库").setCta().onClick(() => void run(checkRepository)))
           .settingEl.addClass("simple-one-sync-setup-action", "simple-one-sync-setup-check-action", "simple-one-sync-setup-auth-submit");
-        if (this.lightweightGuideVerified) report(`✓ 已核验私人仓库与读写权限 · 分支 ${this.lightweightGuideVerified.branch}。`);
       }
     } else {
+      body.createEl("p", { text: "选择本机同步范围，完成后可在轻量 Git 同步设置中调整。", cls: "simple-one-sync-setup-step-desc" });
       body.createEl("p", { text: `${options.repoUrl} · ${options.branch}` });
       if (!this.lightweightGuideVerified) body.createEl("p", { text: "正在回看已保存的同步规则；如需重新接入，请先返回核验 token 和仓库。" });
-      body.createEl("p", { text: "勾选本机同步规则，完成后仍可在轻量 Git 同步设置中调整。" });
       renderMobileSyncRules(body, options, () => {}, () => engine.listCloudPlugins(), this.plugin.manifest.id);
       body.createEl("p", { text: "完成后绑定并启用轻量同步；首次同步请查看文件预览，再确认执行。" });
     }
@@ -4244,8 +4298,8 @@ export class SyncSettingsTab extends PluginSettingTab {
       "核对本地与远端文件，并决定同名文件如何处理。",
       guidedDone ? "接入已完成，可回看核验结果或重新检查两端状态。" : "确认接入信息，然后执行首次推送。"
     ];
-    if (this.setupViewStep !== 1 && this.setupViewStep !== 3) {
-      new Setting(body).setName("").setHeading();
+    if (this.setupViewStep !== 1) {
+      new Setting(body).setName(steps[this.setupViewStep - 1]).setHeading();
       body.createEl("p", { text: descriptions[this.setupViewStep - 1], cls: "simple-one-sync-setup-step-desc" });
     }
     if (this.setupViewStep === 1) this.displaySetupAuth(body);
@@ -4381,7 +4435,6 @@ export class SyncSettingsTab extends PluginSettingTab {
     }
     const card = body.createDiv({ cls: "simple-one-sync-setup-detail" });
     if (this.setupRepoMode === "existing") {
-      new Setting(card).setName("核验已有 GitHub 仓库").setHeading();
       card.createEl("p", { text: "在已有 GitHub 仓库页面点击「code」，复制 HTTPS 地址并填入下方。" });
       card.createEl("p", { text: "核验会检查仓库是否为私有，以及当前登录账号是否具有写入权限。", cls: "simple-one-sync-setup-helper" });
       const repoUrlSetting = new Setting(card).setName("GitHub 仓库地址").addText((text) => text.setPlaceholder("https://github.com/user/vault.git").setValue(this.setupRepoInput).onChange((value) => { this.setupRepoInput = value.trim(); }));
@@ -4392,8 +4445,6 @@ export class SyncSettingsTab extends PluginSettingTab {
       }, "", false)))
         .settingEl.addClass("simple-one-sync-setup-action", "simple-one-sync-setup-check-action", "simple-one-sync-setup-auth-submit");
     } else {
-      const heading = card.createDiv({ cls: "simple-one-sync-setup-section-header" });
-      new Setting(heading).setName("创建 GitHub 新仓库").setHeading();
       card.createEl("p", { text: "填写仓库名称后，插件会在当前 GitHub 账号下创建一个空的 private（私人）仓库。此时不会推送本地文件。" });
       new Setting(card).setName("新仓库名称").addText((text) => text.setPlaceholder("例如 my-Obsidian-vault").setValue(this.setupRepoNameInput).onChange((value) => { this.setupRepoNameInput = value.trim(); })).settingEl.addClass("simple-one-sync-setup-repo-name");
       new Setting(card).addButton((button) => button.setButtonText("创建私人仓库").setCta().setDisabled(this.setupBusy).onClick(() => void this.runSetup(async () => {

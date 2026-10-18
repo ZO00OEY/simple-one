@@ -115,6 +115,7 @@ type SettingsPage =
   | { type: "display-enhancements" }
   | { type: "feature-enhancements" }
   | { type: "render-enhancements" }
+  | { type: "theme-formatting" }
   | { type: "notion-columns" }
   | { type: "event-reminders" }
   | { type: "date-management" }
@@ -140,6 +141,24 @@ const QUICK_FORMAT_HEADING_LABELS: Record<QuickFormatHeadingLevel, string> = {
   h5: "五级标题",
   h6: "六级标题",
 };
+
+function readRenderedFormatColor(
+  tag: "strong" | "em" | "mark" | "del",
+  property: "color" | "backgroundColor"
+): string {
+  const sample = document.body.createDiv({
+    cls: "markdown-rendered markdown-preview-view simple-format-color-sample",
+  });
+  const element = sample.createEl(tag, { text: "格式预览" });
+  const color = getComputedStyle(element)[property];
+  sample.remove();
+
+  const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number);
+  if (!channels || channels.length < 3 || channels.some((channel) => !Number.isFinite(channel))) {
+    return "#808080";
+  }
+  return `#${channels.map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("")}`;
+}
 
 export class SimpleSettingTab extends PluginSettingTab {
   plugin: SimplePlugin;
@@ -296,6 +315,8 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.renderFeatureEnhancementSettings(containerEl);
     } else if (this.page.type === "render-enhancements") {
       this.renderRenderEnhancementSettings(containerEl);
+    } else if (this.page.type === "theme-formatting") {
+      this.renderThemeFormattingSettings(containerEl);
     } else if (this.page.type === "notion-columns") {
       this.renderNotionColumnsSettings(containerEl);
     } else if (this.page.type === "event-reminders") {
@@ -479,6 +500,12 @@ export class SimpleSettingTab extends PluginSettingTab {
   private renderRenderEnhancementSettings(container: HTMLElement): void {
     this.renderPageHeader(container, "渲染优化");
     this.renderSettingCard(container, (card) => {
+      this.renderNavigationItem(
+        card,
+        "主题格式样式",
+        "调整正文加粗、斜体、高亮和删除线的显示效果；未自定义的项目继续跟随当前主题。",
+        () => this.openPage({ type: "theme-formatting" })
+      );
       this.renderNavigationItem(
         card,
         "HTML 预览",
@@ -754,6 +781,65 @@ export class SimpleSettingTab extends PluginSettingTab {
         disabledReasons.inlineExtraction,
         () => void planInlineImageExtraction(this.plugin)
       );
+    });
+  }
+
+  private renderThemeFormattingSettings(container: HTMLElement): void {
+    this.renderPageHeader(container, "主题格式样式", () => this.openPage({ type: "render-enhancements" }));
+    const formatting = this.plugin.settings.themeFormatting;
+    this.renderSettingCard(container, (card) => {
+      const colorSetting = (
+        name: string,
+        description: string,
+        key: keyof typeof formatting,
+        tag: "strong" | "em" | "mark" | "del",
+        property: "color" | "backgroundColor"
+      ): void => {
+        const value = formatting[key];
+        const setting = new Setting(card)
+          .setName(name)
+          .setDesc(`${description}当前：${value || "跟随主题"}`);
+        const preview = setting.controlEl.createSpan({
+          cls: "markdown-rendered simple-theme-format-preview",
+        });
+        preview.createEl(tag, {
+          text: { strong: "加粗", em: "斜体", mark: "高亮", del: "删除线" }[tag],
+        });
+        setting.addColorPicker((picker) => picker
+            .setValue(value || readRenderedFormatColor(tag, property))
+            .onChange(async (color) => {
+              formatting[key] = color;
+              await this.plugin.saveSettings();
+              this.plugin.applyThemeFormattingStyles();
+              this.renderSettingsPreservingScroll();
+            }))
+          .addButton((button) => button
+            .setButtonText("跟随主题")
+            .setDisabled(!value)
+            .onClick(async () => {
+              formatting[key] = "";
+              await this.plugin.saveSettings();
+              this.plugin.applyThemeFormattingStyles();
+              this.renderSettingsPreservingScroll();
+            }));
+      };
+
+      colorSetting("加粗文字颜色", "设置 Markdown 加粗文字颜色。", "boldColor", "strong", "color");
+      new Setting(card)
+        .setName("加粗字重")
+        .setDesc("调整加粗文字粗细；留空时由当前主题决定。")
+        .addDropdown((dropdown) => dropdown
+          .addOptions({ "": "跟随主题", "600": "半粗", "700": "加粗", "800": "特粗" })
+          .setValue(formatting.boldWeight)
+          .onChange(async (value) => {
+            formatting.boldWeight = value;
+            await this.plugin.saveSettings();
+            this.plugin.applyThemeFormattingStyles();
+          }));
+      colorSetting("斜体文字颜色", "设置 Markdown 斜体文字颜色。", "italicColor", "em", "color");
+      colorSetting("高亮背景颜色", "设置 ==高亮== 文本的背景颜色。", "highlightBackground", "mark", "backgroundColor");
+      colorSetting("高亮文字颜色", "设置高亮文本的前景颜色。", "highlightColor", "mark", "color");
+      colorSetting("删除线颜色", "设置 Markdown 删除线文字颜色。", "strikethroughColor", "del", "color");
     });
   }
 

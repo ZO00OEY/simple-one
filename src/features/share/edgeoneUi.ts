@@ -6,9 +6,46 @@ export function shareExternalLink(parent: HTMLElement, text: string, href: strin
     attr: { target: "_blank", rel: "noopener noreferrer" } });
 }
 
+export function renderMainlandPreviewNotice(parent: HTMLElement, projectUrl: string): void {
+  const first = parent.createDiv();
+  first.createSpan({ text: "当前加速区域包含中国大陆。未绑定自定义域名时，需从" });
+  shareExternalLink(first, "项目概览 ↗", projectUrl);
+  first.createSpan({ text: "获取预览链接（有效期 3 小时）。" });
+  parent.createDiv({ text: "长期访问请绑定已备案的自定义域名。" });
+}
+
+export interface EdgeOneRepositoryVisibility {
+  private: boolean | null;
+  checking: boolean;
+  error: string;
+  refresh: () => void;
+}
+
+function renderGithubAccessReminder(parent: HTMLElement, visibility?: EdgeOneRepositoryVisibility,
+  phase: "creation" | "deployment" = "deployment"): void {
+  if (!visibility) return;
+  if (visibility.checking || visibility.error) {
+    const status = parent.createDiv({ cls: "simple-share-edgeone-visibility-status" });
+    status.createEl("p", { text: visibility.checking ? "正在检查 GitHub 分享仓库是否公开…" : visibility.error,
+      cls: visibility.error ? "simple-one-sync-setup-error" : "simple-one-sync-setup-helper", attr: { role: "status", "aria-live": "polite" } });
+    if (visibility.error) status.createEl("button", { text: "重新检查仓库状态", attr: { type: "button" } })
+      .addEventListener("click", visibility.refresh);
+    return;
+  }
+  if (!visibility.private) return;
+  parent.createEl("p", {
+    text: phase === "creation"
+      ? "分享仓库为私有，请确认 EdgeOne Makers 已获该仓库的 GitHub 授权。"
+      : "本次部署未成功，且分享仓库为私有。请检查 EdgeOne Makers 是否仍有该仓库的 GitHub 授权，并查看部署日志确认原因。",
+    cls: "simple-one-sync-setup-error"
+  });
+  if (phase === "deployment") shareExternalLink(parent.createDiv({ cls: "simple-share-provider-links" }),
+    "在 GitHub 检查或补充授权 ↗", "https://github.com/settings/installations");
+}
+
 export function renderEdgeOneRow(parent: HTMLElement, connection: EdgeOneConnection, enabled: boolean,
   publishing: boolean, openGuide: () => void): void {
-  const row = new Setting(parent).setName("腾讯 EdgeOne Pages（Makers）").setClass("simple-share-provider-row");
+  const row = new Setting(parent).setName("EdgeOne Makers").setClass("simple-share-provider-row");
   const links = row.descEl.createDiv({ cls: "simple-share-provider-links" });
   if (connection.website) shareExternalLink(links, "打开分享网站 ↗", connection.website);
   shareExternalLink(links, "在腾讯检查项目设置 ↗", EDGEONE_PROJECTS_URL);
@@ -30,9 +67,28 @@ export function renderEdgeOneRow(parent: HTMLElement, connection: EdgeOneConnect
 }
 
 export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConnection, enabled: boolean,
-  publishing: boolean, back: () => void, shareGuide: () => void, embedded = false): void {
+  publishing: boolean, back: () => void, shareGuide: () => void, embedded = false, onProjectReady?: () => void,
+  repositoryVisibility?: EdgeOneRepositoryVisibility, progressText = ""): void {
   const blocked = !enabled || publishing || connection.busy;
   const completed = connection.completed;
+  const runAndContinue = async (work: () => Promise<void>): Promise<void> => {
+    await connection.run(work);
+    if (connection.error) return;
+    connection.authMode = "verify";
+    connection.refresh();
+    if (embedded && connection.projectCheckDone && connection.linked) onProjectReady?.();
+  };
+  if (connection.authMode === null) {
+    connection.tokenVerified = false;
+    connection.projectCheckDone = false;
+    connection.error = "";
+    connection.authMode = connection.hasToken ? "verify" : "create";
+    if (connection.hasToken) void Promise.resolve().then(async () => {
+      repositoryVisibility?.refresh();
+      await runAndContinue(() => connection.verifyToken(true));
+      if (connection.error && !connection.tokenVerified) { connection.authMode = "create"; connection.refresh(); }
+    });
+  }
   if (!embedded) {
   const status = parent.createDiv({ cls: `simple-one-sync-setup-status is-${connection.error ? "error" : completed ? "success" : "disconnected"}`, attr: { role: "status" } });
   setIcon(status.createSpan({ cls: "simple-one-sync-setup-status__icon" }), connection.error ? "triangle-alert" : completed ? "check" : "unplug");
@@ -42,7 +98,8 @@ export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConne
     ? "当前分享仓库已关联腾讯项目，最近一次分享已部署到正式网站。"
     : "核验腾讯授权，关联分享仓库，然后初始化网站。") });
   }
-  const available = connection.hasToken ? connection.linked ? 3 : 2 : 1;
+  const available = connection.authMode === "verify" && connection.tokenVerified && connection.hasToken
+    ? connection.linked ? 3 : 2 : 1;
   const step = Math.min(connection.state.step, available);
   if (!embedded) {
   const nav = parent.createDiv({ cls: "simple-one-sync-setup-nav simple-share-edgeone-nav" });
@@ -59,83 +116,120 @@ export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConne
     });
   });
   }
-  const body = parent.createDiv({ cls: "simple-one-sync-card simple-one-sync-setup-body simple-share-guide-body simple-share-edgeone-guide" });
+  const body = parent.createDiv({ cls: `simple-one-sync-setup-body simple-share-guide-body simple-share-edgeone-guide${embedded ? " is-embedded" : " simple-one-sync-card"}` });
+  const authBody = step === 1 || embedded && step >= 2
+    ? body.createDiv({ cls: "simple-share-edgeone-flow-step simple-share-edgeone-auth-section" }) : body;
+  if (step === 1 || embedded && step >= 2) {
+    new Setting(authBody).setName("授权 Simple One 管理 EdgeOne Makers").setHeading();
+    if (step >= 2) authBody.createEl("p", { text: "EdgeOne Makers API Token 已核验。", cls: "simple-one-sync-setup-feedback" });
+  }
   if (step === 1) {
-    new Setting(body).setName("选择授权方式").setHeading();
-    const options = body.createDiv({ cls: "simple-one-sync-setup-options simple-share-edgeone-auth-options" });
-    for (const mode of ["create", "verify"] as const) {
-      const button = options.createEl("button", { text: mode === "verify" ? "验证已有授权" : "填写 API Token",
-        cls: `simple-one-sync-setup-option${connection.authMode === mode ? " is-selected" : ""}`,
-        attr: { type: "button", "aria-pressed": String(connection.authMode === mode) } });
-      button.disabled = blocked || (mode === "verify" && !connection.hasToken);
-      button.addEventListener("click", () => {
-        connection.authMode = mode; connection.draftToken = ""; connection.error = ""; connection.message = "";
-        if (mode === "verify") void connection.run(() => connection.verifyToken(true));
-        else connection.refresh();
-      });
+    if (connection.authMode === "create") {
+      const links = authBody.createDiv({ cls: "simple-share-provider-links" });
+      shareExternalLink(links, "创建 EdgeOne Makers API Token ↗", EDGEONE_SETTINGS_URL);
+      authBody.createEl("p", { text: "登录腾讯云，依次进入 EdgeOne → Makers → 设置 → API Token，点击「创建 API Token」。" });
+    } else if (connection.authMode === "verify") {
+      authBody.createEl("p", { text: connection.tokenVerified ? "EdgeOne Makers API Token 已核验。" : "正在核验本机已保存的 EdgeOne Makers API Token…",
+        cls: connection.tokenVerified ? "simple-one-sync-setup-feedback" : "simple-one-sync-setup-helper", attr: { role: "status", "aria-live": "polite" } });
     }
     if (connection.authMode === "create") {
-      const links = body.createDiv({ cls: "simple-share-provider-links" });
-      shareExternalLink(links, "打开腾讯 API Token 设置 ↗", EDGEONE_SETTINGS_URL);
-      body.createEl("p", { text: "登录腾讯云，选择 EdgeOne → Makers → 设置 → API Token，点击「创建 API Token」。复制创建后的完整 API Token，粘贴到下方核验。" });
-      body.createEl("p", { text: "授权时间长度可给长授权，过期将无法查询构建状态。" });
-    } else {
-      body.createEl("p", { text: connection.hasToken ? "点击「验证已有授权」直接读取已保存的 API Token，重新检验连接。核验通过后进入关联分享仓库。" : "尚未保存 API Token，请先选择「填写 API Token」。" });
-    }
-    body.createEl("p", { text: "Token 仅存在你的本地设置中。" });
-    if (connection.authMode === "create") {
-    new Setting(body).setName("腾讯 API Token").setClass("simple-one-sync-token-input")
+    new Setting(authBody).setName("EdgeOne Makers API Token").setClass("simple-one-sync-token-input")
       .addText(text => {
         text.inputEl.type = "password";
         text.inputEl.autocomplete = "off";
-        text.setPlaceholder("粘贴腾讯 API Token").setValue(connection.draftToken).onChange(value => { connection.draftToken = value; });
+        text.setPlaceholder("粘贴完整的 API Token").setValue(connection.draftToken).onChange(value => { connection.draftToken = value; });
         text.inputEl.disabled = blocked;
       });
-    new Setting(body).addButton(button => button.setButtonText("核验连接").setCta().setDisabled(blocked)
-      .onClick(() => { void connection.run(() => connection.verifyToken()); }));
+    new Setting(authBody).addButton(button => button.setButtonText("核验连接").setCta().setDisabled(blocked)
+      .onClick(() => { void runAndContinue(() => connection.verifyToken()); }));
     }
-  } else if (step === 2) {
+  } else if (step === 2 || embedded && step >= 2) {
     const site = connection.site();
     const ready = !!site.owner && !!site.repo;
     if (!ready) {
-      body.createEl("p", { text: "请先完成笔记分享引导，创建并初始化专用的公开分享仓库。" });
+      body.createEl("p", { text: "请先完成笔记分享引导，创建或连接分享仓库。" });
       const button = body.createEl("button", { text: "前往笔记分享引导", attr: { type: "button" } });
       button.disabled = blocked; button.addEventListener("click", shareGuide);
     } else {
-      const repo = new Setting(body).setName("当前分享仓库").setClass("simple-share-repository-row");
-      shareExternalLink(repo.descEl, `https://github.com/${site.owner}/${site.repo}`, `https://github.com/${site.owner}/${site.repo}`);
-      body.createEl("p", { text: connection.linked
-        ? `已关联腾讯项目 ${connection.state.projectName}，分支为 ${site.branch}。后续推送分享会触发腾讯自动更新。`
-        : "当前分享仓库尚未关联腾讯项目，请选择已有项目或创建并关联。若提示 GitHub 尚未授权，请在腾讯控制台选择「导入 Git 仓库 → GitHub」，完成授权后返回重试。" });
-      const links = body.createDiv({ cls: "simple-share-provider-links" });
-      shareExternalLink(links, "打开腾讯项目页并授权 GitHub ↗", EDGEONE_PROJECTS_URL);
-      if (connection.linked && !embedded) {
-        new Setting(body).addButton(button => button.setButtonText("继续初始化或检查网站").setCta().setDisabled(blocked)
-          .onClick(() => { connection.state.step = 3; connection.refresh(); }));
-      } else if (!connection.linked) {
-      new Setting(body).setName("腾讯项目名称").setDesc("可使用建议名称，也可以填写自己的名称。")
-        .addText(text => {
-          text.setValue(connection.draftName || site.repo.toLowerCase().replace(/[^a-z0-9-]/g, "-")).onChange(value => { connection.draftName = value; });
-          text.inputEl.disabled = blocked;
+      const areaNames = { overseas: "全球（不含中国大陆）", mainland: "中国大陆", global: "全球（含中国大陆）" };
+      const project = body.createDiv({ cls: "simple-one-sync-setup-detail simple-share-edgeone-project-stage" });
+      if (!connection.projectCheckDone) {
+        const lookup = project.createDiv({ cls: "simple-share-edgeone-flow-step simple-share-edgeone-project-step" });
+        new Setting(lookup).setName("查找 EdgeOne Makers 项目").setHeading();
+        lookup.createEl("p", {
+          text: connection.busy ? connection.message || "正在查找匹配项目…"
+            : connection.error ? "项目查找未完成，可重试。" : "核验 API Token 后自动查找与当前分享仓库和分支匹配的项目。",
+          cls: "simple-one-sync-setup-helper", attr: { role: "status", "aria-live": "polite" }
         });
-      new Setting(body).setName("访问区域").setDesc("选择网站部署的加速区域。")
-        .addDropdown(dropdown => dropdown.addOptions({ overseas: "全球（不含中国大陆）", mainland: "中国大陆", global: "全球（含中国大陆）" })
-          .setValue(connection.area).setDisabled(blocked).onChange(value => { connection.area = value as typeof connection.area; }));
-      const domainHint = body.createEl("p", { cls: "simple-one-sync-setup-helper" });
-      domainHint.append("Page One 支持自定义域名，请在");
-      shareExternalLink(domainHint, "腾讯网页工作台", EDGEONE_PROJECTS_URL);
-      domainHint.append("中绑定，并按指引配置域名解析。插件不代办域名绑定或备案。");
-      if (connection.candidates.length) new Setting(body).setName("已有腾讯项目")
-        .addDropdown(dropdown => dropdown.addOptions(Object.fromEntries(connection.candidates.map(project => [project.ProjectId, project.Name])))
-          .setValue(connection.selectedProject).setDisabled(blocked).onChange(value => { connection.selectedProject = value; }));
-      new Setting(body)
-        .addButton(button => button.setButtonText("查找已有项目").setDisabled(blocked).onClick(() => { void connection.run(() => connection.findProjects()); }))
-        .addButton(button => button.setButtonText(connection.selectedProject ? "关联项目并继续" : "创建并关联项目").setCta().setDisabled(blocked)
-          .onClick(() => { void connection.run(() => connection.connectProject()); }));
+        if (connection.error && connection.hasToken) new Setting(lookup).addButton(button => {
+          button.buttonEl.addClass("simple-share-find-project");
+          button.setButtonText("重新查找项目").setDisabled(blocked)
+            .onClick(() => { void runAndContinue(async () => { await connection.enterRepositoryStep(); connection.projectCheckDone = true; }); });
+        });
+      } else if (connection.linked) {
+        const linked = project.createDiv({ cls: "simple-share-edgeone-flow-step simple-share-edgeone-project-step" });
+        new Setting(linked).setName("已关联 EdgeOne Makers 项目").setHeading();
+        const deploying = embedded && (publishing || connection.state.lastCheck?.kind === "pending");
+        if (deploying) linked.createEl("progress", { attr: { "aria-label": "正在验证仓库读取并部署" } });
+        const detail = deploying && progressText &&
+          !(connection.state.lastCheck?.kind === "pending" && /正在检查网站部署/.test(progressText))
+          ? progressText : connection.message;
+        linked.createEl("p", { text: detail,
+          cls: deploying || !embedded && connection.completed ? "simple-one-sync-setup-feedback" : "simple-one-sync-setup-helper",
+          attr: { role: "status", "aria-live": "polite" } });
+        renderGithubAccessReminder(linked, repositoryVisibility);
+        if (repositoryVisibility) shareExternalLink(linked.createDiv({ cls: "simple-share-provider-links" }), "查看 EdgeOne 项目及部署日志 ↗", EDGEONE_PROJECTS_URL);
+        if (!embedded) new Setting(linked).addButton(button => button.setButtonText("继续初始化或检查网站").setCta().setDisabled(blocked)
+          .onClick(() => { connection.state.step = 3; connection.refresh(); }));
+      } else if (connection.candidates.length) {
+        const choice = project.createDiv({ cls: "simple-share-edgeone-flow-step simple-share-edgeone-project-step" });
+        new Setting(choice).setName("选择已有项目").setHeading();
+        choice.createEl("p", { text: connection.message, cls: "simple-one-sync-setup-helper", attr: { role: "status", "aria-live": "polite" } });
+        new Setting(choice).setName("匹配的 EdgeOne Makers 项目")
+          .addDropdown(dropdown => dropdown.addOptions(Object.fromEntries(connection.candidates.map(item => [item.ProjectId, `${item.Name}（${item.ProjectId}）`])))
+            .setValue(connection.selectedProject).setDisabled(blocked).onChange(value => { connection.selectedProject = value; }));
+        new Setting(choice).addButton(button => button.setButtonText("关联所选项目并继续").setCta().setDisabled(blocked)
+          .onClick(() => { void runAndContinue(() => connection.connectProject()); }));
+      } else {
+        project.createEl("p", { text: connection.message, cls: "simple-one-sync-setup-helper", attr: { role: "status", "aria-live": "polite" } });
+        const steps = project.createDiv({ cls: "simple-share-edgeone-project-steps" });
+        const github = steps.createDiv({ cls: "simple-share-edgeone-flow-step simple-share-edgeone-project-step" });
+        new Setting(github).setName("使用 GitHub 分享仓库");
+        github.createEl("p", { text: `本次使用：${site.owner}/${site.repo}（${site.branch} 分支）`, cls: "simple-share-edgeone-selected-repo" });
+        if (connection.projectCreationFailed) {
+          github.createEl("p", { text: "项目创建未成功。若错误涉及仓库读取，请检查 EdgeOne 的 GitHub 连接和仓库授权后重试。",
+            cls: "simple-one-sync-setup-helper" });
+          renderGithubAccessReminder(github, repositoryVisibility, "creation");
+          const links = github.createDiv({ cls: "simple-share-provider-links" });
+          shareExternalLink(links, "在 EdgeOne 导入 GitHub 仓库 ↗", EDGEONE_PROJECTS_URL);
+          shareExternalLink(links, "在 GitHub 检查或补充授权 ↗", "https://github.com/settings/installations");
+        }
+        const region = steps.createDiv({ cls: "simple-share-edgeone-flow-step simple-share-edgeone-project-step" });
+        const regionSetting = new Setting(region).setName("为新建 EdgeOne Makers 项目选择加速区域")
+          .setDesc(`项目名称自动使用分享仓库名：${site.repo.toLowerCase().replace(/[^a-z0-9-]/g, "-")}。`)
+          .addDropdown(dropdown => dropdown.addOptions(areaNames)
+            .setValue(connection.area).setDisabled(blocked).onChange(value => {
+              connection.area = value as typeof connection.area;
+              updateAreaNote();
+            }));
+        const areaNote = regionSetting.infoEl.createDiv({ cls: "simple-share-edgeone-area-note", attr: { role: "note" } });
+        setIcon(areaNote.createSpan({ cls: "simple-share-edgeone-area-note__icon" }), "circle-alert");
+        const areaCopy = areaNote.createDiv();
+        const updateAreaNote = () => {
+          areaCopy.replaceChildren();
+          if (connection.area === "overseas") areaCopy.textContent = "该区域不提供中国大陆节点加速；项目域名在非中国大陆可直接访问，绑定自定义域名无需备案。";
+          else renderMainlandPreviewNotice(areaCopy, EDGEONE_PROJECTS_URL);
+        };
+        updateAreaNote();
+        new Setting(project).addButton(button => button.setButtonText("创建并关联项目").setCta().setDisabled(blocked)
+          .onClick(() => { void runAndContinue(() => connection.connectProject()); }))
+          .addButton(button => {
+            button.buttonEl.addClass("simple-share-find-project");
+            button.setButtonText("已在腾讯创建？重新查找").setDisabled(blocked)
+              .onClick(() => { void runAndContinue(async () => { await connection.enterRepositoryStep(); connection.projectCheckDone = true; }); });
+          });
       }
     }
-  } else if (embedded) {
-    body.createEl("p", { text: `已关联项目 ${connection.state.projectName ?? ""}，继续验证仓库属性后初始化网站。` });
   } else {
     body.createEl("h3", { text: completed ? "接入已完成" : "初始化腾讯分享网站" });
     body.createEl("p", { text: `项目：${connection.state.projectName ?? ""}` });
@@ -150,7 +244,7 @@ export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConne
       .addButton(button => button.setButtonText("返回分享设置").onClick(() => { connection.stop(); back(); }));
   }
   if (connection.busy) body.createEl("progress", { attr: { "aria-label": "腾讯接入正在进行" } });
-  if (connection.message || connection.error) body.createEl("p", {
+  if (connection.error || connection.message && (connection.busy || step !== 2 || !connection.projectCheckDone)) body.createEl("p", {
     text: connection.error || connection.message,
     cls: connection.error ? "simple-one-sync-setup-error" : "simple-one-sync-setup-feedback",
     attr: { role: "status", "aria-live": "polite" }

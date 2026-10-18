@@ -128,6 +128,7 @@ export interface SimplePluginSettings {
   enableInlineCodeCopy: boolean;
   enableHtmlPreview: boolean;
   enableReadableCustomTags: boolean;
+  themeFormatting: ThemeFormattingSettings;
   enableNotionColumns: boolean;
   enableNotionColumnsMouseGesture: boolean;
   enableNotionColumnsContextMenu: boolean;
@@ -236,6 +237,15 @@ export interface EnhancementSettings {
   quickCopyLink: QuickCopyLinkSettings;
   quickFormat: QuickFormatSettings;
   currentNoteLinkConverter: CurrentNoteLinkConverterSettings;
+}
+
+export interface ThemeFormattingSettings {
+  boldColor: string;
+  boldWeight: string;
+  italicColor: string;
+  highlightBackground: string;
+  highlightColor: string;
+  strikethroughColor: string;
 }
 
 export interface QuickCopyLinkSettings {
@@ -686,6 +696,14 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   enableInlineCodeCopy: true,
   enableHtmlPreview: true,
   enableReadableCustomTags: true,
+  themeFormatting: {
+    boldColor: "",
+    boldWeight: "",
+    italicColor: "",
+    highlightBackground: "",
+    highlightColor: "",
+    strikethroughColor: "",
+  },
   enableNotionColumns: true,
   enableNotionColumnsMouseGesture: true,
   enableNotionColumnsContextMenu: true,

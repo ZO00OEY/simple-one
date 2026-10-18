@@ -15,12 +15,12 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 const hash = bytes => createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
 try {
   const bundle = join(folder, "mobile.cjs");
-  await esbuild.build({ stdin: { contents: 'export { MobileGithub } from "./src/features/sync/mobileGithub"; export { downloadSummary, mirrorPlan, strategyChoices } from "./src/features/sync/syncPlan";', resolveDir: process.cwd() }, bundle: true, platform: "node", format: "cjs", outfile: bundle,
+  await esbuild.build({ stdin: { contents: 'export { MobileGithub } from "./src/features/sync/mobileGithub"; export { mirrorPlan, strategyChoices } from "./src/features/sync/syncPlan";', resolveDir: process.cwd() }, bundle: true, platform: "node", format: "cjs", outfile: bundle,
     plugins: [{ name: "mock-obsidian", setup(build) {
       build.onResolve({ filter: /^obsidian$/ }, () => ({ path: "obsidian", namespace: "mock" }));
       build.onLoad({ filter: /.*/, namespace: "mock" }, () => ({ contents: "export const requestUrl = request => globalThis.githubRequest(request);" }));
     } }] });
-  const { MobileGithub, downloadSummary, mirrorPlan, strategyChoices } = require(bundle);
+  const { MobileGithub, mirrorPlan, strategyChoices } = require(bundle);
   async function fixture(localTexts, remoteTexts) {
     let clock = 100, head = "c0", root = "t0", commitIndex = 0, treeIndex = 0;
     const local = new Map(), blobs = new Map(), trees = new Map(), commits = new Map(), calls = [];

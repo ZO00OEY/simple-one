@@ -107,6 +107,58 @@ for (const [pull, backup, expected] of [
 }
 console.log('Desktop startup: fetch-only mode, fetch-before-backup order and deferred merge protection passed');
 
+for (const cancel of [false, true]) {
+  const f = fixture();
+  Object.assign(f.sync, {
+    desktopStartupGeneration: 0, featureActive: true,
+    host: { app: { workspace: { onLayoutReady: fn => fn() } } },
+    nativeGitEnabled: () => true,
+    scheduleStartupPull: () => f.calls.push('startup-sync'),
+    resumeDesktopDirtyState: async () => f.calls.push('recover'),
+  });
+  f.sync.scheduleDesktopStartup();
+  await advance(2 / 60);
+  assert.deepEqual(f.calls, [], 'startup tasks wait for the UI grace period');
+  if (cancel) f.sync.clearDesktopTimeouts();
+  await advance(1 / 60);
+  assert.deepEqual(f.calls, cancel ? [] : ['startup-sync', 'recover'],
+    'delayed tasks run after three seconds unless cancelled');
+}
+{
+  const f = fixture();
+  let ready;
+  Object.assign(f.sync, {
+    desktopStartupGeneration: 0, featureActive: true,
+    host: { app: { workspace: { onLayoutReady: fn => { ready = fn; } } } },
+    nativeGitEnabled: () => true,
+    scheduleStartupPull: () => f.calls.push('startup-sync'),
+    resumeDesktopDirtyState: async () => f.calls.push('recover')
+  });
+  f.sync.scheduleDesktopStartup();
+  f.sync.clearDesktopTimeouts();
+  ready();
+  await advance(1);
+  assert.deepEqual(f.calls, [], 'unloading before layout readiness cancels the pending callback');
+}
+console.log('Desktop startup delay: grace period, timer cancellation and stale layout callback protection passed');
+
+{
+  const f = fixture();
+  f.sync.settings.setupBackup = { step: 2, repoUrl: 'https://github.com/example/vault', verified: undefined };
+  f.sync.settings.setupMutationStarted = false;
+  f.sync.saveSettings = async () => {};
+  f.sync.restartDesktopAutomation = async () => f.calls.push('restart');
+  f.sync.scheduleDesktopStartup = () => f.calls.push('startup');
+  f.sync.refreshSyncView = async () => {};
+  await f.sync.cancelSetup();
+  assert.deepEqual(f.calls, ['restart', 'startup'], 'cancelling setup restores a startup task that was paused before it ran');
+  f.calls.length = 0;
+  f.sync.settings.setupBackup = { step: 2, repoUrl: '', verified: undefined };
+  f.sync.startupPullScheduled = true;
+  await f.sync.cancelSetup();
+  assert.deepEqual(f.calls, ['restart'], 'an already scheduled startup sync is not scheduled again');
+}
+
 for (const saved of [{}, { pullOnStartup: true, backupOnStartup: true }]) {
   const f = fixture();
   Object.assign(f.sync, {

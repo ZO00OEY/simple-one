@@ -26,6 +26,7 @@ import { registerImageZoom } from "./features/imageZoom";
 import { registerMermaidEnhancer } from "./features/mermaidEnhancer";
 import { registerLinkFilter } from "./features/linkFilter";
 import { registerNewNoteDefaults } from "./features/newNoteDefaults";
+import { registerNoteFilenameFilter } from "./features/noteFilenameFilter";
 import { registerPopupWindowSizing } from "./features/popupWindowSizing";
 import { registerWindowPositionOptimization } from "./features/windowPositionOptimization";
 import { registerQuickCopyLink } from "./features/quickCopyLink";
@@ -112,6 +113,29 @@ export default class SimplePlugin extends Plugin {
     this.applyReadableLineWidth();
     this.applyImageHeightLimit();
     this.applyMobileHeaderButtons();
+    this.applyThemeFormattingStyles();
+    this.register(() => {
+      const docs = new Set<Document>([document]);
+      this.app.workspace.iterateAllLeaves((leaf) => docs.add(leaf.getContainer().doc));
+      for (const doc of docs) {
+        doc.body.classList.remove(
+          "simple-format-bold-color",
+          "simple-format-bold-weight",
+          "simple-format-italic-color",
+          "simple-format-highlight-background",
+          "simple-format-highlight-color",
+          "simple-format-strikethrough-color"
+        );
+        for (const property of [
+          "--simple-format-bold-color",
+          "--simple-format-bold-weight",
+          "--simple-format-italic-color",
+          "--simple-format-highlight-background",
+          "--simple-format-highlight-color",
+          "--simple-format-strikethrough-color",
+        ]) doc.body.style.removeProperty(property);
+      }
+    });
     this.registerEvent(this.app.workspace.on("css-change", () => this.applyMobileHeaderButtons()));
     this.register(() => {
       document.body.classList.remove("simple-mobile-header-size", "simple-mobile-native-header", "simple-mobile-compact-bottom");
@@ -138,6 +162,7 @@ export default class SimplePlugin extends Plugin {
       applyQuickFormatStyles(this, win.doc);
       this.applyReadableLineWidth(win.doc);
       this.applyReadableCustomTagStyles();
+      this.applyThemeFormattingStyles(win.doc);
     }));
     this.register(() => document.body.classList.remove("simple-readable-custom-tags"));
 
@@ -188,6 +213,7 @@ export default class SimplePlugin extends Plugin {
     this.refreshMermaidEnhancements = registerMermaidEnhancer(this);
     this.refreshTemplateFillActions = registerTemplateFillAction(this);
     registerNewNoteDefaults(this);
+    registerNoteFilenameFilter(this);
     registerQuickCopyLink(this);
     this.refreshQuickFormatActions = registerQuickFormat(this);
     this.refreshReformatActions = registerCurrentNoteLinkConverter(this);
@@ -300,6 +326,10 @@ export default class SimplePlugin extends Plugin {
     this.settings.enableImageZoom = data?.enableImageZoom ?? DEFAULT_SETTINGS.enableImageZoom;
     this.settings.enableHtmlPreview = data?.enableHtmlPreview ?? DEFAULT_SETTINGS.enableHtmlPreview;
     this.settings.enableReadableCustomTags = data?.enableReadableCustomTags ?? DEFAULT_SETTINGS.enableReadableCustomTags;
+    this.settings.themeFormatting = {
+      ...DEFAULT_SETTINGS.themeFormatting,
+      ...data?.themeFormatting,
+    };
     this.settings.enableNotionColumns = data?.enableNotionColumns ?? DEFAULT_SETTINGS.enableNotionColumns;
     this.settings.htmlPreviewRules = data?.htmlPreviewRules ?? DEFAULT_SETTINGS.htmlPreviewRules;
     for (const rule of this.settings.htmlPreviewRules) {
@@ -386,6 +416,27 @@ export default class SimplePlugin extends Plugin {
     for (const doc of docs) {
       doc.body.classList.toggle("simple-readable-custom-tags", this.settings.enableReadableCustomTags);
       this.decorateCustomTags(doc.body);
+    }
+  }
+
+  applyThemeFormattingStyles(targetDoc?: Document): void {
+    const docs = targetDoc ? new Set([targetDoc]) : new Set<Document>([document]);
+    if (!targetDoc) this.app.workspace.iterateAllLeaves((leaf) => docs.add(leaf.getContainer().doc));
+    const formats = [
+      ["boldColor", "simple-format-bold-color", "--simple-format-bold-color"],
+      ["boldWeight", "simple-format-bold-weight", "--simple-format-bold-weight"],
+      ["italicColor", "simple-format-italic-color", "--simple-format-italic-color"],
+      ["highlightBackground", "simple-format-highlight-background", "--simple-format-highlight-background"],
+      ["highlightColor", "simple-format-highlight-color", "--simple-format-highlight-color"],
+      ["strikethroughColor", "simple-format-strikethrough-color", "--simple-format-strikethrough-color"],
+    ] as const;
+    for (const doc of docs) {
+      for (const [key, className, property] of formats) {
+        const value = this.settings.themeFormatting[key].trim();
+        doc.body.classList.toggle(className, !!value);
+        if (value) doc.body.style.setProperty(property, value);
+        else doc.body.style.removeProperty(property);
+      }
     }
   }
 

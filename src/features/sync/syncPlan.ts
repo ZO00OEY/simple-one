@@ -3,11 +3,6 @@ import type { ConflictChoice, MobilePlan } from "./mobileGithub";
 
 export type SyncStrategy = "merge" | "remote" | "local" | "custom";
 
-export function downloadSummary(downloads: number, total: number): { ratio: number; recommend: boolean } {
-  const ratio = total ? Math.min(1, downloads / total) : 0;
-  return { ratio, recommend: downloads > 1000 || downloads >= 100 && ratio >= 0.5 };
-}
-
 export function strategyChoices(plan: MobilePlan, strategy: SyncStrategy): Record<string, ConflictChoice> {
   const choices = { ...plan.pendingChoices };
   if (strategy !== "merge") return choices;

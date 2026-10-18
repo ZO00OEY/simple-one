@@ -3,7 +3,7 @@ import { settingsSection } from "../../shared/settingsLayout";
 import { MobileOptions, sameContent } from "./linkDiff";
 import { ConflictChoice, MobileConflict, MobileGithub, MobilePlan } from "./mobileGithub";
 import { LiveReview, PreviewFile, ZoeySyncConflictPreviewModal } from "./conflictPreview";
-import { downloadSummary, mirrorPlan, strategyChoices, type SyncStrategy } from "./syncPlan";
+import { mirrorPlan, strategyChoices, type SyncStrategy } from "./syncPlan";
 
 export interface MobileSyncFlow {
   strategy(plan: MobilePlan): Promise<SyncStrategy | null>;
@@ -63,8 +63,7 @@ export class MobileSyncModal {
     }
     if (this.plan.conflicts.length && !await this.reviewDifferences()) return false;
     if (this.flow && !await this.flow.confirm(this.plan)) return false;
-    const deferred = !!this.flow && this.engine.initialSync && downloadSummary(this.plan.downloads.length, Object.keys(this.plan.desired).length).recommend;
-    await this.engine.execute(this.plan, deferred);
+    await this.engine.execute(this.plan);
     if (this.engine.downloadTask) { await this.flow?.transfer(); return false; }
     if (this.engine.requiresPluginReload(this.plan)) new Notice("同步与分享 程序文件已更新，请重新加载插件或重启 Obsidian 使新代码生效。", 12000);
     return true;
@@ -254,16 +253,16 @@ export function renderMobileSettings(root: HTMLElement, host: MobileHost, guide 
     const troubleshooting = settingsSection(root, "故障排查");
     const confirmation = troubleshooting.createDiv();
     confirmation.hidden = true;
-    new Setting(troubleshooting).setName("清除所有基准 base 并重新执行全库导入")
-      .setDesc("若变更内容过多，可通过此方式全库导入云端库内容；或将云端内容打包下载后执行导入，以更节省时间。")
-      .addButton(button => button.setButtonText("重新执行全库导入").setDisabled(!host.active() || !options.bound)
+    new Setting(troubleshooting).setName("清除所有同步基准并重新配对")
+      .setDesc("重新检查本地与云端文件，预览并确认后通过 GitHub API 逐文件同步。")
+      .addButton(button => button.setButtonText("重新配对").setDisabled(!host.active() || !options.bound)
         .onClick(() => { confirmation.hidden = false; }));
     troubleshooting.appendChild(confirmation);
     confirmation.createEl("p", { text: "将清除全部同步基准、缓存与未完成进度，保留本机和云端实际文件、仓库绑定及同步规则。随后重新检查全库，确认同步范围和处理方式后才写入文件。" });
     const feedback = confirmation.createEl("p", { attr: { role: "status", "aria-live": "polite" } });
     const cancel = confirmation.createEl("button", { text: "取消", attr: { type: "button" } });
     cancel.addEventListener("click", () => { confirmation.hidden = true; });
-    const confirm = confirmation.createEl("button", { text: "确认清除基准并重新导入", attr: { type: "button" } });
+    const confirm = confirmation.createEl("button", { text: "确认清除基准并重新配对", attr: { type: "button" } });
     confirm.addEventListener("click", () => {
       confirm.disabled = true; cancel.disabled = true;
       feedback.setText("正在清除基准并检查全库…");

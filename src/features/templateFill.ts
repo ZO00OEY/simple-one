@@ -1,4 +1,5 @@
 import { runAsync } from "../shared/async";
+import { sanitizeNoteFilename } from "../shared/noteFilename";
 import {
   App,
   htmlToMarkdown,
@@ -665,7 +666,7 @@ export class TemplateFillView extends ItemView {
     content = addSiteBodyMarker(content, result.siteRule);
 
     const rawName = editedFields[cat.filenameField] || "未命名";
-    const safeName = rawName.replace(/[\\/:*?"<>|]/g, "_");
+    const safeName = sanitizeNoteFilename(rawName);
 
     const folderPath = cat.outputFolder.trim() ? normalizePath(cat.outputFolder) : "";
     const filePath = folderPath ? normalizePath(`${folderPath}/${safeName}.md`) : `${safeName}.md`;

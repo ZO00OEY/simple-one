@@ -4,7 +4,6 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import vm from "node:vm";
 import esbuild from "esbuild";
-import { zipSync } from "fflate";
 
 const output = resolve("../../../.codex/output");
 await mkdir(output, { recursive: true });
@@ -12,7 +11,7 @@ const folder = await mkdtemp(join(output, "mobile-runtime-test-"));
 try {
   const bundle = join(folder, "runtime.cjs");
   await esbuild.build({ stdin: {
-    contents: 'export { default as LinkPlugin, SyncSettingsTab } from "./src/features/sync/index"; export { MobileGithub } from "./src/features/sync/mobileGithub"; export { extractRepositoryArchive } from "./src/features/sync/repositoryArchive"; export { blobSha } from "./src/features/sync/linkDiff"; export { ZoeySyncConflictPreviewModal } from "./src/features/sync/conflictPreview"; export { textParts, resolveTextParts } from "./src/features/sync/textDiff";',
+    contents: 'export { default as LinkPlugin, SyncSettingsTab } from "./src/features/sync/index"; export { MobileGithub } from "./src/features/sync/mobileGithub"; export { blobSha } from "./src/features/sync/linkDiff"; export { ZoeySyncConflictPreviewModal } from "./src/features/sync/conflictPreview"; export { textParts, resolveTextParts } from "./src/features/sync/textDiff";',
     resolveDir: process.cwd()
   }, bundle: true, platform: "browser", format: "cjs", external: ["obsidian"],
     loader: { ".png": "dataurl" }, outfile: bundle });
@@ -36,7 +35,7 @@ try {
     context.window = context;
     vm.runInContext(source, context);
     assert.deepEqual(nodeLoads, [], `${platform}: plugin loads without Node modules`);
-    const { LinkPlugin, MobileGithub, extractRepositoryArchive, blobSha, ZoeySyncConflictPreviewModal, textParts, resolveTextParts } = context.module.exports;
+    const { LinkPlugin, MobileGithub, blobSha, ZoeySyncConflictPreviewModal, textParts, resolveTextParts } = context.module.exports;
     // Completing (or leaving) the guide must redraw the sidebar after releasing
     // the busy flag, even when no later vault event triggers another render.
     for (const outcome of ["success", "cancel", "error"]) {
@@ -91,40 +90,6 @@ try {
     assert.equal(created, 1); assert.equal(revealed, 0);
     await LinkPlugin.prototype.openSyncView.call(sidebar);
     assert.equal(revealed, 1); assert.equal(refreshed, 1);
-    const zip = zipSync({ 'vault/note.md': new TextEncoder().encode('mobile archive'),
-      'vault/.obsidian/plugins/unselected/main.js': new TextEncoder().encode('excluded plugin') });
-    const extracted = await extractRepositoryArchive(zip, { 'note.md': { sha: 'fixture', mode: '100644' } }, () => {});
-    assert.equal(extracted.size, 1);
-    assert.equal(new TextDecoder().decode(extracted.get('note.md')), 'mobile archive');
-    const oversizedZip = zipSync({
-      'vault/note.md': new TextEncoder().encode('selected from large archive'),
-      'vault/excluded.bin': new Uint8Array(65 * 1024 * 1024)
-    }, { level: 0 });
-    assert(oversizedZip.length > 64 * 1024 * 1024);
-    let oversizedConsumed = 0;
-    const oversizedResult = await extractRepositoryArchive(oversizedZip,
-      { 'note.md': { sha: 'fixture', mode: '100644' } }, () => {}, async (path, bytes) => {
-        assert.equal(path, 'note.md');
-        assert.equal(new TextDecoder().decode(bytes), 'selected from large archive');
-        oversizedConsumed++;
-      });
-    assert.equal(oversizedConsumed, 1, 'large archives still extract only the selected file');
-    assert.equal(oversizedResult.size, 0, 'large archive results are consumed rather than retained');
-    const payload = new Uint8Array(2 * 1024 * 1024);
-    const largeFiles = Object.fromEntries(Array.from({ length: 80 }, (_, index) => [`vault/${index}.bin`, payload]));
-    const selectedFiles = Object.fromEntries(Array.from({ length: 80 }, (_, index) => [`${index}.bin`, { sha: 'fixture', mode: '100644' }]));
-    let consumed = 0;
-    const retained = await extractRepositoryArchive(zipSync(largeFiles), selectedFiles, () => {}, async (_path, bytes) => {
-      assert.equal(bytes.length, payload.length);
-      consumed++;
-      await Promise.resolve();
-    });
-    assert.equal(consumed, 80, '160 MiB is handled in batches rather than retained cumulatively');
-    assert.equal(retained.size, 0, 'consumed archive results are not kept in the returned map');
-    await assert.rejects(extractRepositoryArchive(zipSync({ 'vault/note.md': payload }), { 'note.md': { sha: 'fixture', mode: '100644' } },
-      () => {}, async () => { throw new Error('staging disk failure'); }), /staging disk failure/);
-    const unsafe = zipSync({ 'vault/../outside.md': new TextEncoder().encode('unsafe') });
-    await assert.rejects(extractRepositoryArchive(unsafe, {}, () => {}), /路径/);
     assert.equal(typeof LinkPlugin, "function");
     let stored = { ignorePatterns: ["private/", "!private/keep.md"] };
     const settingsPlugin = { app: { vault: { configDir: ".custom" } },
