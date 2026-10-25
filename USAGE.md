@@ -29,15 +29,9 @@ The **当前应用** badge shows the mode you are actually using. Mobile backgro
 
 On first setup or when differences need review, choose to merge both sides, mirror the cloud, mirror local files, or customize each difference. Review the final transfer and deletion lists before executing; mirroring can delete files unique to the other side within the sync scope.
 
-During initial setup or rejoining after a reset, when downloads exceed 1,000 files, or at least 100 files make up 50% of the final in-scope file count, cloud updates finish first and a saved download task lets you choose automatic download or manual archive import. After closing or restarting Obsidian, use the red triangle in the sync sidebar toolbar to resume. Private archive links require signing into an authorized GitHub account in your browser.
+Initial setup, rejoining, and everyday sync all download the confirmed files individually through the GitHub API; they do not request a repository archive. Files with identical content share one download. The new common baseline is saved only after the downloads and verification succeed. Network failures or local edits during download stop the operation and preserve the previous baseline.
 
-Import a ZIP, or select an extracted repository folder if your system supports folder selection. ZIP input is read in small chunks; required files are verified and staged on disk before the confirmed plan is applied. Unselected plugins, credentials, and private Obsidian settings are protected. Individual files still have a 96 MiB processing limit. A wrong snapshot, missing content, or newly edited local target stops the import and preserves the previous baseline.
-
-The task stays until file application, verification, and baseline persistence all succeed. Failure or newly edited local targets keep it visible. Expand the reset-progress section to explicitly clear the task and staging progress; the last completed baseline, uploaded files, imported files, and new edits are preserved.
-
-Lightweight settings also offer a troubleshooting action to clear every baseline and restart whole-vault import. Confirmation clears baselines, caches, and unfinished progress while preserving actual files, repository binding, and sync rules, then opens a fresh full-vault review. This differs from resetting download progress, which preserves the last completed baseline.
-
-Smaller initial batches can still use a repository archive, with individual-download fallback on failure. After establishing a baseline, everyday synchronization downloads individual files through the API and no longer prompts for whole-vault import. The former 64 MiB total ZIP cutoff has been removed.
+Lightweight settings offer a troubleshooting action to clear every common baseline and restart a full-vault difference review. It clears baselines, caches, and unfinished progress while preserving actual files, repository binding, and sync rules. The next sync still downloads files individually.
 
 ## Share a note online
 
@@ -50,7 +44,7 @@ Publishing does not clone or synchronize a local share repository. Each run gene
 3. Open a note and click its share icon, or run **分享此笔记** from the command palette.
 4. Send the copied note name and website link to the reader.
 
-At the sidebar's top left, the accent-colored **推送新分享** button includes a cloud-upload icon and publishes all pending shares, content edits, directory moves, and deletions. Website, layout, sorting, and settings controls sit at the top right. Below the search field, only batch-directory and deletion-mode controls remain. The folder button reveals checkboxes. Save the selected destination, then use the top push button to publish. Individual rows offer original-note location and link copying. Right-click a row to edit its public directory and filename. Moving notes preserves their fixed sharing links.
+At the sidebar's top left, the accent-colored **推送新分享** button includes a cloud-upload icon and publishes all pending shares, content edits, directory moves, and deletions. Website, sorting, and settings controls sit at the top right. Below the search field, only batch-directory and deletion-mode controls remain. The folder button reveals checkboxes. Save the selected destination, then use the top push button to publish. Individual rows offer original-note location and link copying. Right-click a row to edit its public directory and filename. Moving notes preserves their fixed sharing links.
 
 Deletion mode requires selecting notes and confirming deletion. It removes public copies while preserving original vault notes. Display settings control the original-note location button and batch-directory button.
 
@@ -58,7 +52,7 @@ Filter through search, then select all, invert, or clear the selection. Moving i
 
 Directory mappings use the existing vault file `.obsidian/plugins/simple-one/share-manifest.json`: `directories` maps codes to paths, for example `{"writing":"写作/人物"}`, and each note's `directoryCode` references its destination. The next publish relocates copies to `notes/<directory>/<share ID>.md`, removes the previous paths, and updates the website catalog. The private manifest, including original vault paths, is not published.
 
-The sidebar can show a flat list, your vault folders, or public categories. Its settings control paths, original-note location buttons, and batch-directory buttons. In **笔记分享设置**, use **检查网站部署** if the website has not caught up with your latest push.
+The sidebar always shows public directories. Previously saved flat or vault-folder layouts automatically use public directories. Its settings control paths, original-note location buttons, and batch-directory buttons. In **笔记分享设置**, use **检查网站部署** if the website has not caught up with your latest push.
 
 The reader supports collapsible headings, Callouts, formulas, Mermaid, and Simple One columns. Under **笔记分享设置 → 界面设置**, you can import or export an HTML template, or restore the default. Push again to apply a template change. Custom templates must retain the reader's required elements and script references.
 

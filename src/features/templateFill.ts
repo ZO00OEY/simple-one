@@ -1,5 +1,6 @@
 import { runAsync } from "../shared/async";
 import { sanitizeNoteFilename } from "../shared/noteFilename";
+import { applySearchUrlTemplate } from "../shared/searchUrl";
 import {
   App,
   htmlToMarkdown,
@@ -250,33 +251,6 @@ export class TemplateFillView extends ItemView {
 
   private renderSearchGroups(): void {
     this.renderUnifiedSearchGroups();
-    return;
-    this.previewEl.addClass("is-active");
-    this.previewEl.empty();
-    for (const searchGroup of this.searchGroups) {
-      const group = this.previewEl.createDiv({ cls: "simple-search-group" });
-      const header = group.createDiv({ cls: "simple-search-group-header" });
-      header.createDiv({
-        cls: "simple-search-group-title",
-        text: `${searchGroup.cat.name} · ${siteLabel(searchGroup.siteRule)}`,
-      });
-      const actions = header.createDiv({ cls: "simple-search-group-actions" });
-      const prev = actions.createEl("button", { cls: "simple-soft-button simple-search-more" });
-      prev.setText("上一页");
-      prev.disabled = !searchGroup.prevPageUrl;
-      if (searchGroup.prevPageUrl) prev.addEventListener("click", () => void this.loadSearchPage(searchGroup, "prev"));
-      const more = actions.createEl("button", { cls: "simple-soft-button simple-search-more" });
-      more.setText("下一页");
-      more.disabled = !searchGroup.nextPageUrl;
-      if (searchGroup.nextPageUrl) more.addEventListener("click", () => void this.loadSearchPage(searchGroup, "next"));
-
-      const stack = group.createDiv({ cls: "simple-search-stack" });
-      stack.addEventListener("mouseleave", () => this.clearSearchCandidateActivation(stack));
-      stack.addEventListener("focusout", (event) => {
-        if (!stack.contains(event.relatedTarget as Node | null)) this.clearSearchCandidateActivation(stack);
-      });
-      this.renderSearchCandidateRows(stack, searchGroup);
-    }
   }
 
   private renderUnifiedSearchGroups(): void {
@@ -421,49 +395,6 @@ export class TemplateFillView extends ItemView {
     this.infoEl.createDiv({ text: `候选：${this.searchGroups.reduce((sum, entry) => sum + entry.candidates.length, 0)} 个` });
   }
 
-  private renderSearchCandidateRows(stack: HTMLElement, searchGroup: SearchGroup): void {
-    if (searchGroup.candidates.length === 0) {
-      stack.createDiv({ cls: "simple-search-empty", text: "没有搜索结果，或网站拦截了搜索页。" });
-      return;
-    }
-    stack.addClass("has-results");
-    const start = searchResultStartNumber(searchGroup);
-    for (let index = 0; index < searchGroup.candidates.length; index++) {
-      const candidate = searchGroup.candidates[index];
-      const row = stack.createDiv({ cls: "simple-search-candidate" });
-      row.tabIndex = 0;
-      row.addEventListener("mouseenter", () => this.activateSearchCandidate(row));
-      row.addEventListener("focusin", () => this.activateSearchCandidate(row));
-      row.createDiv({ cls: "simple-search-index", text: String(start + index) });
-      const main = row.createDiv({ cls: "simple-search-candidate-main" });
-      main.createDiv({ cls: "simple-search-title", text: candidate.title || "(未命名)" });
-      const detail = main.createDiv({ cls: "simple-search-detail" });
-      const meta = [candidate.author].filter(Boolean).join(" · ");
-      if (meta) detail.createDiv({ cls: "simple-search-meta", text: meta });
-      if (candidate.intro) detail.createDiv({ cls: "simple-search-intro", text: candidate.intro });
-      const openCandidate = () => {
-        this.urlInput.value = candidate.url;
-        this.pendingSearchFields = {
-          "书名": candidate.title,
-          "作者": cleanSearchAuthor(candidate.author),
-          "文案": candidate.intro,
-        };
-        this.showUrlPreview(candidate.url, {
-          cat: candidate.cat,
-          pattern: candidate.siteRule.urlPattern,
-          siteRule: candidate.siteRule,
-          fields: candidate.siteRule.fields || [],
-        });
-      };
-      row.addEventListener("click", openCandidate);
-      row.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        openCandidate();
-      });
-    }
-  }
-
   private activateSearchCandidate(row: HTMLElement): void {
     const stack = row.closest<HTMLElement>(".simple-search-stack");
     if (stack) this.clearSearchCandidateActivation(stack);
@@ -472,25 +403,6 @@ export class TemplateFillView extends ItemView {
 
   private clearSearchCandidateActivation(stack: HTMLElement): void {
     stack.querySelectorAll(".simple-search-candidate.is-active").forEach((item) => item.removeClass("is-active"));
-  }
-
-  private async loadSearchPage(group: SearchGroup, direction: "prev" | "next"): Promise<void> {
-    const targetUrl = direction === "next" ? group.nextPageUrl : group.prevPageUrl;
-    if (!targetUrl) return;
-    const buttonText = `${siteLabel(group.siteRule)} 正在加载${direction === "next" ? "下一页" : "上一页"}...`;
-    this.infoEl.setText(buttonText);
-    const targetPageIndex = group.pageIndex + (direction === "next" ? 1 : -1);
-    const currentUrl = group.pageUrl;
-    const next = await searchSitePage(this.lastSearchQuery, group.cat, group.siteRule, targetUrl, targetPageIndex);
-    group.pageUrl = targetUrl;
-    group.pageIndex = targetPageIndex;
-    group.prevPageUrl = direction === "next" ? currentUrl : previousSearchPageUrl(group);
-    group.nextPageUrl = next.nextPageUrl;
-    group.candidates = next.candidates;
-    this.infoEl.empty();
-    this.infoEl.createDiv({ text: `书名搜索：${this.lastSearchQuery}` });
-    this.infoEl.createDiv({ text: `候选：${this.searchGroups.reduce((sum, entry) => sum + entry.candidates.length, 0)} 个` });
-    this.renderSearchGroups();
   }
 
   private renderSearchBackButton(): void {
@@ -880,20 +792,22 @@ function hasQidianIntroDetail(html: string | null): boolean {
 }
 
 async function fetchQidianRenderedBookHtml(url: string): Promise<string | null> {
-  const script = `
-    new Promise((resolve) => {
-      const done = () => resolve(document.documentElement.outerHTML);
-      if (document.querySelector("#book-intro-detail")) return done();
-      const started = Date.now();
-      const timer = setInterval(() => {
-        if (document.querySelector("#book-intro-detail") || Date.now() - started > 15000) {
-          clearInterval(timer);
-          done();
-        }
-      }, 300);
-    })
-  `;
+  const script = webviewElementWaitScript("#book-intro-detail", 15000, "document.documentElement.outerHTML");
   return await runWebviewScript(url, script, 25000);
+}
+
+function webviewElementWaitScript(selector: string, waitMs: number, resultExpression: string): string {
+  return `new Promise((resolve) => {
+    const done = () => resolve(${resultExpression});
+    if (document.querySelector(${JSON.stringify(selector)})) return done();
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (document.querySelector(${JSON.stringify(selector)}) || Date.now() - started > ${waitMs}) {
+        clearInterval(timer);
+        done();
+      }
+    }, 300);
+  })`;
 }
 
 async function searchNovelGroups(
@@ -918,7 +832,7 @@ async function searchNovelGroups(
       const search = job.siteRule.search;
       if (!search) continue;
       const pageIndex = search.pageStart ?? 1;
-      const searchUrl = applySearchUrlTemplate(search.searchUrl, query, pageIndex, search.resultLimit || 10);
+      const searchUrl = applySearchUrlTemplate(search.searchUrl, query, pageIndex, search.resultLimit || 10, search.queryEncoding);
       const result = await searchSitePage(query, job.cat, job.siteRule, searchUrl, pageIndex);
       const group = {
         key: `${job.cat.id}:${job.siteRule.id}`,
@@ -983,19 +897,7 @@ async function searchSitePage(
 }
 
 async function fetchSearchWebviewHtml(url: string, resultList: string): Promise<string | null> {
-  const script = `
-    new Promise((resolve) => {
-      const done = () => resolve(document.documentElement.outerHTML);
-      if (document.querySelector(${JSON.stringify(resultList)})) return done();
-      const started = Date.now();
-      const timer = setInterval(() => {
-        if (document.querySelector(${JSON.stringify(resultList)}) || Date.now() - started > 12000) {
-          clearInterval(timer);
-          done();
-        }
-      }, 300);
-    })
-  `;
+  const script = webviewElementWaitScript(resultList, 12000, "document.documentElement.outerHTML");
   return await runWebviewScript(url, script, 25000);
 }
 
@@ -1072,7 +974,7 @@ async function fanqieSearchResultFromBooks(
     return {
       candidates: hydrated.filter((candidate) => candidate.title && candidate.url),
       nextPageUrl: nextIndex * limit < total
-        ? applySearchUrlTemplate(search.searchUrl, query, nextIndex, limit)
+        ? applySearchUrlTemplate(search.searchUrl, query, nextIndex, limit, search.queryEncoding)
         : "",
     };
 }
@@ -1084,8 +986,7 @@ async function searchFanqieRenderedPage(
   siteRule: SiteRule,
   pageIndex: number
 ): Promise<{ candidates: SearchCandidate[]; nextPageUrl: string }> {
-  const script = `
-    new Promise((resolve) => {
+  const script = webviewElementWaitScript(".search-book-item", 12000, `(() => {
       const findReactBook = (node) => {
         const key = Object.keys(node).find((item) => item.startsWith("__reactFiber$") || item.startsWith("__reactInternalInstance$"));
         const root = key ? node[key] : null;
@@ -1104,8 +1005,7 @@ async function searchFanqieRenderedPage(
         };
         return scan(root, 0);
       };
-      const done = () => {
-        const books = Array.from(document.querySelectorAll(".search-book-item")).map((item) => {
+      const books = Array.from(document.querySelectorAll(".search-book-item")).map((item) => {
           const data = findReactBook(item) || {};
           return {
             book_id: data.book_id || data.bookId || "",
@@ -1113,19 +1013,9 @@ async function searchFanqieRenderedPage(
             author: data.author || item.querySelector(".desc span")?.textContent?.replace(/^作者[:：]?\\s*/, "") || "",
             book_abstract: data.book_abstract || data.abstract || item.querySelector(".desc.abstract")?.textContent || "",
           };
-        });
-        resolve(JSON.stringify({ data: { search_book_data_list: books, total_count: books.length } }));
-      };
-      if (document.querySelector(".search-book-item")) return done();
-      const started = Date.now();
-      const timer = setInterval(() => {
-        if (document.querySelector(".search-book-item") || Date.now() - started > 12000) {
-          clearInterval(timer);
-          done();
-        }
-      }, 300);
-    })
-  `;
+      });
+      return JSON.stringify({ data: { search_book_data_list: books, total_count: books.length } });
+    })()`);
   const jsonText = await runWebviewScript(pageUrl, script, 20000);
   if (!jsonText) return { candidates: [], nextPageUrl: "" };
   try {
@@ -1192,15 +1082,6 @@ function extractFanqieCandidateField(
   const field = siteRule.fields.find((item) => item.fieldName === fieldName)
     ?? siteRule.fields.find((item) => item.source === fallbackSource);
   return field ? extractField(html, field) : "";
-}
-
-function applySearchUrlTemplate(template: string, query: string, page: number, limit: number): string {
-  return template
-    .replace(/\{\{queryEncoded\}\}/g, encodeURIComponent(query))
-    .replace(/\{\{query\}\}/g, query)
-    .replace(/\{\{pageIndex\}\}/g, String(page))
-    .replace(/\{\{limit\}\}/g, String(limit))
-    .replace(/\{\{page\}\}/g, String(page));
 }
 
 function selectSearchText(root: HTMLElement, selector: string): string {
@@ -1549,12 +1430,6 @@ function pushUnique(values: string[], value: string): void {
 
 function siteLabel(siteRule: SiteRule): string {
   return siteRule.shortName || siteRule.name || siteRule.urlPattern;
-}
-
-function searchResultStartNumber(group: SearchGroup): number {
-  const limit = Math.max(1, group.siteRule.search?.resultLimit || group.candidates.length || 10);
-  const pageStart = group.siteRule.search?.pageStart ?? 1;
-  return Math.max(0, group.pageIndex - pageStart) * limit + 1;
 }
 
 function extractBestQidianBookData(pageMap: Map<string, PageMapEntry>): Record<string, string> {

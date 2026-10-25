@@ -94,31 +94,43 @@ export class ShareRepository {
     for (const path of previous.files) if (!retained.has(path) && this.entries.has(path)) expected[path] = null;
     return { base: this.head.sha, expected };
   }
-  async push(job: PublishJob, persist: (job: PublishJob) => Promise<void> = async () => {}): Promise<string> {
+  async push(job: PublishJob, persist: (job: PublishJob) => Promise<void> = async () => {}, progress: (message: string) => void = () => {}): Promise<string> {
+    progress("正在核对云端版本…");
     const current = { sha: await this.readRef(), tree: this.head?.tree ?? "" };
     if (job.commit && current.sha === job.commit) return job.commit;
     if (current.sha !== job.base) throw new Error("云端在生成期间发生变化，请重新发布；不会强制覆盖。");
     if (!Object.keys(job.expected).length) return current.sha;
     if (!job.commit) {
       const entries: { path: string; mode: string; type: string; sha: string | null }[] = [];
-      for (const [path, hash] of Object.entries(job.expected)) {
-        if (!managedPath(path)) throw new Error("发布计划越出公开文件范围。");
-        if (hash === null) { entries.push({ path, mode: "100644", type: "blob", sha: null }); continue; }
-        const bytes = this.generated.get(path);
-        if (!bytes || await blobSha(bytes) !== hash) throw new Error("目标文件变化，请重新生成。");
-        let binary = "";
-        for (let start = 0; start < bytes.length; start += 32768) binary += String.fromCharCode(...bytes.subarray(start, start + 32768));
-        const blob = await this.request<{ sha: string }>(this.prefix + "/git/blobs", "POST", { content: btoa(binary), encoding: "base64" });
-        if (blob.sha !== hash) throw new Error("文件上传哈希校验失败。");
-        entries.push({ path, mode: "100644", type: "blob", sha: hash });
+      const changes = Object.entries(job.expected);
+      const uploads = changes.filter(([, hash]) => hash !== null).length;
+      let uploaded = 0;
+      progress(`正在上传变化文件：0/${uploads}`);
+      // Independent blobs can upload together; the branch changes only after all succeed.
+      for (let offset = 0; offset < changes.length; offset += 4) {
+        entries.push(...await Promise.all(changes.slice(offset, offset + 4).map(async ([path, hash]) => {
+          if (!managedPath(path)) throw new Error("发布计划越出公开文件范围。");
+          if (hash !== null) {
+            const bytes = this.generated.get(path);
+            if (!bytes || await blobSha(bytes) !== hash) throw new Error("目标文件变化，请重新生成。");
+            let binary = "";
+            for (let start = 0; start < bytes.length; start += 32768) binary += String.fromCharCode(...bytes.subarray(start, start + 32768));
+            const blob = await this.request<{ sha: string }>(this.prefix + "/git/blobs", "POST", { content: btoa(binary), encoding: "base64" });
+            if (blob.sha !== hash) throw new Error("文件上传哈希校验失败。");
+            progress(`正在上传变化文件：${++uploaded}/${uploads}`);
+          }
+          return { path, mode: "100644", type: "blob", sha: hash };
+        })));
       }
       let tree = current.tree;
+      progress("文件上传完成，正在建立新的发布版本…");
       for (let offset = 0; offset < entries.length; offset += 500) tree = (await this.request<{ sha: string }>(this.prefix + "/git/trees", "POST", { base_tree: tree, tree: entries.slice(offset, offset + 500) })).sha;
       job.commit = (await this.request<{ sha: string }>(this.prefix + "/git/commits", "POST", { message: "Update shared notes", tree, parents: [job.base] })).sha;
       if (!/^[a-f0-9]{40}$/.test(job.commit)) throw new Error("GitHub 提交格式不正确。");
       await persist(job);
     }
     if (await this.readRef() !== job.base) throw new Error("推送前云端出现新提交，请重新发布。");
+    progress("正在提交发布版本到分享仓库…");
     await this.request(this.prefix + "/git/refs/heads/" + encodeURIComponent(this.site.branch), "PATCH", { sha: job.commit, force: false });
     if (await this.readRef() !== job.commit) throw new Error("推送结果尚未确认；重新发布会按云端实际内容对比。");
     return job.commit;

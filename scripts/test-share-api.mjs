@@ -23,7 +23,11 @@ const target = { ...initialState, files: ['index.html', 'publish-state.json', '.
 const files = new Map([['index.html', 'new reader'], ['publish-state.json', JSON.stringify(target)], ['.nojekyll', '']]);
 const originalHead = remote.head;
 const job = await repo.writeFiles(files, await repo.state()); assert.equal(job.base, originalHead);
-await repo.push(job); assert.equal(remote.files.get('index.html').toString(), 'new reader');
+const progressMessages = [];
+await repo.push(job, undefined, message => progressMessages.push(message)); assert.equal(remote.files.get('index.html').toString(), 'new reader');
+assert(progressMessages.some(message => message.startsWith('正在上传变化文件：')));
+assert(progressMessages.includes('文件上传完成，正在建立新的发布版本…'));
+assert(progressMessages.includes('正在提交发布版本到分享仓库…'));
 assert(remote.files.has('README.md') && remote.files.has('private-note.md'));
 repo = create(); await repo.refresh();
 const unchanged = await repo.writeFiles(files, await repo.state());
@@ -92,4 +96,39 @@ let unsafeFallbacks = 0;
 const uncertainCli = new FallbackShareRepository({ sync: { exec: async () => { throw Error('connection reset'); } } }, { owner: 'test', repo: 'public', branch: 'main' }, 'fixture-token', () => { unsafeFallbacks++; });
 await assert.rejects(() => uncertainCli.api(['repos/test/public/git/blobs', '--method', 'POST', '--input', '-'], JSON.stringify({ content: 'x' })), /connection reset/);
 assert.equal(unsafeFallbacks, 0, 'an uncertain write is not replayed through the fallback transport');
+// Upload independent blobs together, but publish no tree if any upload fails.
+const parallelRemote = shareRemoteFixture({ 'index.html': 'old', 'publish-state.json': JSON.stringify(initialState) });
+const parallelRepo = create();
+let uploadsActive = 0, uploadsPeak = 0, rejectUpload = false;
+const uploads = [];
+parallelRepo.api = async (args, input) => {
+  const method = args[args.indexOf('--method') + 1], body = input ? JSON.parse(input) : undefined;
+  if (args[0].endsWith('/git/blobs') && method === 'POST') {
+    const upload = (async () => {
+      uploadsPeak = Math.max(uploadsPeak, ++uploadsActive);
+      try {
+        await new Promise(resolve => setTimeout(resolve, 5));
+        if (rejectUpload) throw Error('fixture upload failed');
+        return JSON.stringify(await parallelRemote.request(args[0], method, body));
+      } finally { uploadsActive--; }
+    })();
+    uploads.push(upload); return upload;
+  }
+  return JSON.stringify(await parallelRemote.request(args[0], method, body));
+};
+await parallelRepo.refresh();
+const parallelFiles = new Map([['index.html', 'new']]);
+for (let i = 0; i < 10; i++) parallelFiles.set(`reader/test-${i}.css`, `style-${i}`);
+parallelFiles.set('publish-state.json', JSON.stringify({ version: 1, notes: {}, files: [...parallelFiles.keys(), 'publish-state.json'] }));
+await parallelRepo.push(await parallelRepo.writeFiles(parallelFiles, await parallelRepo.state()));
+assert.equal(uploadsPeak, 4, 'upload concurrency is bounded at four');
+for (const [path, content] of parallelFiles) assert.equal(parallelRemote.files.get(path).toString(), content);
+await parallelRepo.refresh();
+for (let i = 0; i < 10; i++) parallelFiles.set(`reader/test-${i}.css`, `changed-${i}`);
+const failedJob = await parallelRepo.writeFiles(parallelFiles, await parallelRepo.state());
+const safeHead = parallelRemote.head;
+rejectUpload = true;
+await assert.rejects(() => parallelRepo.push(failedJob), /fixture upload failed/);
+await Promise.allSettled(uploads);
+assert.equal(parallelRemote.head, safeHead, 'failed concurrent uploads leave the published branch untouched');
 console.log('Direct API publishing passed: no CLI/clone/sync baseline or disk cache, metadata-only reads, blob-hash deltas, unchanged no-op, scoped deletion, races and restart recovery.');

@@ -66,6 +66,7 @@ export interface SearchRule {
   enabled?: boolean;
   type?: "html" | "fanqieApi" | "webviewHtml";
   searchUrl: string;
+  queryEncoding?: string;
   pageStart?: number;
   resultLimit?: number;
   resultList: string;
@@ -100,7 +101,17 @@ export interface TemplateCategory {
   siteRules: SiteRule[];
 }
 
+export interface TypographySettings {
+  enabled: boolean;
+  fontSize: number;
+  lineHeight: number;
+  letterSpacing: number;
+  paragraphSpacing: number;
+  paragraphStyle: "spaced" | "indent";
+}
+
 export interface SimplePluginSettings {
+  desktopTypography: TypographySettings;
   autoProcessPaste: boolean;
   autoProcessObsidian: boolean;
   autoProcessPastedTextLinks: boolean;
@@ -676,6 +687,7 @@ function makeSolarTermAnniversary(
 }
 
 export const DEFAULT_SETTINGS: SimplePluginSettings = {
+  desktopTypography: { enabled: true, fontSize: 15, lineHeight: 1.7, letterSpacing: 0, paragraphSpacing: 0.8, paragraphStyle: "spaced" },
   autoProcessPaste: true,
   autoProcessObsidian: true,
   autoProcessPastedTextLinks: false,

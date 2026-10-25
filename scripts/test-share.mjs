@@ -11,13 +11,13 @@ import { shareRemoteFixture } from "./share-remote-fixture.mjs";
 const require = createRequire(import.meta.url);
 const folder = await mkdtemp(join(tmpdir(), "simple-share-test-"));
 globalThis.crypto ??= webcrypto;
-globalThis.window = { require, setTimeout };
+globalThis.window = { require, setTimeout, clearTimeout, setInterval, clearInterval };
 const fixture = `export class TFile { constructor(path) { this.path=path; this.name=path.split('/').pop(); this.extension=this.name.split('.').pop(); this.basename=this.name.slice(0,-this.extension.length-1); } }
 export class FileSystemAdapter { constructor(root) { this.root=root; } getBasePath() {return this.root;} }
 export class TFolder {constructor(path){this.path=path;}}
 export const Platform={isMobile:false};
 export const requireApiVersion=()=>true; export const requestUrl=()=>{throw new Error('Unexpected live request in share test');};
-export class Component{};export class ItemView{constructor(leaf){this.app=leaf?.app;this.contentEl=leaf?.contentEl;}getState(){return {};}};export class MarkdownView{};export class Menu{};export class Modal{constructor(app){this.app=app;Object.assign(this,globalThis.shareModalElements?.());}open(){this.onOpen?.();}close(){this.onClose?.();}};export class FuzzySuggestModal{};export class Notice{};export class Setting{constructor(parent){if(globalThis.shareSetting)return globalThis.shareSetting(parent);}};export class WorkspaceLeaf{};export const addIcon=()=>{};export const setIcon=()=>{};export const setTooltip=()=>{};export const parseYaml=source=>({share_id:/^share_id: (.+)$/m.exec(source)?.[1]});`;
+export class Component{};export class ItemView{constructor(leaf){this.app=leaf?.app;this.contentEl=leaf?.contentEl;}getState(){return {};}};export class MarkdownView{};export class Menu{};export class Modal{constructor(app){this.app=app;Object.assign(this,globalThis.shareModalElements?.());}open(){this.onOpen?.();}close(){this.onClose?.();}};export class FuzzySuggestModal{};export class Notice{constructor(message){this.messages=[message];globalThis.shareNotices?.push(this);}setMessage(message){this.messages.push(message);return this;}hide(){this.hidden=true;}};export class Setting{constructor(parent){if(globalThis.shareSetting)return globalThis.shareSetting(parent);}};export class WorkspaceLeaf{};export const addIcon=()=>{};export const setIcon=()=>{};export const setTooltip=()=>{};export const parseYaml=source=>({share_id:/^share_id: (.+)$/m.exec(source)?.[1]});`;
 const plugin = { name: "obsidian-fixture", setup(build) { build.onResolve({ filter: /^obsidian$/ }, () => ({ path: "obsidian", namespace: "fixture" })); build.onLoad({ filter: /.*/, namespace: "fixture" }, () => ({ contents: fixture, loader: "js" })); } };
 async function bundle(source, name) {
   const outfile = join(folder, `${name}.cjs`);
@@ -27,6 +27,20 @@ async function bundle(source, name) {
 try {
   const model = await bundle("src/features/share/model.ts", "model");
   const libraries = await bundle("src/features/share/libraries.ts", "libraries");
+  const withdrawnFolders = model.emptyManifest();
+  withdrawnFolders.directories = { removed: '旧目录', manual: '新建空目录', shared: '共享目录' };
+  withdrawnFolders.notes = {
+    aaaaaaaaaaaa: { enabled: false, deleted: true, sourcePath: 'a.md', category: '旧目录', directoryCode: 'removed', revision: 1 },
+    bbbbbbbbbbbb: { enabled: false, deleted: true, sourcePath: 'b.md', category: '共享目录', directoryCode: 'shared', revision: 1 },
+    cccccccccccc: { enabled: true, sourcePath: 'c.md', category: '共享目录/子目录', revision: 1 }
+  };
+  model.pruneWithdrawnDirectories(withdrawnFolders, ['旧目录']);
+  assert(withdrawnFolders.directories.removed, 'remote-only shares still protect their directory');
+  model.pruneWithdrawnDirectories(withdrawnFolders);
+  assert.deepEqual(withdrawnFolders.directories, { manual: '新建空目录', shared: '共享目录' });
+  assert.equal(withdrawnFolders.notes.aaaaaaaaaaaa.directoryCode, undefined);
+  assert.equal(withdrawnFolders.notes.aaaaaaaaaaaa.deleted, true, 'directory cleanup preserves withdrawal intent');
+  model.parseManifest(model.serializeManifest(withdrawnFolders));
   const libraryManifest = model.emptyManifest();
   libraryManifest.site = { owner: "owner", repo: "first", branch: "main" };
   libraries.ensureLibraries(libraryManifest);
@@ -54,20 +68,22 @@ try {
     if (selected.title) assert(output.startsWith('《标题 第二行》'));
     assert.equal(output.includes('https://example.github.io/notes/'), selected.github);
     assert.equal(output.includes('https://example.edgeone.dev/'), selected.pageOne);
-    assert.equal(output.includes('GitHub 链接：'), selected.github && selected.pageOne);
-    assert.equal(output.includes('EdgeOne Makers 链接：'), selected.github && selected.pageOne);
+    assert.equal(output.includes('GitHub 链接：'), selected.github && (selected.title || selected.pageOne));
+    assert.equal(output.includes('EdgeOne Makers 链接：'), selected.pageOne && (selected.title || selected.github));
   }
   assert.throws(() => model.formatShareContent('标题', '', '', { title:false, github:false, pageOne:false }), /至少勾选/);
   assert.equal(model.formatShareContent('标题', '', '', { title:false, github:false, pageOne:true }), '');
-  assert.equal(model.formatShareContent('标题', '', 'https://example.edgeone.dev/', { title:true, github:true, pageOne:true }), '《标题》\nhttps://example.edgeone.dev/');
-  assert.equal(model.formatShareContent('标题', 'https://example.github.io/notes/', '', { title:true, github:true, pageOne:true }), '《标题》\nhttps://example.github.io/notes/');
+  assert.equal(model.formatShareContent('标题', '', 'https://example.edgeone.dev/', { title:true, github:true, pageOne:true }), '《标题》\nEdgeOne Makers 链接：https://example.edgeone.dev/');
+  assert.equal(model.formatShareContent('标题', 'https://example.github.io/notes/', '', { title:true, github:true, pageOne:true }), '《标题》\nGitHub 链接：https://example.github.io/notes/');
   assert.deepEqual(model.DEFAULT_SHARE_COPY_CONTENT, { title:true, github:true, pageOne:true });
   assert.equal(model.normalizeShareDomainUrl('https://share.example.com/notes'), 'https://share.example.com/notes/');
   assert.equal(model.shareDomainNoteUrl('https://share.example.com/notes/', 'abcdefghijkl'), 'https://share.example.com/notes/#/notes/abcdefghijkl');
   assert.throws(() => model.normalizeShareDomainUrl('https://share.example.com/?token=secret'), /不含参数/);
-  assert.equal(model.formatShareContent('标题', '', '', model.DEFAULT_SHARE_COPY_CONTENT, [{ name: '备用站点', url: 'https://share.example.com/#/notes/abcdefghijkl' }]), '《标题》\nhttps://share.example.com/#/notes/abcdefghijkl');
+  assert.equal(model.formatShareContent('标题', '', '', model.DEFAULT_SHARE_COPY_CONTENT, [{ name: '备用站点', url: 'https://share.example.com/#/notes/abcdefghijkl' }]), '《标题》\n备用站点：https://share.example.com/#/notes/abcdefghijkl');
+  assert.equal(model.formatShareContent('标题', '', '', { title:false, github:false, pageOne:false }, [{ name:'备用站点', url:'https://share.example.com/' }]), 'https://share.example.com/');
   const copyManifest = model.emptyManifest();
   copyManifest.copyContent = { title:false, github:false, pageOne:true };
+  copyManifest.copyContent.excludedDomains = ['custom:domain-1'];
   copyManifest.customDomains = [{ id: 'domain-1', name: '备用站点', baseUrl: 'https://share.example.com/' }];
   copyManifest.edgeOneDomains = { projectId: 'makers-fixture', domains: [
     { domain: 'notes.example.com', status: 'online' }, { domain: 'backup.example.com', status: 'online' }], selected: ['notes.example.com'] };
@@ -110,12 +126,20 @@ try {
   const privateNote = { path: "私人.md", name: "私人.md", basename: "私人", extension: "md" };
   const image = { path: "999 attachment/a.png", name: "a.png", basename: "a", extension: "png" };
   let markdown = `---\nshare_id: ${id}\nsecret: hidden\n---\n# 正文\n%%PRIVATE%%\n[[目标|公开目标]] ![[a.png|300]] [[私人]]\n\n\`\`\`simple-columns\nwidths: 50:50\n[[目标]]\n---column---\n![[a.png]]\n\`\`\`\n\`[[私人]]\`\n\`\`\`js\n[[私人]]\n\`\`\``;
-  const vault = { read: async () => markdown, readBinary: async () => Uint8Array.of(1,2,3).buffer };
+  let attachmentReads = 0;
+  const vault = { read: async () => markdown, readBinary: async () => { attachmentReads++; return Uint8Array.of(1,2,3).buffer; } };
   const host = { app: { vault, metadataCache: { getFirstLinkpathDest: name => ({ "目标": target, "a.png": image, "私人": privateNote })[name], getFileCache: file => ({ frontmatter: file === target ? { share_id: other } : {} }) } } };
   host.app.vault.configDir = ".obsidian";
   const manifest = model.emptyManifest(); manifest.notes[other] = { enabled: true, sourcePath: target.path, category: "写作", revision: 1 };
   const index = new Map([[other, [target]]]);
   const exported = await exporter.exportNote(host, source, "写作", manifest, index);
+  assert.equal(attachmentReads, 1, 'repeated references read and hash an attachment once per export');
+  const sharedAssets = new Map(), beforeShared = attachmentReads;
+  await exporter.exportNote(host, source, "写作", manifest, index, '', sharedAssets);
+  await exporter.exportNote(host, { ...source, path: 'another.md' }, "写作", manifest, index, '', sharedAssets);
+  assert.equal(attachmentReads - beforeShared, 1, 'notes in one task share attachment work');
+  await exporter.exportNote(host, source, "写作", manifest, index);
+  assert.equal(attachmentReads - beforeShared, 2, 'a new task reads attachments again to detect edits');
   const publicNamed = await exporter.exportNote(host, source, "写作", manifest, index, "公开名称");
   assert.equal(publicNamed.title, "公开名称");
   assert.equal(publicNamed.source, exported.source);
@@ -152,13 +176,13 @@ try {
     const host = { manifest: { id: 'fixture' }, app: { secretStorage: { getSecret: () => 'fixture-token' } }, sync: { exec: async (_program, args) => { probes++; return args[0] === 'api' ? 'fixture-user' : 'gh version'; } } };
     const desktop = new combined.ShareFeature(host);
     assert(await desktop.repository() instanceof combined.FallbackShareRepository);
-    assert.equal(probes, 2, 'desktop probes CLI authentication and GitHub API access');
-    await desktop.repository(); assert.equal(probes, 4, 'CLI availability is verified again for each repository operation');
+    assert.equal(probes, 1, 'desktop reads local CLI credentials without network authentication probes');
+    await desktop.repository(); assert.equal(probes, 2, 'local credentials are checked again for each operation');
     combined.Platform.isMobile = true;
     try {
       const mobile = new combined.ShareFeature(host);
       assert(await mobile.repository() instanceof combined.ApiShareRepository);
-      assert.equal(probes, 4, 'mobile never probes or executes CLI');
+      assert.equal(probes, 2, 'mobile never probes or executes CLI');
     } finally { combined.Platform.isMobile = false; }
     const missing = new combined.ShareFeature({ ...host, sync: { exec: async () => { throw new Error('CLI not installed'); } } });
     assert(await missing.repository() instanceof combined.ApiShareRepository);
@@ -383,10 +407,16 @@ try {
     assert.equal(verifyFeedback.querySelectorAll("li").length, 0);
     assert(rootEl.querySelector(".simple-share-repository-content .simple-one-sync-setup-action").textContent.includes("连接已有仓库"));
     const [github, repository, change] = [ui.github, ui.repository, ui.change];
+    const bindingAdapter = ui.host.app.vault.adapter;
+    const bindingCache = new Map();
+    ui.host.app.vault.adapter = { ...bindingAdapter,
+      write: async (path, value) => { bindingCache.set(path, value); },
+      exists: async path => bindingCache.has(path), read: async path => bindingCache.get(path) };
     let madePublic = false;
     const publicCalls = [];
     ui.github = async (path, method, body) => {
       publicCalls.push({ path, method, body });
+      if (path.endsWith('/pages')) return JSON.stringify({ html_url: 'https://fixture.github.io/notes-share/', status: 'built' });
       if (method === "PATCH") { madePublic = true; return JSON.stringify({ private: false }); }
       return JSON.stringify({ default_branch: "main", private: !madePublic });
     };
@@ -398,6 +428,8 @@ try {
     assert.deepEqual(publicCalls.find(call => call.method === "PATCH"),
       { path: "repos/fixture/notes-share", method: "PATCH", body: { private: false } });
     assert.equal(madePublic, true, "the repository is confirmed public before the connection is saved");
+    assert([...bindingCache.values()].some(value => JSON.parse(value).visibility === false), 'binding updates the management visibility cache');
+    assert((await ui.shareCopyText('abcdefghijkl', '实际笔记')).includes('https://fixture.github.io/notes-share/#/notes/abcdefghijkl'), 'copying works immediately after binding without opening management');
     ui.guideStep = 2; ui.repoMode = "existing"; ui.renderSettings(rootEl, true, false);
     const privateCheckbox = rootEl.querySelector(".simple-share-repo-private-option input");
     assert.equal(privateCheckbox.checked, false);
@@ -420,6 +452,9 @@ try {
     assert.deepEqual(privateCalls.find(call => call.method === "PATCH"),
       { path: "repos/fixture/notes-share", method: "PATCH", body: { private: true } });
     assert.equal(privateState, true, "repository privacy is re-read after the update");
+    assert([...bindingCache.values()].some(value => JSON.parse(value).visibility === true && !JSON.parse(value).pages), 'rebinding private clears cached public Pages links');
+    assert.equal(await ui.githubShareWebsite(), '', 'private rebinding cannot copy a stale public link');
+    ui.host.app.vault.adapter = bindingAdapter;
     assert(!rootEl.textContent.includes("已确认为私有"), "the next step does not reuse the previous visibility choice as a result");
     ui.guideStep = 2; ui.repoMode = "existing"; ui.makeExistingRepositoryPrivate = false;
     ui.github = async (_path, method) => {
@@ -653,14 +688,113 @@ try {
     assert(rootEl.textContent.includes('未命名 1'));
     numericSearch.renderPanel(rootEl, '1', true);
     assert.equal(rootEl.querySelectorAll('.simple-share-note-row').length, 2, 'visible paths remain searchable');
+    const folderSelect = new combined.ShareFeature({ sync: { isSyncing: () => false } });
+    folderSelect.manifest = structuredClone(layout.manifest);
+    folderSelect.rows = layout.rows.filter(row => row.id !== withdrawnId).map((row, index) => ({
+      ...row, file: { path: `group/${index ? 'child/' : ''}${row.title}.md`, parent: { path: index ? 'group/child' : 'group' } },
+    }));
+    const folderSelected = new Set();
+    const folderSelection = { selected: folderSelected, onChange() {} };
+    const renderFolders = query => folderSelect.renderPanel(rootEl, query, false, 'source', new Set(['source:/group/child']), undefined, false, folderSelection);
+    renderFolders('');
+    assert.equal(rootEl.querySelectorAll('.simple-share-folder-selection').length, 2);
+    rootEl.querySelector('.simple-share-selection').click();
+    assert(rootEl.querySelector('.simple-share-folder-selection').indeterminate, 'individual selections update parent mixed state');
+    rootEl.querySelector('.simple-share-folder-selection').click();
+    assert.equal(folderSelected.size, 2, 'folder selection includes collapsed descendants');
+    assert.equal(rootEl.querySelectorAll('.simple-share-selection:checked').length, 2);
+    assert([...rootEl.querySelectorAll('.simple-share-folder-selection')].every(input => input.checked));
+    rootEl.querySelector('.simple-share-folder-selection').click();
+    assert.equal(folderSelected.size, 0, 'checked folder can deselect its descendants');
+    renderFolders(folderSelect.rows[0].title);
+    rootEl.querySelector('.simple-share-folder-selection').click();
+    assert.deepEqual([...folderSelected], [folderSelect.rows[0].id], 'folder selection respects search filtering');
+    const dropped = [];
+    folderSelected.clear(); folderSelected.add(firstId); folderSelected.add(secondId);
+    folderSelect.renderPanel(rootEl, '', false, 'public', new Set(), undefined, false,
+      { selected: folderSelected, onChange() {}, onDrop: (ids, directory) => dropped.push({ ids, directory }) });
+    const destination = [...rootEl.querySelectorAll('.simple-share-folder-heading')]
+      .find(summary => summary.querySelector('.simple-share-folder-name').textContent === '专栏');
+    assert.equal(destination.children[1].className, 'simple-share-folder-selection', 'folder checkbox precedes the SVG folder icon');
+    const transfer = { types: [], data: {}, setData(type, value) { this.types.push(type); this.data[type] = value; }, getData(type) { return this.data[type] || ''; } };
+    const drag = new dom.window.Event('dragstart', { bubbles: true, cancelable: true });
+    Object.defineProperty(drag, 'dataTransfer', { value: transfer });
+    rootEl.querySelector('.simple-share-note-row[draggable="true"]').dispatchEvent(drag);
+    const drop = new dom.window.Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', { value: transfer });
+    destination.dispatchEvent(drop);
+    assert.deepEqual(dropped, [{ ids: [firstId, secondId], directory: '公开/专栏' }], 'dragging one selected row moves the whole selection to the public folder');
+    const heldBox = dom.window.document.body.createDiv(), heldDrops = [];
+    folderSelect.renderPanel(heldBox, '', false, 'public', new Set(), undefined, false,
+      { selected: folderSelected, onChange() {}, onDrop: (ids, directory) => heldDrops.push({ ids, directory }) });
+    const heldRow = heldBox.querySelector('[data-share-drag-id]');
+    const heldTarget = heldBox.querySelector('[data-share-directory="公开/专栏"]');
+    const savedTimer = dom.window.setTimeout, savedCancelTimer = dom.window.clearTimeout, savedHitTest = dom.window.document.elementFromPoint;
+    let hold;
+    dom.window.setTimeout = (callback, delay) => { if (delay === 450) { hold = callback; return 987; } return savedTimer(callback, delay); };
+    dom.window.clearTimeout = id => { if (id !== 987) savedCancelTimer(id); };
+    dom.window.document.elementFromPoint = () => heldTarget;
+    const pointerEvent = (type, x = 40, y = 40) => {
+      const event = new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
+      Object.defineProperty(event, 'pointerId', { value: 7 }); return event;
+    };
+    try {
+      heldRow.dispatchEvent(pointerEvent('pointerdown'));
+      assert.equal(typeof hold, 'function', 'holding the primary pointer arms a drag');
+      hold();
+      const preview = dom.window.document.querySelector('.simple-share-drag-preview:not(.is-native)');
+      assert(preview && preview.textContent.includes('2 篇'), 'long press shows a file preview and selected count');
+      const heldContext = new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      heldRow.dispatchEvent(heldContext); assert(heldContext.defaultPrevented, 'long press suppresses the note context menu');
+      dom.window.document.dispatchEvent(pointerEvent('pointermove', 120, 100));
+      assert(heldTarget.classList.contains('is-drop-target'));
+      dom.window.document.dispatchEvent(pointerEvent('pointerup', 120, 100));
+      assert.deepEqual(heldDrops, [{ ids: [firstId, secondId], directory: '公开/专栏' }]);
+      assert(!preview.isConnected && !heldTarget.classList.contains('is-drop-target'), 'drop removes the preview and folder highlight');
+      heldRow.dispatchEvent(pointerEvent('pointerdown')); hold();
+      dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      assert.equal(dom.window.document.querySelector('.simple-share-drag-preview:not(.is-native)'), null, 'Escape cancels a held drag');
+      folderSelected.clear();
+      let nativeImage;
+      const singleTransfer = { setData(type, value) { this.ids = value; }, setDragImage(element) { nativeImage = element; } };
+      const singleDrag = new dom.window.Event('dragstart', { bubbles: true, cancelable: true });
+      Object.defineProperty(singleDrag, 'dataTransfer', { value: singleTransfer });
+      heldRow.dispatchEvent(singleDrag);
+      assert.equal(singleTransfer.ids, heldRow.dataset.shareDragId, 'an unselected row can be dragged directly as a single note');
+      assert(nativeImage?.querySelector('.simple-share-drag-icon'), 'native dragging also receives the file preview');
+      heldRow.dispatchEvent(new dom.window.Event('dragend', { bubbles: true }));
+      assert(!nativeImage.isConnected);
+    } finally {
+      dom.window.setTimeout = savedTimer; dom.window.clearTimeout = savedCancelTimer; dom.window.document.elementFromPoint = savedHitTest;
+      folderSelect.renderPanel(heldBox, '', false); heldBox.remove();
+    }
     const panel = new combined.ShareFeature({ app: { workspace: { getLeavesOfType: () => [], requestSaveLayout() {}, getLeaf: () => ({ openFile: async file => openedNotes.push(file.path) }) } }, sync: { isSyncing: () => false } });
     panel.manifest = structuredClone(layout.manifest); panel.rows = layout.rows.filter(row => row.id !== withdrawnId);
     panel.rows[0] = { ...panel.rows[0], file: { path: '甲.md', parent: { path: '' } } };
     panel.manifest.site = { owner: 'fixture', repo: 'share', branch: 'main' };
+    assert.equal(panel.display.layout, 'public', 'share sidebar defaults to the public directory');
+    for (const layout of ['source', 'list']) {
+      panel.restoreDisplay({ layout, showPaths: false, descending: false });
+      assert.equal(panel.display.layout, 'public', 'old workspace layouts migrate to the public directory');
+    }
     const view = new combined.ShareView({ app: panel.host.app, contentEl: rootEl }, panel);
     view.render();
+    assert.equal(rootEl.querySelector('[aria-label="切换文件视图"]'), null, 'the sidebar has no layout switch');
+    const unchangedRow = rootEl.querySelector('.simple-share-note-row');
+    panel.status = '正在上传变化文件：1/3'; panel.busy = true; panel.publishStartedAt = Date.now() - 2200;
+    view.updateStatus();
+    assert(rootEl.querySelector('.simple-share-progress').textContent.includes('已用 2 秒'));
+    assert.equal(rootEl.querySelector('.simple-share-note-row'), unchangedRow, 'progress updates preserve the note list DOM');
+    panel.status = '推送成功 · 网站正在构建新的发布版本'; panel.error = '测试构建检查提示'; panel.busy = false;
+    view.updateStatus();
+    assert(rootEl.querySelector('.simple-share-progress').textContent.includes('推送成功'));
+    assert(rootEl.querySelector('.simple-share-progress').textContent.includes('测试构建检查提示'), 'build errors do not hide successful repository publication');
+    panel.status = ''; panel.error = ''; panel.publishStartedAt = 0;
+    view.updateStatus();
     assert(rootEl.querySelector('.simple-share-header button').classList.contains('simple-share-edit'), 'tools start at the left of the top toolbar');
-    assert.equal(rootEl.querySelector('.simple-share-header button:last-child').textContent, '切换同步', 'sync switch ends the toolbar');
+    assert.equal(rootEl.querySelector('.simple-one-panel-switch'), null, 'sharing has no sync switch');
+    assert.equal(view.getDisplayText(), '分享');
+    assert.equal(view.getIcon(), 'share-2');
     assert.equal(rootEl.querySelector('.simple-share-header').nextElementSibling.className, 'setting-item simple-share-publish-row');
     assert.equal(rootEl.querySelector('.simple-share-publish-row').nextElementSibling.className, 'setting-item simple-share-search');
     assert.equal(rootEl.querySelector('.simple-share-publish-row button').textContent, '推送新分享');
@@ -678,11 +812,55 @@ try {
     assert(rootEl.querySelector('.simple-share-selection-bar').hidden);
     rootEl.querySelector('.simple-share-note-link').click();
     assert.deepEqual(openedNotes, ['甲.md'], 'normal title click opens the original note');
+    const openedShares = [];
+    const originalOpen = globalThis.window.open;
+    panel.published.notes[secondId] = { title: '乙', category: '', hash: '0'.repeat(64), assets: [] };
+    globalThis.window.open = url => openedShares.push(url);
+    try {
+      view.render();
+      const titles = rootEl.querySelectorAll('.simple-share-note-link');
+      assert.equal(titles.length, 2, 'published notes without a local source remain clickable');
+      titles[1].click();
+      assert.deepEqual(openedShares, [`https://fixture.github.io/share/#/notes/${secondId}`]);
+    } finally { globalThis.window.open = originalOpen; }
+    const oldCopyClipboard = globalThis.navigator.clipboard;
+    const oldCopyText = panel.shareCopyText;
+    const oldCopyTimer = globalThis.window.setTimeout;
+    let clipboardContent = '', finishCopy, resetCopy;
+    const expectedCopy = '《乙》\nhttps://fixture.github.io/share/#/notes/' + secondId;
+    panel.shareCopyText = async () => expectedCopy;
+    globalThis.navigator.clipboard = { writeText: text => new Promise(resolve => { finishCopy = () => { clipboardContent = text; resolve(); }; }) };
+    globalThis.window.setTimeout = (callback, delay) => {
+      if (delay === 1200) { resetCopy = callback; return 1; }
+      return oldCopyTimer(callback, delay);
+    };
+    try {
+      const copy = rootEl.querySelector('.simple-share-copy');
+      assert(copy, 'published notes expose a styled copy button');
+      copy.click();
+      assert(copy.disabled, 'duplicate clicks are disabled while copying');
+      assert(!copy.classList.contains('is-copied'), 'success is not shown before clipboard write completes');
+      await new Promise(resolve => setTimeout(resolve, 0));
+      finishCopy();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      assert.equal(clipboardContent, expectedCopy, 'clicking the icon writes the formatted share content to the clipboard');
+      assert(copy.classList.contains('is-copied'));
+      assert.equal(copy.dataset.icon, 'check');
+      assert.equal(copy.getAttribute('aria-label'), '已复制到剪贴板');
+      assert(!copy.disabled);
+      resetCopy();
+      assert(!copy.classList.contains('is-copied'));
+      assert.equal(copy.dataset.icon, 'copy', 'success feedback returns to the copy icon');
+    } finally {
+      globalThis.navigator.clipboard = oldCopyClipboard;
+      globalThis.window.setTimeout = oldCopyTimer;
+      panel.shareCopyText = oldCopyText;
+    }
     openedNotes.length = 0;
     rootEl.querySelector('.simple-share-edit').click();
     assert(!rootEl.querySelector('.simple-share-selection-bar').hidden);
     assert.equal(rootEl.querySelectorAll('.simple-share-locate').length, 0);
-    assert.deepEqual([...rootEl.querySelectorAll('.simple-share-selection-bar button')].map(button => button.textContent), ['全选', '反选', '清空', '移动', '删除']);
+    assert.deepEqual([...rootEl.querySelectorAll('.simple-share-selection-bar button')].map(button => button.textContent), ['全选', '反选', '清空', '新建', '删除']);
     assert.equal(rootEl.querySelectorAll('.simple-share-selection').length, 2);
     const selectionRow = rootEl.querySelector('.simple-share-note-row');
     selectionRow.querySelector(".setting-item-info").click();
@@ -721,9 +899,45 @@ try {
     assert.equal(rootEl.querySelectorAll('.simple-share-selection:checked').length, 0);
     assert(rootEl.querySelector('.simple-share-selection-bar').textContent.includes('已选 0 篇'));
     assert([...rootEl.querySelectorAll('.simple-share-selection-bar button')].find(button => button.textContent === '删除').disabled);
-    assert([...rootEl.querySelectorAll('.simple-share-selection-bar button')].find(button => button.textContent === '移动').disabled);
+    assert(![...rootEl.querySelectorAll('.simple-share-selection-bar button')].find(button => button.textContent === '新建').disabled, 'creating a directory needs no selected notes');
     assert.equal(rootEl.querySelectorAll('.simple-share-selection').length, 2);
     assert(!('showDirectory' in view.getState()), 'obsolete directory visibility switch is removed');
+    const sidebarCreations = [], sidebarMoves = [];
+    panel.createShareDirectory = async (parent, name) => {
+      const path = `${parent}/${name}`;
+      sidebarCreations.push({ parent, name });
+      panel.manifest.directories = { ...(panel.manifest.directories || {}), sidebar: path };
+      return path;
+    };
+    panel.moveShares = async (ids, directory) => { sidebarMoves.push({ ids, directory }); };
+    rootEl.querySelector('.simple-share-selection').click();
+    const selectedId = rootEl.querySelector('.simple-share-selection:checked').dataset.shareId;
+    selectAction('新建');
+    assert.equal(panel.display.layout, 'public', 'new folders are managed in the public tree');
+    const createForm = rootEl.querySelector('.simple-share-create-folder');
+    const selectedParent = panel.manifest.notes[selectedId].category;
+    assert(createForm.querySelector('label').textContent.includes(selectedParent));
+    const folderName = createForm.querySelector('input'); folderName.value = '新目录'; folderName.dispatchEvent(new dom.window.Event('input'));
+    createForm.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(sidebarCreations, [{ parent: selectedParent, name: '新目录' }]);
+    const newFolder = rootEl.querySelector(`[data-share-directory="${selectedParent}/新目录"]`);
+    assert(newFolder, 'an empty newly-created directory is visible as a drop target');
+    assert.equal(rootEl.querySelectorAll('.simple-share-selection:checked').length, 1, 'new folder creation keeps the selected notes ready to drag');
+    const sidebarTransfer = { types: [], data: {}, setData(type, value) { this.types.push(type); this.data[type] = value; }, getData(type) { return this.data[type] || ''; } };
+    const sidebarDrag = new dom.window.Event('dragstart', { bubbles: true, cancelable: true });
+    Object.defineProperty(sidebarDrag, 'dataTransfer', { value: sidebarTransfer });
+    rootEl.querySelector('.simple-share-note-row[draggable="true"]').dispatchEvent(sidebarDrag);
+    assert(sidebarTransfer.types.includes('application/x-simple-share-notes'), 'sidebar drag carries the selected share IDs');
+    const sidebarDrop = new dom.window.Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(sidebarDrop, 'dataTransfer', { value: sidebarTransfer });
+    newFolder.dispatchEvent(sidebarDrop);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(sidebarMoves, [{ ids: [selectedId], directory: `${selectedParent}/新目录` }]);
+    rootEl.querySelector(`[data-share-directory="${selectedParent}/新目录"]`).click();
+    selectAction('新建');
+    assert(rootEl.querySelector('.simple-share-create-folder label').textContent.includes(`${selectedParent}/新目录`), 'clicking an empty folder sets the parent for the next creation');
+    rootEl.querySelector('.simple-share-create-folder button[type="button"]').click();
     rootEl.querySelector('.simple-share-edit').click();
     assert(rootEl.querySelector('.simple-share-selection-bar').hidden);
     assert.equal(rootEl.querySelectorAll('.simple-share-selection').length, 0, 'leaving edit mode hides checkboxes');
@@ -770,7 +984,7 @@ try {
     assert.equal(moves[1].directory, '公开/旧/新建文件夹');
     delete globalThis.shareModalElements; popup.remove();
     ui.manifest.enabled = false; ui.renderSettings(rootEl, false, false);
-    assert.deepEqual([...rootEl.querySelectorAll(".simple-section-title")].map(title => title.textContent), ["分享库管理", "界面与分享模板"]);
+    assert.deepEqual([...rootEl.querySelectorAll(".simple-section-title")].map(title => title.textContent), ["分享库管理", "分享模板"]);
     assert.equal([...rootEl.querySelectorAll('button')].filter(button => button.textContent === '管理').length, 1);
     assert(![...rootEl.querySelectorAll('button')].some(button => button.textContent === '删除记录'), 'delete action is inside library management');
     assert(rootEl.querySelector(".simple-share-settings-dependent").classList.contains("is-disabled"));
@@ -778,9 +992,8 @@ try {
     assert(!rootEl.textContent.includes("默认分享库"));
     assert(!rootEl.textContent.includes("当前分享用仓库"));
     assert(!rootEl.textContent.includes("当前部署状态"));
-    assert(rootEl.querySelector(".simple-share-preview-area"));
-    assert(rootEl.textContent.includes("分享预览"));
-    assert(rootEl.querySelector(".simple-share-preview-example").textContent.includes("《示例笔记》"));
+    assert(!rootEl.querySelector(".simple-share-preview-area"));
+    assert(!rootEl.textContent.includes("分享预览"));
     ui.manifest.enabled = true;
     ui.renderSettings(rootEl, false, false);
     const [detailGithub, detailAdapter, detailDomains] = [ui.github, ui.host.app.vault.adapter, ui.edgeone.customDomainsForProject];
@@ -823,6 +1036,7 @@ try {
     assert(rootEl.querySelector('.simple-share-library-detail__notice'), 'private repository displays a compact warning');
     assert(!rootEl.querySelector('.simple-share-library-detail__section').textContent.includes('分享网址'), 'private repository has no GitHub Pages URL');
     assert.equal(rootEl.querySelectorAll('.simple-share-library-detail__section').length, 3, 'GitHub, EdgeOne and custom domains are separate modules');
+    assert.equal(rootEl.querySelectorAll('.simple-share-channel-status[aria-label="不可用"]').length, 3, 'private Pages, mainland temporary EdgeOne and unconfigured domains are unavailable');
     assert.deepEqual([...rootEl.querySelectorAll('.simple-share-library-detail__heading')].map(heading => heading.textContent), ['GitHub Pages', 'EdgeOne Makers', '自定义网站域名'], 'each provider has a visible section heading');
     assert([...rootEl.querySelectorAll('button')].some(button => button.textContent === '新增分享网站'));
     [...rootEl.querySelectorAll('button')].find(button => button.textContent === '新增分享网站').click();
@@ -870,6 +1084,7 @@ try {
     assert(detailCalls.some(call => call.method === 'PATCH' && call.request.private === false), 'visibility switch makes the repository public after confirmation');
     assert([...rootEl.querySelectorAll('.simple-share-library-detail__visibility-choices button')].find(button => button.textContent === '公开').getAttribute('aria-pressed') === 'true', 'public repository is selected');
     assert(rootEl.textContent.includes('分享网址https://fixture.github.io/notes-share/'));
+    assert(rootEl.querySelector('.simple-share-library-detail__section .simple-share-channel-status.is-available'), 'public enabled Pages is available');
     assert(!rootEl.querySelector('.simple-share-library-detail__section')?.querySelector('.simple-share-library-detail__notice'), 'public repository does not show the private warning');
     assert(!rootEl.textContent.includes('启用 GitHub Pages'), 'an enabled Pages site needs no enable action');
     [...rootEl.querySelectorAll('.simple-share-library-detail__visibility-choices button')].find(button => button.textContent === '私有').click();
@@ -889,67 +1104,147 @@ try {
     for (let attempt = 0; rootEl.textContent.includes('正在读取') && attempt < 100; attempt++) await new Promise(resolve => setTimeout(resolve, 0));
     assert(rootEl.textContent.includes('当前仓库为私有，GitHub Pages 不可用。'), 'a later opening shows the saved visibility');
     assert(!rootEl.querySelectorAll('.simple-share-library-detail__section')[1].querySelector('.simple-share-library-detail__notice'), 'overseas-only area has no mainland preview warning');
+    assert(rootEl.querySelectorAll('.simple-share-library-detail__section')[1].querySelector('.simple-share-channel-status.is-available'), 'overseas EdgeOne site is available');
     assert.equal(detailCalls.length, callsBeforeCachedOpen, 'a cached opening does not request GitHub');
-    assert.equal(domainCalls, domainCallsBeforeCachedOpen, 'a cached opening does not request EdgeOne again');
+    assert.equal(domainCalls, domainCallsBeforeCachedOpen + 1, 'opening management refreshes domain status while keeping GitHub cached');
     ui.manifest.edgeOneDomains = { projectId: 'makers-test-project', domains: [{ domain: 'updated.example.com', status: 'online' }] };
+    domainResult = ui.manifest.edgeOneDomains.domains;
     assert.equal(ui.backFromShareLibraryManagement(), true);
     [...rootEl.querySelectorAll('button')].find(button => button.textContent === '管理').click();
     for (let attempt = 0; rootEl.textContent.includes('正在读取') && attempt < 100; attempt++) await new Promise(resolve => setTimeout(resolve, 0));
     assert(rootEl.querySelector('a[href="https://updated.example.com"]'), 'the current manifest wins over an older local details cache');
-    assert.equal(domainCalls, domainCallsBeforeCachedOpen, 'showing updated manifest domains does not require an API request');
+    assert.equal(domainCalls, domainCallsBeforeCachedOpen + 2, 'reopening refreshes the custom domain list');
     edgeArea = 'global';
-    domainResult = [{ domain: 'notes.example.com', status: 'online' }, { domain: 'backup.example.com', status: 'online' }, { domain: 'preview.example.com', status: 'pending' }];
+    domainResult = [{ domain: 'notes.example.com', status: 'online' }, { domain: 'backup.example.com', status: 'online' }, { domain: 'preview.example.com', status: 'pending' }, { domain: 'bound.example.com', status: '' }];
     [...rootEl.querySelectorAll('button')].find(button => button.textContent === '重新检查').click();
     for (let attempt = 0; detailCalls.length === callsBeforeCachedOpen && attempt < 100; attempt++) await new Promise(resolve => setTimeout(resolve, 0));
     assert(detailCalls.length > callsBeforeCachedOpen, 'manual recheck requests GitHub');
     for (let attempt = 0; rootEl.textContent.includes('正在重新检查') && attempt < 100; attempt++) await new Promise(resolve => setTimeout(resolve, 0));
-    assert.equal(domainCalls, domainCallsBeforeCachedOpen + 1, 'manual recheck requests the custom domain list');
+    assert.equal(domainCalls, domainCallsBeforeCachedOpen + 3, 'manual recheck requests the custom domain list');
     assert(rootEl.querySelector('a[href="https://notes.example.com"]'), 'an online custom domain is clickable');
     assert(rootEl.querySelector('a[href="https://backup.example.com"]'), 'multiple online custom domains are listed');
-    assert(rootEl.textContent.includes('https://preview.example.com（待生效）'), 'a second pending domain is also displayed');
-    const onlineDomainToggle = rootEl.querySelector('input[aria-label="启用 notes.example.com"]');
-    const pendingDomainToggle = rootEl.querySelector('input[aria-label="启用 preview.example.com"]');
-    assert(onlineDomainToggle.checked && !onlineDomainToggle.disabled, 'an online domain is enabled by default');
-    assert(!pendingDomainToggle.checked && pendingDomainToggle.disabled, 'a pending domain cannot be shared yet');
-    onlineDomainToggle.checked = false; onlineDomainToggle.dispatchEvent(new dom.window.Event('change'));
-    for (let attempt = 0; ui.manifest.edgeOneDomains?.selected === undefined && attempt < 100; attempt++) await new Promise(resolve => setTimeout(resolve, 0));
-    assert.deepEqual(ui.manifest.edgeOneDomains.selected, ['backup.example.com'], 'disabling one domain preserves the other enabled domain');
-    onlineDomainToggle.checked = true; onlineDomainToggle.dispatchEvent(new dom.window.Event('change'));
-    for (let attempt = 0; !ui.manifest.edgeOneDomains?.selected?.includes('notes.example.com') && attempt < 100; attempt++) await new Promise(resolve => setTimeout(resolve, 0));
-    assert(ui.manifest.edgeOneDomains.selected.includes('notes.example.com'), 'a domain can be enabled again');
-    const backupDomainToggle = rootEl.querySelector('input[aria-label="启用 backup.example.com"]');
-    backupDomainToggle.checked = false; backupDomainToggle.dispatchEvent(new dom.window.Event('change'));
-    for (let attempt = 0; ui.manifest.edgeOneDomains.selected.includes('backup.example.com') && attempt < 100; attempt++) await new Promise(resolve => setTimeout(resolve, 0));
-    assert.deepEqual(ui.manifest.edgeOneDomains.selected, ['notes.example.com'], 'each online domain has an independent selection');
+    assert(rootEl.querySelector('.simple-share-domain-pending')?.textContent.includes('部署中'), 'a pending domain displays its deployment status');
+    assert(rootEl.querySelector('a[href="https://bound.example.com"]'), 'a domain without an API status is displayed as a bound link');
+    assert(!rootEl.textContent.includes('状态未确认'), 'missing API status does not create an unconfirmed warning');
+    assert.equal(rootEl.querySelectorAll('.simple-share-library-detail__domain-choice input').length, 0, 'domain management no longer has selection checkboxes');
+    assert(rootEl.querySelector('.simple-share-domain-pending .simple-share-spinner'), 'pending domains show a deployment spinner');
     assert(!rootEl.querySelectorAll('.simple-share-library-detail__section')[1].querySelector('.simple-share-library-detail__notice'), 'an online custom domain removes the preset-domain preview warning');
+    const pollingResult = domainResult, pollingSettings = structuredClone(ui.manifest.edgeOneDomains);
+    const pollingSync = ui.host.sync.isSyncing;
+    ui.host.sync.isSyncing = () => false;
+    const domainTimer = window.setTimeout, cancelDomainTimer = window.clearTimeout;
+    const pollingRoot = dom.window.document.body.appendChild(dom.window.document.createElement('div'));
+    let domainTick;
+    window.setTimeout = (callback, milliseconds, ...args) => {
+      if (milliseconds === 10000) { domainTick = callback; return 9876; }
+      return domainTimer(callback, milliseconds, ...args);
+    };
+    window.clearTimeout = timer => { if (timer !== 9876) cancelDomainTimer(timer); };
+    try {
+      domainResult = [{ domain: 'poll.example.com', status: 'pending' }];
+      const deploymentGeneration = ui.deploymentGeneration;
+      ui.renderShareLibraryDetails(pollingRoot, ui.libraryId);
+      for (let n = 0; !domainTick && n < 100; n++) await new Promise(resolve => domainTimer(resolve, 0));
+      assert(domainTick, 'pending domains schedule a ten-second refresh');
+      const githubBeforePoll = detailCalls.length;
+      const domainBeforePoll = domainCalls;
+      domainResult = [{ domain: 'poll.example.com', status: 'online' }];
+      domainTick();
+      for (let n = 0; ui.manifest.edgeOneDomains.domains[0]?.status !== 'online' && n < 100; n++) await new Promise(resolve => domainTimer(resolve, 0));
+      assert.equal(domainCalls, domainBeforePoll + 1);
+      assert.equal(detailCalls.length, githubBeforePoll, 'domain polling does not request GitHub');
+      assert.equal(ui.domainCheckTimer, undefined, 'domain polling stops after activation');
+      assert.equal(ui.deploymentGeneration, deploymentGeneration, 'domain status refresh does not cancel website deployment monitoring');
+      domainResult = [{ domain: 'poll.example.com', status: 'pending' }];
+      domainTick = undefined;
+      ui.renderShareLibraryDetails(pollingRoot, ui.libraryId);
+      for (let n = 0; !domainTick && n < 100; n++) await new Promise(resolve => domainTimer(resolve, 0));
+      assert(domainTick);
+      ui.stopDomainCheck();
+      const stoppedDomainCalls = domainCalls;
+      domainTick(); await new Promise(resolve => domainTimer(resolve, 0));
+      assert.equal(domainCalls, stoppedDomainCalls, 'a cancelled domain check cannot request again');
+    } finally {
+      ui.stopDomainCheck(); pollingRoot.remove();
+      window.setTimeout = domainTimer; window.clearTimeout = cancelDomainTimer;
+      domainResult = pollingResult; ui.manifest.edgeOneDomains = pollingSettings;
+      ui.host.sync.isSyncing = pollingSync;
+    }
     assert.equal(ui.backFromShareLibraryManagement(), true);
     const beforeCustomPreview = ui.edgeone.state;
     const beforeHosting = ui.manifest.site.hosting;
     ui.edgeone.state = { version: 1, step: 3, repo: 'fixture/notes-share', branch: 'main', projectId: 'makers-test-project', website: 'https://share-site.edgeone.cool' };
     ui.renderSettings(rootEl, false, false);
-    assert(rootEl.querySelector('.simple-share-preview-example').textContent.includes('EdgeOne 自定义域名链接（notes.example.com）'), 'enabled domains appear in the share preview');
-    assert(!rootEl.querySelector('.simple-share-preview-example').textContent.includes('preview.example.com'), 'pending domains stay out of the share preview');
-    assert(!rootEl.querySelector('.simple-share-preview-example').textContent.includes('backup.example.com'), 'disabled online domains stay out of the share preview');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert(!rootEl.querySelector('.simple-share-preview-example'), 'manual share preview is removed');
     assert((await ui.shareCopyText('abcdefghijkl', '实际笔记')).includes('https://notes.example.com/#/notes/abcdefghijkl'), 'copied share content uses the enabled custom domain');
     assert(!(await ui.shareCopyText('abcdefghijkl', '实际笔记')).includes('preview.example.com'), 'copied share content excludes pending domains');
-    assert(!(await ui.shareCopyText('abcdefghijkl', '实际笔记')).includes('backup.example.com'), 'copied share content excludes disabled domains');
+    assert((await ui.shareCopyText('abcdefghijkl', '实际笔记')).includes('backup.example.com'), 'bound domains are controlled only by copy settings');
+    assert((await ui.shareCopyText('abcdefghijkl', '实际笔记')).includes('bound.example.com'), 'bound domains without a status are available for copying');
     ui.manifest.site.hosting = 'edgeone';
     ui.edgeone.state.area = 'global';
     assert(!(await ui.shareCopyText('abcdefghijkl', '实际笔记')).includes('share-site.edgeone.cool'), 'mainland-inclusive projects do not copy the unusable preset domain');
     ui.manifest.copyContent = { title: true, github: true, pageOne: false };
-    assert(!(await ui.shareCopyText('abcdefghijkl', '实际笔记')).includes('notes.example.com'), 'EdgeOne custom domains follow the EdgeOne link checkbox');
+    assert((await ui.shareCopyText('abcdefghijkl', '实际笔记')).includes('notes.example.com'), 'available EdgeOne domains ignore legacy channel toggles');
     ui.renderSettings(rootEl, false, false);
-    assert(!rootEl.querySelector('.simple-share-preview-example').textContent.includes('notes.example.com'), 'the preview follows the same EdgeOne checkbox');
+    assert(!rootEl.querySelector('.simple-share-preview-example'));
     ui.manifest.copyContent = { title: true, github: true, pageOne: true };
     ui.edgeone.state.area = 'overseas';
     assert((await ui.shareCopyText('abcdefghijkl', '实际笔记')).includes('share-site.edgeone.cool'), 'overseas projects may copy the preset domain');
     ui.edgeone.state.area = 'global';
-    ui.github = async path => JSON.stringify(path.endsWith('/pages') ? { html_url: 'https://fixture.github.io/notes-share/', status: 'built' } : { private: false });
+    const copySiteCache = { version: 1, repo: `${ui.manifest.site.owner}/${ui.manifest.site.repo}`.toLowerCase(),
+      branch: ui.manifest.site.branch, visibility: false,
+      pages: { url: 'https://fixture.github.io/notes-share/', status: 'built' } };
+    ui.host.app.vault.adapter = { ...detailAdapter, exists: async () => true, read: async () => JSON.stringify(copySiteCache) };
+    ui.github = async () => { assert.fail('copying share links must not make network requests'); };
     ui.guidePages = undefined;
-    assert((await ui.shareCopyText('abcdefghijkl', '实际笔记')).includes('fixture.github.io/notes-share/'), 'a public built Pages URL is copied after the guide state is gone');
-    ui.github = async path => JSON.stringify(path.endsWith('/pages') ? { html_url: 'https://fixture.github.io/notes-share/', status: 'built' } : { private: true });
+    ui.manifest.copyContent = { title: true, github: false, pageOne: false };
+    assert(!(await ui.shareCopyText('abcdefghijkl', '实际笔记')).includes('fixture.github.io/notes-share/'), 'an unchecked GitHub channel is excluded');
+    ui.manifest.copyContent.github = true;
+    copySiteCache.pages = { url: 'https://fixture.github.io/notes-share', status: 'building' };
+    assert((await ui.shareCopyText('abcdefghijkl', '实际笔记')).includes('https://fixture.github.io/notes-share/#/notes/abcdefghijkl'), 'an enabled public Pages site keeps its fixed link while rebuilding');
+    copySiteCache.pages.status = 'errored';
+    assert(!(await ui.shareCopyText('abcdefghijkl', '实际笔记')).includes('fixture.github.io'), 'failed Pages sites are not generated as available channels');
+    copySiteCache.pages.status = 'built';
+    copySiteCache.visibility = true;
     ui.manifest.site.hosting = 'github';
     assert(!(await ui.shareCopyText('abcdefghijkl', '实际笔记')).includes('fixture.github.io'), 'a private repository never contributes a Pages URL');
+    const priorCustomChannels = ui.manifest.customDomains;
+    const priorCopyChange = ui.change;
+    ui.manifest.customDomains = [{ id: 'copy-fixture', name: '我的站点', baseUrl: 'https://mine.example.com/' }];
+    const customChannelKey = 'custom:copy-fixture';
+    const channels = await ui.shareWebsites();
+    ui.manifest.copyContent = { title: false, github: false, pageOne: false,
+      excludedDomains: channels.filter(channel => channel.key !== customChannelKey && !['github', 'pageOne'].includes(channel.key)).map(channel => channel.key) };
+    assert.equal(await ui.shareCopyText('abcdefghijkl', '实际笔记'), 'https://mine.example.com/#/notes/abcdefghijkl', 'one selected custom channel copies a bare link');
+    ui.manifest.copyContent.title = true;
+    assert.equal(await ui.shareCopyText('abcdefghijkl', '实际笔记'), '《实际笔记》\n我的站点：https://mine.example.com/#/notes/abcdefghijkl', 'title plus a link includes the channel name');
+    const channelMenuItems = [];
+    ui.change = async edit => { edit(ui.manifest); };
+    await ui.addCopyContentMenu({ addItem(configure) {
+      const item = { setTitle(value) { this.title=value;return this; }, setIcon(value) { this.icon=value;return this; }, setDisabled() { return this; }, onClick(callback) { this.click=callback;return this; } };
+      configure(item); channelMenuItems.push(item);
+    } });
+    assert(!channelMenuItems.some(item => item.title === 'GitHub 链接'), 'unavailable channels are hidden');
+    const customMenuItem = channelMenuItems.find(item => item.title === '我的站点');
+    assert.equal(customMenuItem.icon, 'check-square');
+    customMenuItem.click();
+    assert.equal(await ui.shareCopyText('abcdefghijkl', '实际笔记'), '《实际笔记》', 'unchecking a custom channel excludes its URL');
+    assert(model.parseManifest(model.serializeManifest(ui.manifest)).copyContent.excludedDomains.includes(customChannelKey), 'channel choices survive serialization');
+    ui.manifest.customDomains[0].name = '新站名';
+    assert.equal(await ui.shareCopyText('abcdefghijkl', '实际笔记'), '《实际笔记》', 'renaming a channel preserves its selection');
+    ui.manifest.copyContent.excludedDomains = [];
+    ui.manifest.copyContent.title = false;
+    const multipleLinks = await ui.shareCopyText('abcdefghijkl', '实际笔记');
+    assert(multipleLinks.includes('新站名：https://mine.example.com/#/notes/abcdefghijkl'));
+    assert(multipleLinks.includes('EdgeOne 自定义域名链接（notes.example.com）：'), 'multiple selected links include their channel names');
+    ui.manifest.customDomains = priorCustomChannels;
+    ui.change = priorCopyChange;
+    ui.manifest.copyContent = { title: true, github: true, pageOne: false };
+    ui.renderSettings(rootEl, false, false);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert(!rootEl.querySelector('.simple-share-preview-example'));
+    ui.manifest.copyContent = { title: true, github: true, pageOne: true };
     ui.manifest.site.hosting = beforeHosting;
     ui.edgeone.state = beforeCustomPreview;
     ui.host.app.vault.adapter = detailAdapter;
@@ -957,31 +1252,24 @@ try {
     ui.edgeone.customDomainsForProject = detailDomains;
     ui.renderSettings(rootEl, false, false);
     const copyOptions = rootEl.querySelectorAll('.simple-share-settings-dependent input[type="checkbox"]');
-    assert.equal(copyOptions.length, 3);
-    assert.deepEqual([...copyOptions].map(input => input.checked), [true, true, true]);
+    assert.equal(copyOptions.length, 0);
     const originalCopyChange = ui.updateCopyContent.bind(ui);
     ui.updateCopyContent = async (key, value) => { ui.manifest.copyContent = { ...ui.copyContent, [key]:value }; };
-    copyOptions[1].checked = false; copyOptions[1].dispatchEvent(new dom.window.Event('change'));
-    assert.equal(ui.copyContent.github, false, 'settings page updates shared copy preferences');
-    assert(!rootEl.querySelector('.simple-share-preview-example').textContent.includes('example.github.io'), 'preview omits unchecked link');
-    assert(rootEl.querySelector('.simple-share-preview-example').textContent.includes('example.edgeone.cool'), 'preview keeps selected link');
-    copyOptions[1].checked = true; copyOptions[1].dispatchEvent(new dom.window.Event('change'));
     const copyMenuItems = [];
     const copyMenu = { addSeparator() {}, addItem(configure) {
       const item = { setTitle(value) { this.title=value;return this; }, setIcon(value) { this.icon=value;return this; }, setDisabled(value) { this.disabled=value;return this; }, onClick(callback) { this.click=callback;return this; } };
       configure(item);copyMenuItems.push(item);
     } };
-    ui.addCopyContentMenu(copyMenu);
-    assert.deepEqual(copyMenuItems.map(item => item.title), ['笔记标题', 'GitHub 链接', 'EdgeOne Makers 链接']);
-    assert.equal(copyMenuItems[2].icon, 'check-square', 'sidebar menu reflects the settings page');
+    await ui.addCopyContentMenu(copyMenu);
+    assert.deepEqual(copyMenuItems.map(item => item.title), ['笔记标题', ...(await ui.shareWebsites()).filter(site => site.url).map(site => site.name)]);
+    assert.equal(copyMenuItems[0].icon, 'check-square');
     copyMenuItems[0].click();
     ui.renderSettings(rootEl, false, false);
-    assert(!rootEl.querySelector('.simple-share-settings-dependent input[aria-label="笔记标题"]').checked, 'menu changes reflect in the settings page');
+    assert.equal(ui.copyContent.title, false, 'title preference remains available without channel toggles');
     ui.updateCopyContent = originalCopyChange;
-    const selects = rootEl.querySelectorAll("select");
-    const layoutSelect = [...selects].find(select => select.querySelector('option[value="public"]'));
-    layoutSelect.value = "public"; layoutSelect.dispatchEvent(new dom.window.Event("change"));
-    assert.equal(ui.display.layout, "public");
+    assert(![...rootEl.querySelectorAll('.setting-item-name')].some(name => name.textContent === '列表布局'), 'settings no longer expose alternate directory layouts');
+    ui.updateDisplay({ descending: true });
+    assert.equal(ui.display.descending, true);
     assert.equal(ui.display.layout, "public");
     assert(savedLayouts > 0, "display preferences use Obsidian workspace persistence");
     ui.restoreDisplay({ layout: "source", showPaths: true });
@@ -997,6 +1285,8 @@ try {
     assert(ui.backFromEdgeOneGuide());
     assert.equal(pageTitles.at(-1), '笔记分享设置', 'header back returns to sharing settings');
     assert(!ui.backFromEdgeOneGuide(), 'normal sharing back can return to its parent');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    ui.detachSettings();
     const deploymentCalls = [];
     let finishDeployment;
     ui.host.sync.exec = async (_program, args) => {
@@ -1010,8 +1300,8 @@ try {
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(ui.checkingDeployment, true);
     finishDeployment(JSON.stringify({ commit: "fixture-commit", status: "built" })); await check;
-    assert.equal(ui.status, "网站已更新");
-    assert.deepEqual(deploymentCalls, [["auth", "status", "--active", "--hostname", "github.com"], ["api", "user", "--jq", ".login"], ["api", "repos/fixture/notes-share/pages/builds/latest"]], "deployment verifies local CLI access, then only reads build status");
+    assert.equal(ui.status, "推送成功 · 网站已更新");
+    assert.deepEqual(deploymentCalls, [["auth", "token", "--hostname", "github.com"], ["api", "repos/fixture/notes-share/pages/builds/latest"]], "deployment reads local credentials, then only requests build status");
   } finally { delete globalThis.shareSetting; dom.window.close(); }
   console.log("Share authorization UI: method selection, token handoff, device code cancellation and shared title preservation passed.");
   {
@@ -1027,6 +1317,7 @@ try {
         if (occupied === "permission") throw new Error("HTTP 403: denied");
         return "created";
       } } });
+      creator.useCli = async () => true;
       let bound;
       creator.bind = async (owner, name) => { bound = `${owner}/${name}`; };
       if (["precheck", "create-race"].includes(occupied)) {
@@ -1042,6 +1333,47 @@ try {
     manager.scanNow = async () => { scans++; active++; peak = Math.max(peak, active); if (scans === 1) await new Promise(resolve => { release = resolve; }); active--; };
     const first = manager.scan(), second = manager.scan();
     release(); await Promise.all([first, second]); assert.equal(scans, 2); assert.equal(peak, 1, "new changes request a follow-up without overlapping scans");
+    manager.sharing = true;
+    await manager.scan(); assert.equal(scans, 2, 'queuing does not start competing full scans');
+    manager.sharing = false;
+    const pending = new combined.ShareFeature({ app: { vault: { read: () => assert.fail('pending notes are exported only when publishing') } } });
+    const pendingIndex = new Map();
+    for (let i = 0; i < 200; i++) {
+      const id = String(i).padStart(12, '0'), file = new combined.TFile(`pending-${i}.md`);
+      pendingIndex.set(id, [file]);
+      pending.manifest.notes[id] = { enabled: true, sourcePath: file.path, category: '', revision: 1 };
+    }
+    pending.reload = async () => {};
+    pending.local = async () => ({ version: 1 });
+    pending.index = () => pendingIndex;
+    pending.renderViews = () => {};
+    await pending.scan();
+    assert.equal(pending.rows.length, 200);
+    assert(pending.rows.every(row => row.state === '待发布'), 'large queues can render without reading note bodies or attachments');
+    const monitor = new combined.ShareFeature({ app: { workspace: { getLeavesOfType: () => [] } }, sync: { isSyncing: () => false } });
+    monitor.local = async () => ({ commit: 'published-commit' });
+    let checks = 0, scheduled, delay;
+    monitor.checkDeployment = async () => { checks++; monitor.status = '推送成功 · 网站已更新'; };
+    const originalSchedule = window.setTimeout, originalCancel = window.clearTimeout;
+    window.setTimeout = (callback, milliseconds) => { scheduled = callback; delay = milliseconds; return 91; };
+    window.clearTimeout = () => {};
+    try {
+      monitor.status = '推送成功 · 已推送，网站部署中';
+      monitor.scheduleDeploymentCheck('published-commit');
+      assert.equal(delay, 10000, 'deployment polling uses a bounded background interval');
+      scheduled(); await new Promise(resolve => originalSchedule(resolve, 0));
+      assert.equal(checks, 1);
+      monitor.status = '推送成功 · 已推送，网站部署中';
+      monitor.scheduleDeploymentCheck('published-commit');
+      const staleCheck = scheduled;
+      monitor.stopDeploymentCheck();
+      staleCheck(); await new Promise(resolve => originalSchedule(resolve, 0));
+      assert.equal(checks, 1, 'cancelled publication checks cannot update a later task');
+      monitor.local = async () => ({ commit: 'newer-commit' });
+      monitor.scheduleDeploymentCheck('published-commit');
+      scheduled(); await new Promise(resolve => originalSchedule(resolve, 0));
+      assert.equal(checks, 1, 'a changed commit invalidates an old deployment check');
+    } finally { window.setTimeout = originalSchedule; window.clearTimeout = originalCancel; }
     let reveal = false, closed = false, finishScan;
     let created = 0;
     const shareLeaf = { setViewState: async () => {} };
@@ -1064,12 +1396,122 @@ try {
     assert.equal(created, 1, 'reopening reuses share management without creating duplicate panels');
     finishScan();
     const sequence = [];
+    const queued = new combined.ShareFeature({ manifest: { id: 'simple-one' }, app: {
+      vault: { configDir: '.obsidian' },
+      metadataCache: { getFileCache: () => ({ frontmatter: { share_id: 'abcdefghijkl' } }) },
+    } });
+    queued.manifest.site = { owner: 'fixture', repo: 'notes-share', branch: 'main' };
+    queued.manifest.enabled = true;
+    queued.reload = async () => {};
+    queued.index = () => new Map();
+    queued.change = async edit => { edit(queued.manifest); };
+    queued.publish = async () => { assert.fail('queueShare must only update the local manifest'); };
+    await queued.queueShare(new combined.TFile('current.md'));
+    assert.equal(queued.manifest.notes.abcdefghijkl.sourcePath, 'current.md');
+    assert.equal(queued.manifest.notes.abcdefghijkl.enabled, true);
+    queued.github = async () => { assert.fail('opening share websites must not make network requests'); };
+    let savedWebsite = { version: 1, repo: 'fixture/notes-share', branch: 'main', visibility: false,
+      pages: { url: 'https://fixture.github.io/notes-share', status: 'built' } };
+    queued.host.app.vault.adapter = {
+      exists: async () => true,
+      read: async () => JSON.stringify(savedWebsite),
+    };
+    queued.manifest.site.hosting = 'edgeone';
+    const websiteChoices = await queued.shareWebsites();
+    assert.deepEqual(websiteChoices.map(item => item.name), ['GitHub 链接', 'EdgeOne Makers 链接']);
+    assert.equal(websiteChoices[0].url, 'https://fixture.github.io/notes-share/', 'website choices are independent of the bound hosting platform');
+    savedWebsite.visibility = true;
+    assert.equal((await queued.shareWebsites())[0].url, '', 'private repositories do not produce invented Pages links');
+    savedWebsite.visibility = false;
+    savedWebsite.repo = 'fixture/another-library';
+    assert.equal((await queued.shareWebsites())[0].url, '', 'cached website must match the selected library');
+    const batch = new combined.ShareFeature({ app: { vault: { configDir: '.obsidian' } } });
+    let batchScans = 0, batchOpens = 0;
+    batch.open = async () => { batchOpens++; };
+    batch.scan = async () => { batchScans++; };
+    batch.renderViews = () => {};
+    batch.index = () => new Map();
+    const batchFiles = [new combined.TFile('one.md'), new combined.TFile('two.md')];
+    batch.manifest.site = { owner: 'fixture', repo: 'notes-share', branch: 'main' };
+    batch.queueShare = async (_file, _id, onId) => { onId('abcdefghijkl'); };
+    await batch.shareFiles(batchFiles);
+    assert.equal(batchOpens, 1, 'real per-note queuing reuses one sidebar opening');
+    assert.equal(batchScans, 1, 'real per-note queuing defers all intermediate scans');
+    batch.batchSharing = true;
+    await assert.rejects(() => batch.publish(), /已有分享/);
+    batch.batchSharing = false;
+    batchOpens = batchScans = 0;
+    let batchClick, batchTitle, batchDisabled;
+    const batchItem = {
+      setTitle(value) { batchTitle = value; return this; },
+      setIcon() { return this; },
+      setDisabled(value) { batchDisabled = value; return this; },
+      onClick(callback) { batchClick = callback; return this; },
+    };
+    batch.addShareFilesMenu(callback => callback(batchItem), [
+      ...batchFiles, batchFiles[0], new combined.TFolder('folder'),
+      new combined.TFile('image.png'), new combined.TFile('.obsidian/private.md'),
+      new combined.TFile(model.SHARE_FOLDER + '/internal.md'),
+    ]);
+    assert.equal(batchTitle, '分享 2 个笔记', 'menu filters non-notes and deduplicates selected paths');
+    assert.equal(batchDisabled, false);
+    const batchOrder = [];
+    let batchActive = 0;
+    batch.share = async (file, libraryId, notify) => {
+      assert.equal(libraryId, undefined);
+      assert.equal(notify, false, 'batch additions suppress per-note notices');
+      assert.equal(batchActive++, 0, 'batch additions must run sequentially');
+      await Promise.resolve();
+      batchOrder.push(file.path);
+      batchActive--;
+    };
+    batch.fail = error => { throw error; };
+    globalThis.shareNotices = [];
+    batchClick();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(batchOrder, ['one.md', 'two.md']);
+    assert.equal(batchOpens, 1, 'batch opens the sidebar once');
+    assert.equal(batchScans, 1, 'batch refreshes the list once after all notes');
+    assert.equal(globalThis.shareNotices.length, 1, 'batch uses one notification');
+    assert.deepEqual(globalThis.shareNotices[0].messages, [
+      '正在加入分享列表：0/2', '正在加入分享列表：1/2', '正在加入分享列表：2/2',
+      '已加入分享列表：2/2，待推送。',
+    ]);
+    batchOrder.length = 0;
+    batch.share = async file => {
+      batchOrder.push(file.path);
+      if (file.path === 'one.md') throw new Error('fixture queue failure');
+    };
+    await assert.rejects(batch.shareFiles(batchFiles), /one.*fixture queue failure/);
+    assert.equal(globalThis.shareNotices.at(-1).hidden, true, 'failure dismisses the persistent progress notice');
+    delete globalThis.shareNotices;
+    assert.deepEqual(batchOrder, ['one.md', 'two.md'], 'one failure does not skip remaining notes');
+    const folderFiles = [
+      new combined.TFile('books/one.md'), new combined.TFile('books/sub/two.md'),
+      new combined.TFile('books-other/three.md'), new combined.TFile('.obsidian/private.md'),
+      new combined.TFile(model.SHARE_FOLDER + '/internal.md'),
+    ];
+    batch.host.app.vault.getMarkdownFiles = () => folderFiles;
+    let folderSelection;
+    batch.shareFiles = async files => { folderSelection = files.map(file => file.path); };
+    batch.addShareFolderMenu(callback => callback(batchItem), new combined.TFolder('books'));
+    assert.equal(batchTitle, '分享整个文件夹（2 篇笔记）');
+    assert.equal(batchDisabled, false);
+    batchClick();
+    assert.deepEqual(folderSelection, ['books/one.md', 'books/sub/two.md'], 'folder sharing includes descendants but not sibling prefixes');
+    batch.addShareFolderMenu(callback => callback(batchItem), new combined.TFolder('/'));
+    assert.equal(batchTitle, '分享整个文件夹（3 篇笔记）', 'vault root excludes configuration and share internals');
+    batch.addShareFolderMenu(callback => callback(batchItem), new combined.TFolder('empty'));
+    assert.equal(batchTitle, '分享整个文件夹（0 篇笔记）');
+    assert.equal(batchDisabled, true, 'empty folder sharing is disabled');
     manager.manifest.site = { owner: 'fixture', repo: 'notes-share', branch: 'main' };
     manager.open = async () => { sequence.push("open"); };
     manager.shareCopyText = () => 'share content';
-    manager.shareNow = async (_file, _id, onId) => { sequence.push("publish"); onId('abcdefghijkl'); assert.equal(manager.publishingTitle, "current"); };
+    manager.scan = async () => {};
+    manager.publish = async () => { assert.fail("adding a note must not publish"); };
+    manager.queueShare = async (_file, _id, onId) => { sequence.push("queue"); onId('abcdefghijkl'); assert.equal(manager.publishingTitle, "current"); };
     await manager.share(new combined.TFile("current.md"));
-    assert.deepEqual(sequence, ["open", "publish"], "sharing reveals the progress panel before publishing starts");
+    assert.deepEqual(sequence, ["open", "queue"], "sharing reveals the panel and queues without publishing");
     assert.equal(manager.sharing, false);
     libraries.addLibrary(manager.manifest);
     const secondTarget = manager.libraryId;
@@ -1085,28 +1527,28 @@ try {
     manager.manifest.libraries.selected = ['legacy', secondTarget];
     manager.switchLibrary = async id => { libraries.selectLibrary(manager.manifest, id); sequence.push(`switch:${id}`); };
     manager.shareCopyText = () => 'share content';
-    manager.shareNow = async (_file, priorId, onId) => {
-      assert.equal(priorId, undefined === sequence.find(item => item === 'publish:legacy') ? undefined : 'abcdefghijkl');
-      onId('abcdefghijkl'); sequence.push(`publish:${manager.libraryId}`);
-      if (manager.libraryId === secondTarget) throw new Error('fixture publish failed');
+    manager.queueShare = async (_file, priorId, onId) => {
+      assert.equal(priorId, undefined === sequence.find(item => item === 'queue:legacy') ? undefined : 'abcdefghijkl');
+      onId('abcdefghijkl'); sequence.push(`queue:${manager.libraryId}`);
+      if (manager.libraryId === secondTarget) throw new Error('fixture queue failed');
     };
     const oldClipboard = globalThis.navigator.clipboard;
     let copied = '';
     globalThis.navigator.clipboard = { writeText: async text => { copied = text; } };
     try { await manager.share(new combined.TFile('current.md')); }
     finally { globalThis.navigator.clipboard = oldClipboard; }
-    assert(sequence.includes('publish:legacy') && sequence.includes(`publish:${secondTarget}`), 'all selected libraries are attempted');
-    assert.equal(manager.libraryId, secondTarget, 'publishing restores the library being viewed');
+    assert(sequence.includes('queue:legacy') && sequence.includes(`queue:${secondTarget}`), 'all selected libraries are attempted');
+    assert.equal(manager.libraryId, secondTarget, 'queuing restores the library being viewed');
     assert(manager.status.includes('1/2 个分享库'));
-    assert(manager.error.includes('fixture publish failed'));
-    assert(copied.includes('share content'));
-    manager.shareNow = async (_file, priorId, onId) => { onId(priorId ?? 'abcdefghijkl'); };
+    assert(manager.error.includes('fixture queue failed'));
+    assert.equal(copied, '', 'queuing must not overwrite the clipboard');
+    manager.queueShare = async (_file, priorId, onId) => { onId(priorId ?? 'abcdefghijkl'); };
     globalThis.navigator.clipboard = { writeText: async text => { copied = text; } };
     try { await manager.share(new combined.TFile('current.md')); }
     finally { globalThis.navigator.clipboard = oldClipboard; }
     assert(manager.status.includes('2/2 个分享库'));
     assert.equal(manager.error, '');
-    assert(copied.includes('fixture/notes-share') && copied.includes('fixture/second-share'), 'all successful library links are copied together');
+    assert.equal(copied, '', 'queuing multiple libraries must not copy unpublished links');
   }
   console.log("Share manager: background opening, serialized refresh and repository-name conflicts passed.");
   const adapter = new combined.FileSystemAdapter(root);
@@ -1160,6 +1602,36 @@ try {
   const commitCount = () => cloud.calls.filter(call => call.path.endsWith('/git/commits') && call.method === 'POST').length;
   const firstCount = commitCount();
   await feature.publish(); assert.equal(commitCount(), firstCount, 'unchanged publish creates no commit');
+  const originalSourcePath = sourceFiles[0].path;
+  const originalCategory = feature.manifest.notes[id].category;
+  contents.set('移动后的目录/改名后的笔记.md', contents.get(originalSourcePath));
+  contents.delete(originalSourcePath);
+  Object.assign(sourceFiles[0], new combined.TFile('移动后的目录/改名后的笔记.md'));
+  await feature.scan();
+  const movedSourceManifest = model.parseManifest(await adapter.read(manifestPath));
+  assert.equal(movedSourceManifest.notes[id].sourcePath, sourceFiles[0].path, 'ID lookup repairs the source path after a rename and move');
+  assert.equal(movedSourceManifest.notes[id].category, originalCategory, 'moving the source leaves its chosen public directory intact');
+  await feature.publish();
+  assert.equal(JSON.parse(cloud.files.get('catalog.json')).notes.find(note => note.id === id).title, '改名后的笔记');
+  assert(cloud.files.has(`notes/${id}.md`), 'source renaming preserves the public ID and existing public path');
+  const safeIdentityHead = cloud.head;
+  const duplicateFile = new combined.TFile('复制出的笔记.md');
+  sourceFiles.push(duplicateFile);
+  contents.set(duplicateFile.path, `---\nshare_id: ${other}\n---\n复制的正文`);
+  await assert.rejects(() => feature.publish(), /ID 重复/);
+  assert.equal(cloud.head, safeIdentityHead, 'duplicate IDs abort publication without changing the published branch');
+  assert(feature.rows.some(row => row.id === other && row.state === 'ID 冲突'));
+  sourceFiles.pop(); contents.delete(duplicateFile.path);
+  const originalCacheLookup = repoHost.app.metadataCache.getFileCache;
+  const sourceWithId = contents.get(sourceFiles[0].path);
+  repoHost.app.metadataCache.getFileCache = file => file === sourceFiles[0] ? { frontmatter: {} } : originalCacheLookup(file);
+  contents.set(sourceFiles[0].path, '# ID 已丢失的正文');
+  await assert.rejects(() => feature.publish(), /源文件缺失/);
+  assert.equal(cloud.head, safeIdentityHead, 'the old source path alone cannot authorize publishing a note with no matching ID');
+  contents.set(sourceFiles[0].path, sourceWithId);
+  await feature.publish();
+  assert.equal(cloud.head, safeIdentityHead, 'a delayed metadata cache is recovered by checking the actual source ID');
+  repoHost.app.metadataCache.getFileCache = originalCacheLookup;
   const appearance = cloud.files.get('reader/appearance.css').toString();
   assert(appearance.includes('--share-image-max-height:320px'));
   assert(appearance.includes('.callout[data-callout="caution"]{--callout-color:#aabbcc}'));
@@ -1214,10 +1686,16 @@ try {
   await feature.publish();
   assert(cloud.files.has('notes/迁移/新目录/' + other + '.md'));
   assert.equal(cloud.calls.filter(c => c.path.includes('/git/blobs/') && c.method === 'GET').length - reads, 1);
+  const requestsBeforeWithdrawal = cloud.calls.length;
   await feature.removeShares([id]);
+  assert.equal(cloud.calls.length, requestsBeforeWithdrawal, 'staging withdrawal makes no cloud requests');
+  assert(cloud.files.has('notes/迁移/新目录/' + id + '.md'), 'withdrawal is staged without changing the cloud');
+  await feature.publish();
   assert(!cloud.files.has('notes/迁移/新目录/' + id + '.md'));
   assert(cloud.files.has('notes/迁移/新目录/' + other + '.md'));
   await feature.refreshPublished(); await feature.removeShares([other]);
+  assert.equal(JSON.parse(cloud.files.get('catalog.json')).notes.length, 1, 'remote-only withdrawal also waits for explicit publication');
+  await feature.publish();
   assert.equal(JSON.parse(cloud.files.get('catalog.json')).notes.length, 0);
   assert.equal(await adapter.read('private.md'), 'private');
   assert.equal(cloud.files.get('README.md').toString(), 'unmanaged keep');

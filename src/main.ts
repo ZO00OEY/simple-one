@@ -43,6 +43,8 @@ import { reportError } from "./shared/async";
 import { SimpleSettingTab } from "./settings";
 import { normalizePopupScalePercent } from "./shared/popupSizing";
 import { activeDisplayProfile, loadMobileDisplayProfile } from "./shared/displayProfile";
+import { normalizeTypography } from "./shared/typography";
+import { registerTypography } from "./features/typography";
 import { applySwitchStates, collectSwitchStates, isSharedSwitchPath, mobileSettingsForSave, type SwitchStates } from "./shared/platformSwitches";
 import {
   DEFAULT_SETTINGS,
@@ -94,6 +96,7 @@ export default class SimplePlugin extends Plugin {
   refreshQuickFormatActions: () => void = () => {};
   refreshReformatActions: () => void = () => {};
   refreshPopupWindowSizing: () => void = () => {};
+  refreshTypography: () => void = () => {};
   private readableLineWidthDocuments = new Set<Document>();
   private templateFolder = "";
   private desktopSwitchStates: SwitchStates = {};
@@ -111,6 +114,7 @@ export default class SimplePlugin extends Plugin {
     if (loadCancelled) return;
     applyQuickFormatStyles(this);
     this.applyReadableLineWidth();
+    this.refreshTypography = registerTypography(this);
     this.applyImageHeightLimit();
     this.applyMobileHeaderButtons();
     this.applyThemeFormattingStyles();
@@ -227,20 +231,21 @@ export default class SimplePlugin extends Plugin {
     this.share = this.addChild(new ShareFeature(this));
     await this.share.initialize().catch(reportError);
     if (loadCancelled) return;
-    this.addRibbonIcon("refresh-cw", "同步与分享", () => {
+    this.addRibbonIcon("refresh-cw", "同步", () => {
       void this.sync.openSyncView().catch(reportError);
+    });
+    this.addRibbonIcon("share-2", "分享", () => {
+      void this.share.open().catch(reportError);
     });
     this.addSettingTab(new SimpleSettingTab(this.app, this));
     let sidebarTimer: number | undefined, unloaded = false;
     this.register(() => { unloaded = true; if (sidebarTimer !== undefined) window.clearTimeout(sidebarTimer); });
     this.app.workspace.onLayoutReady(() => {
       if (unloaded) return;
-      // The shared sidebar always starts on sync; sharing is opened from its switch.
       sidebarTimer = window.setTimeout(() => {
         void (async () => {
           if (unloaded) return;
-          if (this.sync.settings.enabled || this.share.manifest.enabled
-            || this.app.workspace.getLeavesOfType("simple-one-share").length) {
+          if (this.sync.settings.enabled) {
             await this.sync.openSyncView(false, false);
           }
         })().catch(reportError);
@@ -317,6 +322,7 @@ export default class SimplePlugin extends Plugin {
       data?.plainTextPasteSkipsContentLinkScan ?? DEFAULT_SETTINGS.plainTextPasteSkipsContentLinkScan;
     this.settings.imageMaxHeight = normalizeImageMaxHeight(data?.imageMaxHeight);
     this.settings.readableLineWidth = normalizeReadableLineWidth(data?.readableLineWidth);
+    this.settings.desktopTypography = normalizeTypography(data?.desktopTypography);
     this.settings.popupWindowScale = normalizePopupScalePercent(
       data?.popupWindowScale,
       DEFAULT_SETTINGS.popupWindowScale
@@ -679,7 +685,6 @@ function normalizeDiarySettings(settings: SimplePluginSettings, data: LoadedSett
     if (!rule.flags) rule.flags = "g";
     if (rule.replaceWith === undefined) rule.replaceWith = "";
   }
-  const defaultAnniversaryByName = new Map(makeDefaultAnniversaries().map((anniversary) => [anniversary.name, anniversary]));
   const tagMap = new Map([
     ["传统节日", "传统"],
     ["现代节日", "常用"],
@@ -700,21 +705,6 @@ function normalizeDiarySettings(settings: SimplePluginSettings, data: LoadedSett
     if (!anniversary.id) anniversary.id = nextId();
     if (!anniversary.tags) anniversary.tags = [];
     anniversary.tags = Array.from(new Set(anniversary.tags.map((tag) => tagMap.get(tag) ?? tag)));
-    const defaultAnniversary = defaultAnniversaryByName.get(anniversary.name);
-    if (defaultAnniversary) {
-      anniversary.tags = defaultAnniversary.tags;
-      anniversary.showInCalendar = defaultAnniversary.showInCalendar;
-      anniversary.reminderEnabled = defaultAnniversary.reminderEnabled;
-      anniversary.sameDayReminderEnabled = defaultAnniversary.sameDayReminderEnabled;
-      anniversary.advanceReminderEnabled = defaultAnniversary.advanceReminderEnabled;
-      anniversary.reminderDaysBefore = defaultAnniversary.reminderDaysBefore;
-      if (anniversary.dateType !== defaultAnniversary.dateType) anniversary.dateType = defaultAnniversary.dateType;
-      anniversary.month = defaultAnniversary.month;
-      anniversary.day = defaultAnniversary.day;
-      anniversary.lunarMonth = defaultAnniversary.lunarMonth;
-      anniversary.lunarDay = defaultAnniversary.lunarDay;
-      anniversary.weekdayRule = defaultAnniversary.weekdayRule ? { ...defaultAnniversary.weekdayRule } : undefined;
-    }
     if (anniversary.showInCalendar === undefined) anniversary.showInCalendar = anniversary.enabled;
     anniversary.outputFormat = "task";
     if (anniversary.reminderEnabled === undefined) anniversary.reminderEnabled = false;

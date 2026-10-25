@@ -99,6 +99,7 @@ try {
       return { Projects: [{ ...project, CustomDomains: [
         { Domain: 'notes.example.com', Status: 'Online' },
         { Domain: 'preview.example.com', Status: 'Pending' },
+        { Domain: 'bound.example.com' },
       ] }] };
     }
     return { Projects: [project], TotalCount: 1 };
@@ -107,6 +108,7 @@ try {
   assert.deepEqual(JSON.parse(JSON.stringify(await domains.connection.customDomainsForProject('pages-fixture', site))), [
     { domain: 'notes.example.com', status: 'online' },
     { domain: 'preview.example.com', status: 'pending' },
+    { domain: 'bound.example.com', status: '' },
   ], 'the saved token retrieves every custom domain on the linked project');
   await assert.rejects(domains.connection.customDomainsForProject('pages-fixture', { ...site, branch: 'other' }), /不匹配/);
   assert.equal(edgeOneDeploymentResult([deployed], 'abc123', 'main').kind, 'success');

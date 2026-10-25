@@ -1,7 +1,7 @@
 import { libraryManifest, validateLibraries, type ShareLibraries } from "./libraries";
 export const SHARE_FOLDER = ".gitshare";
 export const ID_PATTERN = /^[a-z0-9]{12}$/;
-export interface ShareCopyContent { title: boolean; github: boolean; pageOne: boolean }
+export interface ShareCopyContent { title: boolean; github: boolean; pageOne: boolean; excludedDomains?: string[] }
 export interface ShareDomain { id: string; name: string; baseUrl: string }
 export interface ShareEdgeOneDomains { projectId: string; domains: Array<{ domain: string; status: string }>; selected?: string[] }
 export const DEFAULT_SHARE_COPY_CONTENT: ShareCopyContent = { title: true, github: true, pageOne: true };
@@ -14,13 +14,13 @@ export function shareDomainNoteUrl(baseUrl: string, noteId: string): string {
   return `${baseUrl}#/notes/${encodeURIComponent(noteId)}`;
 }
 export function formatShareContent(title: string, github: string, pageOne: string, selected: ShareCopyContent, domains: ReadonlyArray<{ name: string; url: string }> = []): string {
-  if (!selected.title && !selected.github && !selected.pageOne) throw new Error("请在复制内容设置中至少勾选一项。");
+  if (!selected.title && !selected.github && !selected.pageOne && !domains.length) throw new Error("请在复制内容设置中至少勾选一项。");
   const lines: string[] = [];
   if (selected.title) lines.push(`《${title.replace(/\r?\n/g, " ")}》`);
   const links = [selected.github && github ? { name: "GitHub 链接", url: github } : undefined,
     selected.pageOne && pageOne ? { name: "EdgeOne Makers 链接", url: pageOne } : undefined,
     ...domains].filter((link): link is { name: string; url: string } => !!link?.url);
-  for (const link of links) lines.push(`${links.length > 1 ? `${link.name}：` : ""}${link.url}`);
+  for (const link of links) lines.push(`${selected.title || links.length > 1 ? `${link.name}：` : ""}${link.url}`);
   return lines.join("\n");
 }
 export interface ShareEntry {
@@ -65,6 +65,7 @@ export function parseManifest(source: string): ShareManifest {
   if (!value || value.version !== 1 || typeof value.enabled !== "boolean" || !value.site || !value.notes || typeof value.notes !== "object" || Array.isArray(value.notes)) throw new Error("分享清单版本或格式不正确；已停止覆盖。");
   if (value.defaultPath !== undefined && value.defaultPath !== "root" && value.defaultPath !== "source") throw new Error("默认分享路径设置不正确。");
   if (value.copyContent !== undefined && (!value.copyContent || ["title", "github", "pageOne"].some(key => typeof value.copyContent![key as keyof ShareCopyContent] !== "boolean"))) throw new Error("复制内容设置不正确。");
+  if (value.copyContent?.excludedDomains !== undefined && (!Array.isArray(value.copyContent.excludedDomains) || value.copyContent.excludedDomains.some(key => typeof key !== "string") || new Set(value.copyContent.excludedDomains).size !== value.copyContent.excludedDomains.length)) throw new Error("复制渠道设置不正确。");
   if (value.customDomains !== undefined) {
     if (!Array.isArray(value.customDomains) || new Set(value.customDomains.map(domain => domain.id)).size !== value.customDomains.length) throw new Error("分享域名记录格式不正确。");
     for (const domain of value.customDomains) {
@@ -108,6 +109,21 @@ export function parseManifest(source: string): ShareManifest {
 export function serializeManifest(value: ShareManifest): string {
   const libraries = value.libraries ? { ...value.libraries, entries: { ...value.libraries.entries, [value.libraries.active]: libraryManifest(value) } } : undefined;
   return JSON.stringify({ ...value, ...(libraries ? { libraries } : {}), notes: Object.fromEntries(Object.entries(value.notes).sort(([a], [b]) => a.localeCompare(b))) }, null, 2) + "\n";
+}
+export function pruneWithdrawnDirectories(manifest: ShareManifest, remoteOnlyCategories: string[] = []): void {
+  const notes = Object.values(manifest.notes);
+  const inside = (category: string, path: string) => category === path || category.startsWith(path + "/");
+  const candidates = new Set(Object.entries(manifest.directories || {}).filter(([, path]) =>
+    notes.some(note => note.deleted && inside(note.category, path)) &&
+    !notes.some(note => !note.deleted && inside(note.category, path)) &&
+    !remoteOnlyCategories.some(category => inside(category, path))).map(([code]) => code));
+  for (const code of candidates) {
+    const path = manifest.directories![code];
+    // Keep a parent if it still contains an independently created empty folder.
+    if (Object.entries(manifest.directories!).some(([child, category]) => !candidates.has(child) && inside(category, path))) continue;
+    delete manifest.directories![code];
+    for (const note of notes) if (note.directoryCode === code) delete note.directoryCode;
+  }
 }
 export function newShareId(existing: ReadonlySet<string>): string {
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";

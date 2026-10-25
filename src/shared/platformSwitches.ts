@@ -3,6 +3,7 @@ import type { SimplePluginSettings } from "../types";
 export type SwitchStates = SimplePluginSettings["mobileSwitches"];
 
 const SHARED_DISPLAY_FEATURES = new Set([
+  "desktopTypography",
   "enableNotionColumns",
   "enableImageZoom",
   "enableWindowPositionOptimization",

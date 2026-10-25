@@ -134,7 +134,11 @@ export class TFile {
   }
 }
 export class TFolder { constructor(children) { this.children = children; } }
-export class Modal { open() { globalThis.__attachmentTest.modal = this; } }
+export class Modal {
+  contentEl = { empty() {} };
+  open() { globalThis.__attachmentTest.modal = this; }
+  close() { this.onClose?.(); }
+}
 export class Notice { constructor(message) { globalThis.__attachmentTest.notices.push(message); } }
 export class Setting {}
 export const normalizePath = path => path.replace(/\\/g, '/').replace(/\/{2,}/g, '/').replace(/^\/+|\/+$/g, '');
@@ -185,5 +189,25 @@ assert.deepEqual(globalThis.__attachmentTest.modal.plans.map(plan => plan.file.p
 organizerLocation = '/';
 await organizer.planAttachmentImageRename(organizerPlugin);
 assert.match(globalThis.__attachmentTest.notices.at(-1), /已禁用/);
+organizerLocation = 'Attachments';
+const inlineNote = new TFile('Notes/Inline.md');
+organizerFiles.push(inlineNote);
+const originalInline = 'before ![](data:image/png;base64,AA==) after';
+let currentInline = originalInline;
+let createdInline = 0;
+organizerPlugin.app.vault.cachedRead = async file => file === inlineNote ? currentInline : '';
+organizerPlugin.app.vault.read = async () => currentInline;
+organizerPlugin.app.vault.createBinary = async () => { createdInline++; };
+await organizer.planInlineImageExtraction(organizerPlugin);
+const inlineModal = globalThis.__attachmentTest.modal;
+assert.equal(inlineModal.plans.length, 1);
+currentInline = `edited ${originalInline}`;
+const applyInline = inlineModal.applyPlans();
+await Promise.resolve();
+globalThis.__attachmentTest.modal.accepted = true;
+globalThis.__attachmentTest.modal.onClose();
+await applyInline;
+assert.equal(createdInline, 0, 'changed notes must be rejected before creating attachments');
+assert.equal(currentInline, `edited ${originalInline}`, 'changed notes must remain untouched');
 delete globalThis.__attachmentTest;
-console.log("Smoke checks passed: formatting, window hooks, platform settings, confirmation, async errors, attachment search exclusions, root attachment organization.");
+console.log("Smoke checks passed: formatting, window hooks, platform settings, confirmation, async errors, attachment checks and changed-note protection.");

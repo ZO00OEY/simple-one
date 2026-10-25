@@ -503,8 +503,15 @@ class UnusedAttachmentModal extends Modal {
       const selected = this.items.filter((item) => item.checked);
       if (!selected.length) return;
       if (!await confirmAction(this.plugin.app, `删除选中的 ${selected.length} 个未引用附件？`)) return;
-      for (const item of selected) await this.plugin.app.fileManager.trashFile(item.file);
-      new Notice(`已删除 ${selected.length} 个附件`);
+      const used = referencedPaths(this.plugin);
+      let deleted = 0;
+      for (const item of selected) {
+        if (used.has(item.file.path)) continue;
+        if (this.plugin.app.vault.getAbstractFileByPath(item.file.path) !== item.file) continue;
+        await this.plugin.app.fileManager.trashFile(item.file);
+        deleted++;
+      }
+      new Notice(`已删除 ${deleted} 个附件；跳过 ${selected.length - deleted} 个已变化或已被引用的附件`);
       this.close();
     });
   }
@@ -646,25 +653,44 @@ class InlineImagePlanModal extends Modal {
     if (!selected.length) return;
     if (!await confirmAction(this.plugin.app, `将选中的 ${selected.length} 张内嵌图片保存为附件？`)) return;
 
+    let converted = 0;
     try {
-      for (let index = 0; index < selected.length; index++) {
-        const plan = selected[index];
-        if (this.progressEl) this.progressEl.setText(`处理进度：${index + 1} / ${selected.length}`);
-        await ensureFolder(this.plugin, plan.targetPath.split("/").slice(0, -1).join("/"));
-        await this.plugin.app.vault.createBinary(plan.targetPath, base64ToArrayBuffer(plan.base64));
-      }
-
-      for (const [source, plans] of groupBySource(selected)) {
-        let content = await this.plugin.app.vault.cachedRead(source);
+      const groups = [...groupBySource(selected)];
+      const replace = (content: string, plans: InlineImagePlan[]): string => {
         for (const plan of [...plans].sort((a, b) => b.start - a.start)) {
+          if (content.slice(plan.start, plan.end) !== plan.match) {
+            throw new Error(`笔记已变化，请重新扫描：${plan.source.path}`);
+          }
           content = `${content.slice(0, plan.start)}![[${plan.targetPath}]]${content.slice(plan.end)}`;
         }
-        await this.plugin.app.vault.modify(source, content);
+        return content;
+      };
+      for (const [source, plans] of groups) replace(await this.plugin.app.vault.read(source), plans);
+
+      let completed = 0;
+      for (const [source, plans] of groups) {
+        const created: TFile[] = [];
+        try {
+          for (const plan of plans) {
+            if (this.progressEl) this.progressEl.setText(`处理进度：${++completed} / ${selected.length}`);
+            await ensureFolder(this.plugin, plan.targetPath.split("/").slice(0, -1).join("/"));
+            created.push(await this.plugin.app.vault.createBinary(plan.targetPath, base64ToArrayBuffer(plan.base64)));
+          }
+          await this.plugin.app.vault.process(source, (content) => replace(content, plans));
+          converted += plans.length;
+        } catch (error) {
+          for (const file of created) await this.plugin.app.fileManager.trashFile(file);
+          throw error;
+        }
       }
 
       this.close();
       new Notice(`已将 ${selected.length} 张内嵌图片保存为附件`);
     } catch (error) {
+      if (converted) {
+        this.close();
+        new Notice(`已转换 ${converted} 张图片；其余处理失败，请重新扫描：${error instanceof Error ? error.message : String(error)}`);
+      }
       if (this.progressEl) this.progressEl.setText(`处理失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }

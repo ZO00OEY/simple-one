@@ -85,11 +85,12 @@ export function edgeOneDeploymentResult(deployments: EdgeOneDeployment[], commit
   const matching = deploymentId ? matchingVersions.find(item => item.DeploymentId === deploymentId)
     : matchingVersions.find(item => item.Status === "Success" && item.UsedInProd === true)
       ?? matchingVersions.sort((a, b) => (b.CreatedOn ?? "").localeCompare(a.CreatedOn ?? ""))[0];
-  if (!matching) return { kind: "pending", text: "最近一次分享尚未找到对应的正式部署记录。" };
+  if (!matching) return { kind: "pending", text: "正在等待网站创建新的发布版本。" };
   if (["Failed", "Timeout", "Cancelled", "Invalid"].includes(matching.Status)) {
     return { kind: "error", text: "最近一次分享部署失败、已取消或已失效，请在腾讯项目页查看原因。" };
   }
-  if (["Pending", "Process"].includes(matching.Status)) return { kind: "pending", text: "最近一次分享正在部署，请稍后检查。" };
+  if (matching.Status === "Pending") return { kind: "pending", text: "网站正在排队，等待构建新的发布版本。" };
+  if (matching.Status === "Process") return { kind: "pending", text: "网站正在构建新的发布版本。" };
   if (matching.Status !== "Success") return { kind: "unknown", text: "腾讯返回了未知部署状态，请在项目页确认。" };
   if (matching.UsedInProd === true) return { kind: "success", text: "最近一次分享已部署，正式网站已更新。" };
   const active = production.find(item => item.UsedInProd === true);
@@ -346,8 +347,8 @@ export class EdgeOneConnection {
     if (!this.linked) throw new Error("请先关联当前分享仓库的腾讯项目。");
     const commit = await this.latestCommit();
     this.report("正在检查最近一次分享的腾讯部署…");
-    const project = await this.project(this.state.projectId!);
-    const result = edgeOneDeploymentResult(await this.deployments(), commit, this.site().branch, deploymentId);
+    const [project, deployments] = await Promise.all([this.project(this.state.projectId!), this.deployments()]);
+    const result = edgeOneDeploymentResult(deployments, commit, this.site().branch, deploymentId);
     this.state.website = edgeOneWebsite(project.PresetDomain);
     this.state.lastCheck = { ...result, commit, checkedAt: Date.now() };
     this.state.completed = result.kind === "success";
@@ -379,7 +380,7 @@ export class EdgeOneConnection {
       const result = await this.checkDeployment(deploymentId);
       if (result.kind === "success") { this.state.step = 3; await this.save(); return; }
       if (result.kind === "error" || result.kind === "unknown") return;
-      await new Promise<void>(resolve => window.setTimeout(resolve, 5000));
+      await new Promise<void>(resolve => window.setTimeout(resolve, 10000));
     }
     if (!this.stopped) this.report("腾讯仍在部署。进度已保留，可稍后点击「检查网站部署」。");
   }

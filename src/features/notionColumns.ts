@@ -265,6 +265,7 @@ class ColumnsSurface {
   private active: ActiveBlock | null = null;
   private columnEditor: { index: number; view: EditorView } | null = null;
   private dirty = false;
+  private saveQueue: Promise<void> = Promise.resolve();
   private formatMenuOpen = false;
   private releaseFormatTarget: (() => void) | null = null;
   private releaseCommandTarget: (() => void) | null = null;
@@ -273,7 +274,7 @@ class ColumnsSurface {
   private pendingImages = 0;
   private renderVersion = new WeakMap<HTMLElement, number>();
   private stageCleanup: (() => void) | null = null;
-  constructor(private plugin: SimplePlugin, private sourcePath: string, columns: Columns, private root: HTMLElement, private save: (value: Columns, drag?: NativeTextDrag) => void, private relocate?: (value: Columns, index: number, point: { x: number; y: number }, remove: boolean, side: "left" | "right") => void) {
+  constructor(private plugin: SimplePlugin, private sourcePath: string, columns: Columns, private root: HTMLElement, private save: (value: Columns, drag?: NativeTextDrag) => void | Promise<void>, private relocate?: (value: Columns, index: number, point: { x: number; y: number }, remove: boolean, side: "left" | "right") => void) {
     this.draft = { widths: [...columns.widths], content: [...columns.content] };
     this.render();
   }
@@ -868,8 +869,14 @@ class ColumnsSurface {
   }
 
   private persist(drag?: NativeTextDrag): void {
-    this.dirty = false;
-    this.save(this.getValue(), drag);
+    const value = this.getValue();
+    this.saveQueue = this.saveQueue.then(async () => {
+      await this.save(value, drag);
+      if (serialize(this.getValue()) === serialize(value)) this.dirty = false;
+    }).catch((error) => {
+      this.dirty = true;
+      new Notice(`双列保存失败：${error instanceof Error ? error.message : String(error)}`);
+    });
   }
 
   private removeShortcutCapture(): void {
@@ -1287,33 +1294,35 @@ export function registerNotionColumns(plugin: SimplePlugin): void {
     const columns = parse(source);
     if (!columns) { el.setText("列视图格式无效"); return; }
     const file = plugin.app.vault.getAbstractFileByPath(ctx.sourcePath);
-    const surface = new ColumnsSurface(plugin, ctx.sourcePath, columns, el, (value, drag) => {
-      if (!(file instanceof TFile)) return;
+    let savedSource = source;
+    const surface = new ColumnsSurface(plugin, ctx.sourcePath, columns, el, async (value, drag) => {
+      if (!(file instanceof TFile)) throw new Error("源文件不存在");
       const section = ctx.getSectionInfo(el);
-      if (!section) { new Notice("无法定位列组源代码"); return; }
+      if (!section) throw new Error("无法定位列组源代码");
       if (drag && pathForView(plugin, drag.view) === ctx.sourcePath) {
         const doc = drag.view.state.doc;
         const blockStart = doc.line(section.lineStart + 1).from;
         const block = findBlocks(doc.toString()).find((item) => item.from === blockStart);
         const removal = dragRemovalRange(drag);
         if (!block || !removal || removal.from < block.to && removal.to > block.from) {
-          new Notice("无法安全移动所选内容，请重新选择");
-          return;
+          throw new Error("无法安全移动所选内容，请重新选择");
         }
         drag.view.dispatch({ changes: [
           { from: removal.from, to: removal.to, insert: "" },
           { from: block.from, to: block.to, insert: serialize(value) },
         ] });
+        savedSource = serialize(value);
         return;
       }
-      void plugin.app.vault.process(file, (text) => {
+      await plugin.app.vault.process(file, (text) => {
         const lines = text.split("\n");
         const current = lines.slice(section.lineStart, section.lineEnd + 1).join("\n");
         const currentBody = /^```simple-columns\n([\s\S]*?)\n```\s*$/.exec(current)?.[1];
-        if (currentBody === undefined || currentBody.trim() !== source.trim()) { new Notice("列组位置已变化，请重新编辑"); return text; }
+        if (currentBody === undefined || currentBody.trim() !== savedSource.trim()) throw new Error("列组位置已变化，请重新编辑");
         lines.splice(section.lineStart, section.lineEnd - section.lineStart + 1, serialize(value));
         return lines.join("\n");
       });
+      savedSource = serialize(value);
     }, (value, index, point, remove, side) => {
       if (!(file instanceof TFile)) return;
       const section = ctx.getSectionInfo(el);
@@ -1355,7 +1364,7 @@ export function registerNotionColumns(plugin: SimplePlugin): void {
         const to = from + current.length;
         const targetPosition = targetLine === null ? null : offset(targetLine);
         return moveColumnInDocument(text, from, to, value, index, targetPosition, side);
-      });
+      }).catch((error) => new Notice(`双列移动失败：${error instanceof Error ? error.message : String(error)}`));
     });
     const child = new MarkdownRenderChild(el);
     child.register(() => surface.destroy());

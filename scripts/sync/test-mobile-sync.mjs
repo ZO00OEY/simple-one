@@ -1289,6 +1289,17 @@ try {
     assert.equal(f.engine.downloadTask, undefined);
     for (const path of Object.keys(cloud)) assert(f.local.has(path));
   }
+  {
+    const cloud = Object.fromEntries(Array.from({ length: 120 }, (_, i) => [`cloud/${i}.md`, `cloud ${i}`]));
+    const f = await fixture({}, cloud);
+    const review = new MobileSyncModal({}, f.engine, await f.engine.preview(), false, undefined, {
+      strategy: async () => 'remote', confirm: async () => true, transfer: async () => {}
+    });
+    assert.equal(await mobileFlowWait.call(review), true);
+    assert.equal(f.calls.filter(c => c.path.startsWith('/zipball/')).length, 0);
+    assert.equal(f.calls.filter(c => c.path.startsWith('/git/blobs/')).length, 120);
+    for (const path of Object.keys(cloud)) assert(f.local.has(path));
+  }
   console.log('First sync uses per-file API downloads without an archive');
   for (const strategy of ['merge', 'local', 'remote', 'custom', 'cancel', 'cancel-confirm']) {
     const f = await fixture({ 'local.md':'local', 'same.md':'local version' }, { 'remote.md':'remote', 'same.md':'remote version' });

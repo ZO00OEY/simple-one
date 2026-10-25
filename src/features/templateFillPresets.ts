@@ -53,7 +53,27 @@ export function defaultTemplateCategories(): TemplateCategory[] {
       filenameField: "书名",
       noteFormat: "",
       siteRules: [
-        { id: nextId(), name: "晋江", shortName: "晋江", urlPattern: "jjwxc\\.net", fields: jjwxcFields() },
+        {
+          id: nextId(), name: "晋江", shortName: "晋江", urlPattern: "jjwxc\\.net", fields: jjwxcFields(),
+          search: {
+            enabled: true,
+            type: "html",
+            searchUrl: "https://m.jjwxc.net/search/index/page/{{page}}?version=1&t=1&kw={{queryEncoded}}",
+            queryEncoding: "gb18030",
+            pageStart: 1,
+            resultLimit: 20,
+            resultList: ".b.module > ul > li:has(a[href^='/book2/'])",
+            resultTitle: "a[href^='/book2/']",
+            resultUrl: "a[href^='/book2/']",
+            resultAuthor: "a[href^='/wapauthor/']",
+            nextPage: {
+              type: "regexFromHtml",
+              page: "main",
+              regex: "<a\\b[^>]*href=[\"']([^\"']+)[\"'][^>]*>\\s*下一页\\s*</a>",
+              replaceWith: "$1",
+            },
+          },
+        },
         {
           id: nextId(),
           name: "番茄小说",

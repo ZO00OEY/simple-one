@@ -41,7 +41,7 @@ ${JSON.stringify(template, null, 2)}
 4. regex、replaceWith 不需要时填空字符串。正则仅匹配一次，无额外 flags；replaceWith 用 $1、$2 引用捕获组。没有 replaceWith 时返回捕获组拼接结果，无捕获组则返回完整匹配；不匹配则返回空值。跨行匹配使用 [\\s\\S] 并正确转义。
 5. 默认只读取输入链接。不需要链接归一化或多页提取时，省略 input、pages、field.page。需要时，可用 input.baseUrl={"type":"urlReplace","regex":"...","replaceWith":"..."} 归一化链接。pages 按顺序加载，例如 [{"id":"main","url":"{{baseUrl}}"}]，也支持 {{inputUrl}}。字段通过 page 指定读取的页面 id。
 6. 多页内容可使用 pages[].urlFrom，从已加载页面生成下一地址。支持 {"type":"selectorHref","page":"main","selector":"a.detail"}，或 {"type":"urlReplace","page":"main","regex":"...","replaceWith":"..."}。相对 href 会按来源页面补全。仅在有实际页面证据时添加。
-7. 不需要搜索时省略 search。需要搜索时，search.type 固定为 html；searchUrl 是返回 HTML 的 GET 地址，不能使用 POST 或专用 API。占位符：{{queryEncoded}} 为 URL 编码关键词，{{query}} 为原始关键词，{{page}} / {{pageIndex}} 为页码，{{limit}} 为结果数量。pageStart 默认 1，resultLimit 默认 10。
+7. 不需要搜索时省略 search。需要搜索时，search.type 固定为 html；searchUrl 是返回 HTML 的 GET 地址，不能使用 POST 或专用 API。占位符：{{queryEncoded}} 为 URL 编码关键词，{{query}} 为原始关键词，{{page}} / {{pageIndex}} 为页码，{{limit}} 为结果数量。queryEncoding 可指定关键词编码，例如 gb18030，默认 utf-8；只影响 {{queryEncoded}}，不改变响应解码。pageStart 默认 1，resultLimit 默认 10。
 8. resultList 选中每条搜索结果；resultTitle、resultUrl、resultAuthor、resultIntro 都是在每条结果内部查找的 CSS 选择器。resultUrl 应选中含 href 的链接；:scope 表示当前结果元素。标题和链接必须存在，作者与简介可省略。详情字段 regex 不适用于搜索结果字段。
 9. 搜索翻页优先使用 nextPage={"type":"selectorHref","page":"main","selector":"a.next"}。确实使用 URL 页码参数时也支持 {"type":"queryParamIncrement","page":"main","param":"page","start":1}，但它本身不会判断末页。有末页条件时优先使用下一页链接。无法确认翻页就省略 nextPage。
 10. 保存目录、笔记命名字段与输出模板由已有模板控制，不放进这份网站规则。

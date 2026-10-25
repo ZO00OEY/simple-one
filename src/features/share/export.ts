@@ -2,7 +2,8 @@ import { TFile } from "obsidian";
 import type SimplePlugin from "../../main";
 import { sha256, type ShareManifest } from "./model";
 export interface ExportedNote { source: string; hash: string; assets: Map<string, ArrayBuffer>; title: string; category: string }
-export async function exportNote(host: SimplePlugin, file: TFile, category: string, manifest: ShareManifest, index: Map<string, TFile[]>, publicName = ""): Promise<ExportedNote> {
+export type ShareAssetCache = Map<TFile, Promise<{ path: string; data: ArrayBuffer }>>;
+export async function exportNote(host: SimplePlugin, file: TFile, category: string, manifest: ShareManifest, index: Map<string, TFile[]>, publicName = "", assetCache: ShareAssetCache = new Map()): Promise<ExportedNote> {
   const assets = new Map<string, ArrayBuffer>();
   let source = await host.app.vault.read(file);
   if (/^\uFEFF?---\r?\n/.test(source) && !/^\uFEFF?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.test(source)) throw new Error("笔记属性区未闭合，停止导出以免公开私人属性。");
@@ -14,9 +15,16 @@ export async function exportNote(host: SimplePlugin, file: TFile, category: stri
     if (target.path.startsWith(".gitshare/") || target.path.startsWith(host.app.vault.configDir + "/") || target.path.split("/").some(part => part.startsWith("."))) throw new Error("附件位于私人配置或隐藏目录，停止导出。");
     const extension = target.extension.toLowerCase();
     if (!new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "pdf", "mp3", "ogg", "wav", "m4a", "mp4", "webm", "txt", "csv"]).has(extension)) throw new Error(`暂不公开此附件格式：${target.name}。请改用常规图片、音视频或文档。`);
-    const data = await host.app.vault.readBinary(target);
-    if (data.byteLength > 25 * 1024 * 1024) throw new Error(`附件超过 25 MB：${target.name}`);
-    const path = `assets/${await sha256(data)}.${extension}`;
+    let cached = assetCache.get(target);
+    if (!cached) {
+      cached = (async () => {
+        const data = await host.app.vault.readBinary(target);
+        if (data.byteLength > 25 * 1024 * 1024) throw new Error(`附件超过 25 MB：${target.name}`);
+        return { path: `assets/${await sha256(data)}.${extension}`, data };
+      })();
+      assetCache.set(target, cached);
+    }
+    const { path, data } = await cached;
     assets.set(path, data); return path;
   };
   const link = async (targetText: string, label: string, embedded: boolean): Promise<string> => {

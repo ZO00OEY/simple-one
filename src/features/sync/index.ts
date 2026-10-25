@@ -1291,7 +1291,7 @@ export default class SyncFeature extends Component {
     let leaf: WorkspaceLeaf | null = this.app.workspace.getLeavesOfType(ZoeySyncView.type)[0] ?? null;
     const existing = !!leaf;
     if (!leaf) {
-      leaf = this.app.workspace.getLeavesOfType("simple-one-share")[0] ?? this.app.workspace.getRightLeaf(false);
+      leaf = this.app.workspace.getRightLeaf(false);
       if (!leaf) return;
       await leaf.setViewState({ type: ZoeySyncView.type, active: reveal });
     }
@@ -2909,7 +2909,7 @@ class ZoeySyncView extends ItemView {
   }
 
   getDisplayText(): string {
-    return "同步与分享";
+    return "同步";
   }
 
   getIcon(): string {
@@ -3014,14 +3014,6 @@ class ZoeySyncView extends ItemView {
     quota.setAttr("title", "以最近一次 GitHub 响应为准；下一次请求会更新额度，同账号其他设备可能共享额度。");
   }
 
-  private renderShareSwitch(header: HTMLElement): void {
-    const shareButton = header.createEl("button", { cls: "simple-one-panel-switch",
-      attr: { type: "button", "aria-label": "切换到分享" } });
-    setIcon(shareButton.createSpan({ cls: "simple-one-panel-switch__icon", attr: { "aria-hidden": "true" } }), "arrow-right-left");
-    shareButton.createSpan({ text: "切换分享" });
-    shareButton.addEventListener("click", runAsync(() => this.plugin.host.share.open()));
-  }
-
   async render(reuseChanges = false): Promise<void> {
     if (this.closed || this.review || this.promptCancel || !this.app.workspace.layoutReady) return;
     const generation = ++this.renderGeneration;
@@ -3030,7 +3022,6 @@ class ZoeySyncView extends ItemView {
     if (this.plugin.settings.enabled === false) {
       container.empty();
       container.addClass("simple-one-sync-view");
-      this.renderShareSwitch(container.createDiv({ cls: "simple-one-sync-view__header" }));
       container.createEl("p", { text: "同步已关闭，可在同步设置中启用。" });
       container.createEl("button", { text: "打开同步设置", attr: { type: "button" } })
         .addEventListener("click", () => this.plugin.openPluginSettings());
@@ -3113,7 +3104,6 @@ class ZoeySyncView extends ItemView {
       reminder.addEventListener("click", () => void this.showDownloadTask());
     }
 
-    this.renderShareSwitch(header);
 
     const status = container.createDiv({ cls: "simple-one-sync-view__status" });
     status.addClass(`is-${statusState.tone}`);
@@ -3474,7 +3464,6 @@ export class SyncSettingsTab extends PluginSettingTab {
     const overview = containerEl.createDiv({ cls: "simple-one-sync-repository-overview" });
     this.addEnableSetting(overview);
     this.addDefaultRepoSetting(overview);
-    this.addShareRepoSetting(overview);
     this.displayDesktop(containerEl);
   }
 
@@ -3485,17 +3474,6 @@ export class SyncSettingsTab extends PluginSettingTab {
           this.plugin.settings.boundRepoUrl = value.trim();
           await this.plugin.saveSettings();
         }));
-    row.settingEl.addClass("simple-one-sync-stacked-setting");
-  }
-
-  private addShareRepoSetting(parent: HTMLElement): void {
-    const site = this.plugin.host?.share?.manifest.site;
-    const url = site?.owner && site.repo ? `https://github.com/${site.owner}/${site.repo}` : "";
-    const row = new Setting(parent).setName("当前分享用仓库")
-      .addText(input => {
-        input.setPlaceholder("尚未绑定分享仓库").setValue(url);
-        input.inputEl.readOnly = true;
-      });
     row.settingEl.addClass("simple-one-sync-stacked-setting");
   }
 

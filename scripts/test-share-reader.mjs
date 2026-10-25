@@ -9,7 +9,7 @@ import { JSDOM } from "jsdom";
 
 const folder = await mkdtemp(join(tmpdir(), "simple-reader-test-"));
 const id = "k7m2x9a4w8p3";
-const dom = new JSDOM('<!doctype html><h1 id="note-title"></h1><input id="search"><nav id="note-list"></nav><article id="content"></article>', { url: `https://example.github.io/share/#/notes/${id}` });
+const dom = new JSDOM('<!doctype html><header></header><main><h1 id="note-title"></h1><input id="search"><nav id="note-list"></nav><article id="content"></article></main>', { url: `https://example.github.io/share/#/notes/${id}` });
 const names = ["window", "document", "navigator", "location", "Node", "NodeFilter", "HTMLElement", "HTMLAnchorElement", "Element", "SVGElement", "DOMParser"];
 const prior = new Map(names.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
 const fixture = `# 双列与安全\n\n> [!note] 提示\n> 正文 **加粗**。\n\n- [x] 完成任务\n\n==高亮== 与 $x^2$\n\n$$\n\\frac{1}{2}\n$$\n\n\`\`\`simple-columns\nwidths: 40:60\n## 左侧\n左侧正文\n---column---\n## 右侧\n右侧正文\n\`\`\`\n\n<script>window.stolen=true</script><img src=x onerror="window.stolen=true"><iframe src="https://evil.example"></iframe>\n\n[危险](javascript:alert(1))\n\n脚注[^1]\n\n[^1]: 注释内容`;
@@ -61,6 +61,18 @@ try {
   assert(themed.includes("320px"));
   standalone.window.close();
   createRequire(import.meta.url)(output);
+  const fontSelect = document.querySelector('.reader-font-control select');
+  assert.deepEqual(Array.from(fontSelect.options, option => option.textContent), ['默认', '微软雅黑', '仓耳今楷']);
+  assert.equal(document.querySelectorAll('.accent-colors button').length, 3, 'font control retains the three theme colors');
+  fontSelect.value = 'jinkai'; fontSelect.dispatchEvent(new dom.window.Event('change'));
+  assert(document.documentElement.style.getPropertyValue('--reader-font').includes('仓耳今楷01'));
+  assert.equal(window.localStorage.getItem('simple-reader-font'), 'jinkai');
+  document.querySelector('button[data-color="blue"]').click();
+  assert(document.documentElement.style.getPropertyValue('--reader-font').includes('仓耳今楷01'), 'color changes preserve the selected font');
+  fontSelect.value = 'yahei'; fontSelect.dispatchEvent(new dom.window.Event('change'));
+  assert(document.documentElement.style.getPropertyValue('--reader-font').includes('Microsoft YaHei'));
+  fontSelect.value = 'default'; fontSelect.dispatchEvent(new dom.window.Event('change'));
+  assert.equal(document.documentElement.style.getPropertyValue('--reader-font'), '', 'default restores the original reader font');
   const wait = async check => { for (let i = 0; i < 100; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 10)); } throw new Error("Reader did not complete"); };
   await wait(() => document.querySelector(".simple-columns"));
   assert(requested.includes(`notes/${encodeURIComponent('写作')}/${encodeURIComponent('人物')}/${id}.md`), 'reader resolves mapped UTF-8 paths while keeping the original ID route');

@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Setting, TFolder, normalizePath } from "obsidian";
+import { AbstractInputSuggest, App, Modal, Notice, Setting, TFolder, normalizePath } from "obsidian";
 import { nextId, type TemplateCategory } from "../types";
 import { runAsync } from "../shared/async";
 
@@ -10,7 +10,23 @@ export function templatePropertyNames(template: TemplateCategory): string[] {
   ].filter(Boolean))];
 }
 
+class TemplateFolderSuggest extends AbstractInputSuggest<string> {
+  protected getSuggestions(query: string): string[] {
+    const search = query.trim().replace(/\\/g, "/").toLocaleLowerCase();
+    return this.app.vault.getAllLoadedFiles()
+      .filter((item): item is TFolder => item instanceof TFolder && item.path !== "/")
+      .map(item => item.path)
+      .filter(path => path.toLocaleLowerCase().includes(search))
+      .sort((a, b) => a.localeCompare(b, "zh-CN", { numeric: true }));
+  }
+
+  renderSuggestion(path: string, el: HTMLElement): void {
+    el.setText(path);
+  }
+}
+
 export class TemplateCreateModal extends Modal {
+  private folderSuggest?: TemplateFolderSuggest;
   constructor(app: App, private readonly onSave: (template: TemplateCategory) => Promise<void>, private readonly template?: TemplateCategory) {
     super(app);
   }
@@ -28,11 +44,13 @@ export class TemplateCreateModal extends Modal {
     new Setting(form).setName("文件保存目录")
       .addText(text => {
         text.setValue(folder).setPlaceholder("例如：阅读/书评").onChange(value => { folder = value; });
-        const list = form.createEl("datalist", { attr: { id: `template-folders-${nextId()}` } });
-        text.inputEl.setAttribute("list", list.id);
-        for (const item of this.app.vault.getAllLoadedFiles()) {
-          if (item instanceof TFolder && item.path !== "/") list.createEl("option", { value: item.path });
-        }
+        this.folderSuggest = new TemplateFolderSuggest(this.app, text.inputEl);
+        this.folderSuggest.limit = 0;
+        this.folderSuggest.onSelect(path => {
+          text.setValue(path);
+          folder = path;
+          this.folderSuggest?.close();
+        });
       });
     const filename = new Setting(form).setName("用作文件名的笔记属性");
     filename.controlEl.addClass("simple-template-filename-control");
@@ -136,5 +154,11 @@ export class TemplateCreateModal extends Modal {
         this.close();
       } finally { save.disabled = form.disabled = false; }
     }));
+  }
+
+  onClose(): void {
+    this.folderSuggest?.close();
+    this.folderSuggest = undefined;
+    this.contentEl.empty();
   }
 }

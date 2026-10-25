@@ -6,6 +6,7 @@ import { confirmAction } from "./shared/confirm";
 // ============================================================
 import { App, Menu, Modal, Notice, PluginSettingTab, Setting, TFile, TFolder, normalizePath, requireApiVersion, setIcon, type SettingDefinitionItem, type SettingDefinitionAction, type SettingDefinitionRender } from "obsidian";
 import type SimplePlugin from "./main";
+import { TYPOGRAPHY_DEFAULTS, TYPOGRAPHY_RANGES } from "./shared/typography";
 import {
   checkUnusedAttachments,
   describeAttachmentLocation,
@@ -97,30 +98,34 @@ function attachmentOrganizerDisabledReasons(
 }
 
 type SettingsPage =
-  | { type: "overview" }
-  | { type: "sync-sharing" }
-  | { type: "html-preview" }
-  | { type: "link-rules" }
-  | { type: "template-rules" }
-  | { type: "attachment-organizer" }
-  | { type: "new-note-defaults" }
-  | { type: "search-folders" }
-  | { type: "calendar-diary" }
-  | { type: "diary" }
-  | { type: "reformat" }
-  | { type: "reformat-rules" }
-  | { type: "quick-format" }
-  | { type: "quick-format-headings" }
-  | { type: "quick-format-callouts" }
-  | { type: "display-enhancements" }
-  | { type: "feature-enhancements" }
-  | { type: "render-enhancements" }
-  | { type: "theme-formatting" }
-  | { type: "notion-columns" }
-  | { type: "event-reminders" }
-  | { type: "date-management" }
-  | { type: "holiday-management" }
-  | { type: "category-manager" }
+  | { type:
+    | "overview"
+    | "sync-sharing"
+    | "html-preview"
+    | "link-rules"
+    | "template-rules"
+    | "attachment-organizer"
+    | "basic-optimization"
+    | "new-note-defaults"
+    | "search-folders"
+    | "calendar-diary"
+    | "diary"
+    | "reformat"
+    | "reformat-rules"
+    | "quick-format"
+    | "quick-format-headings"
+    | "quick-format-callouts"
+    | "display-enhancements"
+    | "desktop-typography"
+    | "feature-enhancements"
+    | "display-preview"
+    | "theme-formatting"
+    | "notion-columns"
+    | "event-reminders"
+    | "date-management"
+    | "holiday-management"
+    | "category-manager"
+  }
   | { type: "category-sites"; categoryId: string };
 
 type HolidayScheduleGroup = {
@@ -164,6 +169,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   plugin: SimplePlugin;
   private syncTab: SyncSettingsTab;
   private page: SettingsPage = { type: "overview" };
+  private displayMobile: boolean;
   private expandedQuickFormatCalloutSections = new Set(["native", "custom"]);
   private expandedReformatRuleSections = new Set(["builtin", "custom"]);
   private editingCustomCalloutIds = new Set<string>();
@@ -177,6 +183,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   constructor(app: App, plugin: SimplePlugin) {
     super(app, plugin);
     this.plugin = plugin;
+    this.displayMobile = plugin.isMobile;
     this.syncTab = new SyncSettingsTab(app, plugin.sync);
     plugin.sync.openSettings = (share = false) => {
       this.openPage({ type: "sync-sharing" });
@@ -230,31 +237,12 @@ export class SimpleSettingTab extends PluginSettingTab {
       { type: "group", heading: "功能拓展", cls: "simple-settings simple-native-overview", items: [
         entry("同步与分享", "sync-sharing", ["GitHub", "Git Ignore", "同步", "分享", "网页链接", "仓库", "手机", "服务器", "Token"], "提供笔记同步功能，支持将笔记发布为可被外部访问的网页链接。"),
         entry("日历与日记", "calendar-diary", ["日记模板", "结转", "周期提醒", "纪念日", "节假日", "季度", "周数"], "管理日历、每日笔记、周期事件提醒、纪念日和节假日。"),
-      ] },
-      { type: "group", heading: "编辑与显示", cls: "simple-settings simple-native-overview", items: [
-        entry("功能增强", "feature-enhancements", ["双列", "图片放大", "图片交互", "Mermaid", "流程图交互"], "双列文本对照，图片与流程图交互优化。"),
-        entry("显示参数", "display-enhancements", ["正文宽度", "图片高度", "窗口缩放", "窗口定位", "手机按钮", "参数优化"], "分别调整电脑端和手机端的正文宽度、图片高度与窗口显示参数。"),
-        entry("渲染优化", "render-enhancements", ["HTML 预览", "颜色代码", "自定义标签", "阅读排版"], "预览 HTML 和颜色代码，优化自定义标签的阅读排版。"),
-        entry(QUICK_FORMAT_NAME, "quick-format", ["标题", "引用", "Callout", "标题颜色", "标题字号"], "把当前行或选中文本快速转换为标题、引用或 Callout。"),
-        entry(REFORMAT_NAME, "reformat", ["粘贴", "链接", "排版规则", "换行", "网址标题"], "自动处理粘贴内容中的链接与文本，并按设定规则对整篇笔记重新排版。"),
-      ] },
-      { type: "group", heading: "快捷操作", cls: "simple-settings simple-native-overview", items: [
-        { name: "快速复制当前笔记链接", aliases: ["Obsidian URL", "绝对路径", "剪贴板"],
-          desc: "在编辑区顶部添加快捷复制按钮。",
-          render: (setting: Setting) => {
-            setting.setName("快速复制当前笔记链接").setDesc("在编辑区顶部添加快捷复制按钮。")
-              .addToggle(toggle => toggle.setValue(Boolean(this.getControlValue("quickCopyLink")))
-                .setDisabled(this.plugin.isMobile).onChange(value => this.setControlValue("quickCopyLink", value)));
-            setting.nameEl.addClass("simple-overview-accent-title");
-            const preview = setting.nameEl.createSpan({ cls: "simple-setting-inline-icons", attr: { "aria-hidden": "true" } });
-            setIcon(preview, quickCopyModeIcon(this.plugin.settings.enhancements.quickCopyLink.lastMode));
-          } },
-        entry("快速新建笔记", "template-rules", ["网页采集", "网站搜索", "分类", "网站规则"], "获取剪贴板内的内容，按设定规则直接在指定目录生成新笔记。"),
-      ] },
-      { type: "group", heading: "功能增强", cls: "simple-settings simple-native-overview", items: [
         entry("附件优化", "attachment-organizer", ["未引用附件", "重命名", "归位", "内嵌图片", "回收站"], "清理未引用附件，并按引用笔记重命名、归位附件。"),
-        entry("搜索时默认屏蔽", "search-folders", ["文件夹", "排除", "包含"], searchFolderSummary(this.plugin.settings.searchFolders)),
-        entry("新建笔记时自动补全属性", "new-note-defaults", ["Notebook Navigator", "Base", "数据库", "属性"], "新建笔记后，按所在目录参考 .base 文件自动补全属性。"),
+        entry("基础优化", "basic-optimization", ["搜索时默认屏蔽", "文件夹", "排除", "包含", "新建笔记时自动补全属性", "Notebook Navigator", "Base", "数据库", "属性"], "设置搜索范围与新建笔记的属性补全。"),
+      ] },
+      { type: "group", heading: "编辑与阅读", cls: "simple-settings simple-native-overview", items: [
+        entry("显示与预览", "display-preview", ["显示设置", "显示参数", "排版设置", "字号", "行高", "字间距", "段间距", "中文阅读版式", "缩进", "正文宽度", "图片高度", "窗口缩放", "窗口定位", "手机按钮", "图片放大", "Mermaid", "HTML 预览", "主题格式样式", "颜色代码", "自定义标签"], "调整正文排版与界面显示，设置图片、流程图及特殊内容的预览方式。"),
+        entry("编辑工具", "feature-enhancements", ["双列", QUICK_FORMAT_NAME, REFORMAT_NAME, "标题", "引用", "Callout", "粘贴", "链接", "排版规则", "快捷操作", "快速新建笔记", "快速复制当前笔记链接", "Obsidian URL", "绝对路径", "剪贴板", "网页采集", "网站搜索"], "设置双列编辑、格式快捷键、自动排版与笔记快捷操作。"),
       ] },
     ];
   }
@@ -291,6 +279,8 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.renderTemplateRules(containerEl);
     } else if (this.page.type === "attachment-organizer") {
       this.renderAttachmentOrganizerSettings(containerEl);
+    } else if (this.page.type === "basic-optimization") {
+      this.renderBasicOptimizationSettings(containerEl);
     } else if (this.page.type === "new-note-defaults") {
       this.renderNewNoteDefaults(containerEl);
     } else if (this.page.type === "search-folders") {
@@ -311,10 +301,12 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.renderQuickFormatCalloutSettings(containerEl);
     } else if (this.page.type === "display-enhancements") {
       this.renderDisplayEnhancementSettings(containerEl);
+    } else if (this.page.type === "desktop-typography") {
+      this.renderTypographySettings(containerEl);
     } else if (this.page.type === "feature-enhancements") {
       this.renderFeatureEnhancementSettings(containerEl);
-    } else if (this.page.type === "render-enhancements") {
-      this.renderRenderEnhancementSettings(containerEl);
+    } else if (this.page.type === "display-preview") {
+      this.renderDisplayPreviewSettings(containerEl);
     } else if (this.page.type === "theme-formatting") {
       this.renderThemeFormattingSettings(containerEl);
     } else if (this.page.type === "notion-columns") {
@@ -327,7 +319,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.renderHolidayManagementSettings(containerEl);
     } else if (this.page.type === "category-manager") {
       this.renderCategoryManager(containerEl);
-    } else {
+    } else if (this.page.type === "category-sites") {
       this.renderCategorySites(containerEl, this.page.categoryId);
     }
   }
@@ -363,92 +355,188 @@ export class SimpleSettingTab extends PluginSettingTab {
     }
   }
 
-  private renderFeatureEnhancementSettings(container: HTMLElement): void {
-    this.renderPageHeader(container, "功能增强");
+  private renderBasicOptimizationSettings(container: HTMLElement): void {
+    this.renderPageHeader(container, "基础优化");
+    this.renderSettingCard(container, card => {
+      this.renderNavigationItem(card, "搜索时默认屏蔽", searchFolderSummary(this.plugin.settings.searchFolders), () => this.openPage({ type: "search-folders" }));
+      this.renderNavigationItem(card, "新建笔记时自动补全属性", "新建笔记后，按所在目录参考 .base 文件自动补全属性。", () => this.openPage({ type: "new-note-defaults" }));
+    });
+  }
 
-    this.renderSettingCard(container, (card) => {
+  private renderFeatureEnhancementSettings(container: HTMLElement): void {
+    this.renderPageHeader(container, "编辑工具");
+
+    this.renderGroup(container, "编辑功能", (card) => {
       this.renderNavigationItem(card, "双列显示", "支持在笔记正文中以双列方式并排呈现和编辑文本，便于内容对照。", () => this.openPage({ type: "notion-columns" }));
-      new Setting(card)
-        .setName("图片交互优化")
-        .setDesc("点击笔记中的图片打开大图；在大图上滚轮缩放，点空白处或按 Esc 关闭。")
-        .addToggle((toggle) =>
-          toggle.setValue(this.plugin.settings.enableImageZoom).onChange(async (value) => {
-            this.plugin.settings.enableImageZoom = value;
-            await this.plugin.saveSettings();
-          })
-        );
-      new Setting(card)
-        .setName("流程图交互优化")
-        .setDesc("为流程图提供适应面板宽度、滚轮缩放与拖动画布，以及全屏查看。")
-        .addToggle((toggle) =>
-          toggle.setValue(this.plugin.settings.enableMermaidEnhancer).onChange(async (value) => {
-            this.plugin.settings.enableMermaidEnhancer = value;
-            await this.plugin.saveSettings();
-            this.plugin.refreshMermaidEnhancements();
-          })
-        );
+      this.renderNavigationItem(card, QUICK_FORMAT_NAME, "调整标题、引用和 Callout 的快捷操作与格式。", () => this.openPage({ type: "quick-format" }), QUICK_FORMAT_ICON);
+      this.renderNavigationItem(card, REFORMAT_NAME, "处理粘贴内容、链接转换和笔记文本排版规则。", () => this.openPage({ type: "reformat" }), REFORMAT_ICON);
+    });
+
+    this.renderGroup(container, "快捷操作", card => {
+      this.renderNavigationItem(card, "快速新建笔记", "获取剪贴板内的内容，按设定规则直接在指定目录生成新笔记。", () => this.openPage({ type: "template-rules" }), TEMPLATE_FILL_ICON);
+      const setting = new Setting(card).setName("快速复制当前笔记链接").setDesc("在编辑区顶部添加快捷复制按钮。")
+        .addToggle(toggle => toggle.setValue(Boolean(this.getControlValue("quickCopyLink")))
+          .setDisabled(this.plugin.isMobile).onChange(value => this.setControlValue("quickCopyLink", value)));
+      const preview = setting.nameEl.createSpan({ cls: "simple-setting-inline-icons", attr: { "aria-hidden": "true" } });
+      setIcon(preview, quickCopyModeIcon(this.plugin.settings.enhancements.quickCopyLink.lastMode));
     });
 
   }
 
-  private renderDisplayEnhancementSettings(container: HTMLElement): void {
-    this.renderPageHeader(container, "显示参数");
-    for (const mobile of [false, true]) {
-      this.renderGroup(container, mobile ? "手机端" : "电脑端", (card) => {
-      const profile = {
-        mobile,
-        settings: mobile ? this.plugin.settings.mobileDisplay : this.plugin.settings,
+  private renderTypographySettings(container: HTMLElement): void {
+    this.renderPageHeader(container, "排版设置 · 电脑端", () => this.openPage({ type: "display-enhancements" }));
+    const settings = this.plugin.settings.desktopTypography;
+    const save = async (): Promise<void> => {
+      this.plugin.refreshTypography();
+      await this.plugin.saveSettings();
+    };
+    this.renderSettingCard(container, card => {
+      new Setting(card).setName("启用排版优化")
+        .setDesc("用于电脑端笔记的编辑和阅读视图；关闭后隐藏下方参数，字号与间距恢复 Obsidian / 主题设置。正文宽度和中文阅读版式由上一级独立控制。")
+        .addToggle(toggle => toggle.setValue(settings.enabled).onChange(async value => {
+          settings.enabled = value;
+          await save();
+          this.renderSettings();
+        }));
+    });
+    if (!settings.enabled) return;
+    this.renderGroup(container, "正文与段落", card => {
+      const labels = {
+        fontSize: ["正文字号", "单位 px；默认 15，可按阅读习惯调整。"],
+        lineHeight: ["行高", "字号的倍数；建议 1.7。"],
+        letterSpacing: ["字间距", "额外增加的间距，单位 px；建议 0。"],
+        paragraphSpacing: ["段间距", "字号的倍数，单位 em；建议 0.8。编辑视图保留原有空行。"],
       };
-      new Setting(card)
-        .setName("弹出窗口缩放比例")
-        .setDesc(`${profile.mobile ? "手机端自动" : "电脑端"}使用此比例显示设置窗口和附件清单；填写 40–95，0 或留空则不调整。`)
-        .addText((text) => {
+      for (const key of Object.keys(TYPOGRAPHY_RANGES) as (keyof typeof TYPOGRAPHY_RANGES)[]) {
+        const [min, max, step] = TYPOGRAPHY_RANGES[key];
+        new Setting(card).setName(labels[key][0]).setDesc(labels[key][1]).addText(text => {
           text.inputEl.type = "number";
-          text.inputEl.min = "0";
-          text.inputEl.max = String(POPUP_SCALE_MAX);
-          text.inputEl.step = "5";
-          text
-            .setPlaceholder(profile.mobile ? "默认 0；不调整" : "默认 70；留空不调整")
-            .setValue(profile.settings.popupWindowScale)
-            .onChange(async (value) => {
-              profile.settings.popupWindowScale = value.trim();
-              await this.plugin.saveSettings();
-              this.plugin.refreshPopupWindowSizing();
-            });
+          text.inputEl.min = String(min);
+          text.inputEl.max = String(max);
+          text.inputEl.step = String(step);
+          text.setValue(String(settings[key])).onChange(async value => {
+            if (!value.trim()) return;
+            const number = Number(value);
+            if (!Number.isFinite(number) || number < min || number > max) return;
+            settings[key] = number;
+            await save();
+          });
         });
-      new Setting(card)
-        .setName("笔记正文宽度")
-        .setDesc(profile.mobile
-          ? "手机端的最大可读行宽，单位为 px；建议留空。大于屏幕可用宽度时通常无明显效果，小于可用宽度时才会收窄正文。需开启 Obsidian 的“可读行长”。"
-          : "电脑端的最大可读行宽，单位为 px；需要开启 Obsidian 的“可读行长”。留空则跟随主题默认值。")
-        .addText((text) => {
-          text.inputEl.type = "number";
-          text.inputEl.min = profile.mobile ? "1" : "400";
-          text.inputEl.max = "2000";
-          text.inputEl.step = "20";
-          text
-            .setPlaceholder(profile.mobile ? "建议留空，跟随主题" : "例如 900；留空跟随主题")
-            .setValue(profile.settings.readableLineWidth)
-            .onChange(async (value) => {
-              profile.settings.readableLineWidth = value.trim();
-              this.plugin.applyReadableLineWidth();
-              await this.plugin.saveSettings();
-            });
+      }
+      new Setting(card).setName("恢复推荐参数").setDesc("15px / 1.7 倍行高 / 字间距 0 / 段间距 0.8em。正文宽度与中文阅读版式保持原设置。")
+        .addButton(button => button.setButtonText("恢复推荐").onClick(async () => {
+          Object.assign(settings, TYPOGRAPHY_DEFAULTS, { paragraphStyle: settings.paragraphStyle });
+          await save();
+          this.renderSettings();
+        }));
+    });
+  }
+
+  private renderDisplayEnhancementSettings(container: HTMLElement): void {
+    this.renderPageHeader(container, "显示设置", () => this.openPage({ type: "display-preview" }));
+    const selector = container.createDiv({ cls: "simple-display-platform-selector", attr: { role: "tablist", "aria-label": "显示参数平台" } });
+    selector.createSpan({ cls: "simple-display-platform-slider", attr: { "aria-hidden": "true" } });
+    const panels: HTMLElement[] = [];
+    const buttons: HTMLButtonElement[] = [];
+    const selectPlatform = (mobile: boolean): void => {
+      this.displayMobile = mobile;
+      selector.classList.toggle("is-mobile-selected", mobile);
+      buttons.forEach((button, index) => {
+        const selected = Boolean(index) === mobile;
+        button.setAttribute("aria-selected", String(selected));
+        button.tabIndex = selected ? 0 : -1;
+        panels[index].hidden = !selected;
+      });
+    };
+    for (const [index, name] of ["电脑端", "手机端"].entries()) {
+      const button = selector.createEl("button", { text: name, attr: {
+        type: "button", role: "tab", id: `simple-display-tab-${index}`, "aria-controls": `simple-display-panel-${index}`,
+      } });
+      buttons.push(button);
+      button.addEventListener("click", () => selectPlatform(Boolean(index)));
+      button.addEventListener("keydown", event => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const next = event.key === "Home" ? 0 : event.key === "End" ? 1 : 1 - index;
+        selectPlatform(Boolean(next));
+        buttons[next].focus();
+      });
+    }
+    for (const mobile of [false, true]) {
+      const name = mobile ? "手机端" : "电脑端";
+      const index = mobile ? 1 : 0;
+      const section = container.createEl("section", { cls: "simple-display-platform", attr: {
+        role: "tabpanel", id: `simple-display-panel-${index}`, "aria-label": name, "aria-labelledby": `simple-display-tab-${index}`,
+      } });
+      panels.push(section);
+      const profile = { mobile, settings: mobile ? this.plugin.settings.mobileDisplay : this.plugin.settings };
+      const renderImageHeight = (card: HTMLElement): void => {
+        new Setting(card)
+          .setName("图片最大高度")
+          .setDesc(`${profile.mobile ? "手机端" : "电脑端"}笔记图片的最大显示高度，按原比例自动缩放；留空表示不限制。`)
+          .addText((text) => {
+            text.inputEl.type = "number";
+            text.inputEl.min = "1";
+            text
+              .setPlaceholder("留空关闭")
+              .setValue(profile.settings.imageMaxHeight)
+              .onChange(async (value) => {
+                profile.settings.imageMaxHeight = value.trim();
+                this.plugin.applyImageHeightLimit();
+                await this.plugin.saveSettings();
+              });
         });
-      new Setting(card)
-        .setName("图片高度")
-        .setDesc(`${profile.mobile ? "手机端" : "电脑端"}笔记图片的最大显示高度，按原比例自动缩放；留空表示不限制。`)
-        .addText((text) => {
-          text.inputEl.type = "number";
-          text.inputEl.min = "1";
-          text
-            .setPlaceholder("留空关闭")
-            .setValue(profile.settings.imageMaxHeight)
-            .onChange(async (value) => {
-              profile.settings.imageMaxHeight = value.trim();
-              this.plugin.applyImageHeightLimit();
+      };
+      this.renderGroup(section, "正文与阅读", card => {
+        if (!mobile) {
+          this.renderNavigationItem(card, "排版设置", "调整字号、行高、字间距和段间距。中文阅读版式与正文宽度由下方单独设置。", () => this.openPage({ type: "desktop-typography" }));
+          new Setting(card).setName("中文阅读版式")
+            .setDesc("开启后正文首行缩进两字，整行加粗及标题行不做缩进。")
+            .addToggle(toggle => toggle.setValue(this.plugin.settings.desktopTypography.paragraphStyle === "indent").onChange(async value => {
+              this.plugin.settings.desktopTypography.paragraphStyle = value ? "indent" : "spaced";
+              this.plugin.refreshTypography();
               await this.plugin.saveSettings();
-            });
+            }));
+        }
+        new Setting(card)
+          .setName("笔记正文宽度")
+          .setDesc(profile.mobile
+            ? "手机端的最大可读行宽，单位为 px；建议留空。大于屏幕可用宽度时通常无明显效果，小于可用宽度时才会收窄正文。需开启 Obsidian 的“可读行长”。"
+            : "电脑端的最大可读行宽，单位为 px；需要开启 Obsidian 的“可读行长”。留空则跟随主题默认值。")
+          .addText((text) => {
+            text.inputEl.type = "number";
+            text.inputEl.min = profile.mobile ? "1" : "400";
+            text.inputEl.max = "2000";
+            text.inputEl.step = "20";
+            text
+              .setPlaceholder(profile.mobile ? "建议留空，跟随主题" : "例如 900；留空跟随主题")
+              .setValue(profile.settings.readableLineWidth)
+              .onChange(async (value) => {
+                profile.settings.readableLineWidth = value.trim();
+                this.plugin.applyReadableLineWidth();
+                await this.plugin.saveSettings();
+              });
+        });
+        if (!mobile) renderImageHeight(card);
+      });
+      if (mobile) this.renderGroup(section, "图片显示", renderImageHeight);
+      this.renderGroup(section, "窗口与界面", card => {
+        new Setting(card)
+          .setName("弹出窗口缩放比例")
+          .setDesc(`${profile.mobile ? "手机端自动" : "电脑端"}使用此比例显示设置窗口和附件清单；填写 40–95，0 或留空则不调整。`)
+          .addText((text) => {
+            text.inputEl.type = "number";
+            text.inputEl.min = "0";
+            text.inputEl.max = String(POPUP_SCALE_MAX);
+            text.inputEl.step = "5";
+            text
+              .setPlaceholder(profile.mobile ? "默认 0；不调整" : "默认 70；留空不调整")
+              .setValue(profile.settings.popupWindowScale)
+              .onChange(async (value) => {
+                profile.settings.popupWindowScale = value.trim();
+                await this.plugin.saveSettings();
+                this.plugin.refreshPopupWindowSizing();
+              });
         });
       if (!mobile) {
         new Setting(card)
@@ -461,9 +549,6 @@ export class SimpleSettingTab extends PluginSettingTab {
       }
       if (mobile) {
         const settings = this.plugin.settings.mobileDisplay;
-        new Setting(card).setName("紧凑底栏").setDesc("缩小手机底部页签与文件信息的字号和留白。").addToggle(toggle => toggle.setValue(settings.compactBottomBar).onChange(async value => {
-          settings.compactBottomBar = value; this.plugin.applyMobileHeaderButtons(); await this.plugin.saveSettings();
-        }));
         const sizeSetting = new Setting(card).setName("顶部按钮大小");
         const updateSizeDescription = (): void => {
           const button = this.plugin.isMobile ? document.querySelector<HTMLElement>(".workspace-leaf.mod-active .view-header .view-action, .view-header .view-action") : null;
@@ -483,6 +568,9 @@ export class SimpleSettingTab extends PluginSettingTab {
           });
         });
         updateSizeDescription();
+        new Setting(card).setName("紧凑底栏").setDesc("缩小手机底部页签与文件信息的字号和留白。").addToggle(toggle => toggle.setValue(settings.compactBottomBar).onChange(async value => {
+          settings.compactBottomBar = value; this.plugin.applyMobileHeaderButtons(); await this.plugin.saveSettings();
+        }));
         new Setting(card)
           .setName("禁用当前主题自带的手机端按钮样式")
           .setDesc("默认开启，关闭当前 Things 主题的圆形悬浮按钮外观，使用原生风格；按钮大小仍由上方设置控制。")
@@ -495,11 +583,13 @@ export class SimpleSettingTab extends PluginSettingTab {
       }
       });
     }
+    selectPlatform(this.displayMobile);
   }
 
-  private renderRenderEnhancementSettings(container: HTMLElement): void {
-    this.renderPageHeader(container, "渲染优化");
+  private renderDisplayPreviewSettings(container: HTMLElement): void {
+    this.renderPageHeader(container, "显示与预览");
     this.renderSettingCard(container, (card) => {
+      this.renderNavigationItem(card, "显示设置", "分别设置电脑端和手机端的正文排版、图片尺寸与窗口界面。", () => this.openPage({ type: "display-enhancements" }));
       this.renderNavigationItem(
         card,
         "主题格式样式",
@@ -512,6 +602,25 @@ export class SimpleSettingTab extends PluginSettingTab {
         "在笔记中预览 HTML 内容，可设置预览前的文本替换规则。",
         () => this.openPage({ type: "html-preview" })
       );
+      new Setting(card)
+        .setName("图片交互优化")
+        .setDesc("点击笔记中的图片打开大图；在大图上滚轮缩放，点空白处或按 Esc 关闭。")
+        .addToggle((toggle) =>
+          toggle.setValue(this.plugin.settings.enableImageZoom).onChange(async (value) => {
+            this.plugin.settings.enableImageZoom = value;
+            await this.plugin.saveSettings();
+          })
+        );
+      new Setting(card)
+        .setName("流程图交互优化")
+        .setDesc("为流程图提供适应面板宽度、滚轮缩放与拖动画布，以及全屏查看。")
+        .addToggle((toggle) =>
+          toggle.setValue(this.plugin.settings.enableMermaidEnhancer).onChange(async (value) => {
+            this.plugin.settings.enableMermaidEnhancer = value;
+            await this.plugin.saveSettings();
+            this.plugin.refreshMermaidEnhancements();
+          })
+        );
       new Setting(card)
         .setName("颜色代码预览")
         .setDesc("在编辑器中的 HEX、RGB、RGBA、HSL 和 HSLA 颜色代码前显示对应的颜色方块。")
@@ -662,7 +771,7 @@ export class SimpleSettingTab extends PluginSettingTab {
 
   private renderSearchFolderSettings(container: HTMLElement): void {
     this.plugin.refreshSearchFolderControls();
-    this.renderPageHeader(container, "搜索增强");
+    this.renderPageHeader(container, "搜索增强", () => this.openPage({ type: "basic-optimization" }));
     const config = this.plugin.settings.searchFolders;
 
     this.renderSettingCard(container, (card) => {
@@ -785,7 +894,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderThemeFormattingSettings(container: HTMLElement): void {
-    this.renderPageHeader(container, "主题格式样式", () => this.openPage({ type: "render-enhancements" }));
+    this.renderPageHeader(container, "主题格式样式", () => this.openPage({ type: "display-preview" }));
     const formatting = this.plugin.settings.themeFormatting;
     this.renderSettingCard(container, (card) => {
       const colorSetting = (
@@ -906,12 +1015,12 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderHtmlPreviewSettings(container: HTMLElement): void {
-    this.renderPageHeader(container, "HTML 预览", () => this.openPage({ type: "render-enhancements" }));
+    this.renderPageHeader(container, "HTML 预览", () => this.openPage({ type: "display-preview" }));
 
     this.renderSettingCard(container, (card) => {
       new Setting(card)
         .setName("启用 HTML 预览")
-        .setDesc("1. 将 HTML 代码块渲染为预览，支持样式，忽略脚本。\n2. 支持在不修改原始文本内容时，通过正则将符合规则的文本转化成指定 HTML 代码，并提供渲染预览。")
+        .setDesc("渲染 HTML 代码，仅显示样式，不执行内嵌脚本。")
         .addToggle((toggle) =>
           toggle.setValue(this.plugin.settings.enableHtmlPreview).onChange(async (value) => {
             this.plugin.settings.enableHtmlPreview = value;
@@ -921,13 +1030,13 @@ export class SimpleSettingTab extends PluginSettingTab {
         );
     });
 
-    const card = container.createDiv({ cls: "simple-card" });
+    const card = container.createDiv({ cls: "simple-card simple-html-preview-rules" });
     const header = card.createDiv({ cls: "simple-card-header" });
     const copy = header.createDiv();
     copy.createDiv({ cls: "simple-card-title", text: "页面转换正则" });
     copy.createDiv({
       cls: "setting-item-description",
-      text: "将匹配内容转换为 HTML 页面代码，或按顺序替换预览内容；已有 HTML 代码块无需匹配正则即可预览。不修改原始笔记内容。",
+      text: "通过正则将匹配内容渲染为指定的 HTML 样式，不修改原文。",
     });
     const headerActions = header.createDiv({ cls: "simple-card-actions" });
     const add = headerActions.createEl("button", { cls: "mod-cta simple-add-button" });
@@ -1169,7 +1278,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderNewNoteDefaults(container: HTMLElement): void {
-    this.renderPageHeader(container, "新建笔记时自动补全属性");
+    this.renderPageHeader(container, "新建笔记时自动补全属性", () => this.openPage({ type: "basic-optimization" }));
 
     this.renderSettingCard(container, (card) => {
       new Setting(card)
@@ -1315,7 +1424,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderTemplateRules(container: HTMLElement): void {
-    this.renderPageHeader(container, "快速新建笔记");
+    this.renderPageHeader(container, "快速新建笔记", () => this.openPage({ type: "feature-enhancements" }));
 
     this.renderSettingCard(container, (card) => {
       new Setting(card)
@@ -1765,6 +1874,9 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private openPage(page: SettingsPage): void {
+    if (page.type === "display-enhancements" && this.page.type !== "display-enhancements" && this.page.type !== "desktop-typography") {
+      this.displayMobile = this.plugin.isMobile;
+    }
     if (page.type === "sync-sharing") this.syncTab.resetNavigation();
     this.page = page;
     this.deleteMode = null;
@@ -1985,7 +2097,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderReformatSettings(container: HTMLElement): void {
-    this.renderPageHeader(container, REFORMAT_NAME);
+    this.renderPageHeader(container, REFORMAT_NAME, () => this.openPage({ type: "feature-enhancements" }));
     const reformat = this.plugin.settings.diary.reformat;
     const enabled = this.plugin.settings.enhancements.currentNoteLinkConverter.enabled;
 
@@ -2215,7 +2327,7 @@ export class SimpleSettingTab extends PluginSettingTab {
 
   private renderQuickFormatSettings(container: HTMLElement): void {
     const quickFormat = this.plugin.settings.enhancements.quickFormat;
-    this.renderPageHeader(container, QUICK_FORMAT_NAME);
+    this.renderPageHeader(container, QUICK_FORMAT_NAME, () => this.openPage({ type: "feature-enhancements" }));
 
     this.renderSettingCard(container, (card) => {
       new Setting(card)
@@ -4473,6 +4585,7 @@ function normalizeSiteRule(value: unknown): SiteRule {
       enabled: typeof value.search.enabled === "boolean" ? value.search.enabled : undefined,
       type: stringValue(value.search.type),
       searchUrl: stringValue(value.search.searchUrl),
+      queryEncoding: stringValue(value.search.queryEncoding),
       pageStart: typeof value.search.pageStart === "number" ? value.search.pageStart : undefined,
       resultLimit: typeof value.search.resultLimit === "number" ? value.search.resultLimit : undefined,
       resultList: stringValue(value.search.resultList),

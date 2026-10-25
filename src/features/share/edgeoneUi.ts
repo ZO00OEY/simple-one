@@ -7,7 +7,7 @@ export function shareExternalLink(parent: HTMLElement, text: string, href: strin
 }
 
 export function renderMainlandPreviewNotice(parent: HTMLElement, projectUrl: string): void {
-  const first = parent.createDiv();
+  const first = parent.createDiv({ cls: "simple-share-inline-notice" });
   first.createSpan({ text: "当前加速区域包含中国大陆。未绑定自定义域名时，需从" });
   shareExternalLink(first, "项目概览 ↗", projectUrl);
   first.createSpan({ text: "获取预览链接（有效期 3 小时）。" });

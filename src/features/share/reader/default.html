@@ -84,7 +84,11 @@ main a:hover { text-decoration-thickness:2px }
 .accent-picker summary::-webkit-details-marker { display:none }
 .accent-picker summary::after { content:""; width:6px; height:6px; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; transform:rotate(45deg); margin-top:-3px }
 .accent-swatch { display:block; width:22px; height:22px; border-radius:4px; background:var(--swatch); border:1px solid rgb(0 0 0 / 10%) }
-.accent-options { position:absolute; top:calc(100% + 6px); right:0; display:flex; gap:6px; padding:8px; border:1px solid var(--share-line); border-radius:8px; background:var(--share-bg); box-shadow:0 4px 16px rgb(0 0 0 / 10%); z-index:10 }
+.accent-options { position:absolute; top:calc(100% + 6px); right:0; display:grid; gap:6px; min-width:174px; padding:8px; border:1px solid var(--share-line); border-radius:8px; background:var(--share-bg); box-shadow:0 4px 16px rgb(0 0 0 / 10%); z-index:10 }
+.accent-colors { display:flex; justify-content:space-between; gap:6px }
+.reader-font-control { display:grid; gap:6px; margin-top:4px; padding-top:10px; border-top:1px dashed var(--share-line); font-size:13px }
+.reader-font-control select { width:100%; min-height:34px; padding:4px 8px; border:1px solid var(--share-line); border-radius:5px; background:var(--share-bg); color:var(--share-text); font:inherit }
+.reader-font-control select:focus-visible { outline:2px solid var(--share-accent); outline-offset:2px }
 .accent-options button { display:grid; place-items:center; width:36px; height:36px; padding:5px; background:transparent; border:1px solid transparent; border-radius:6px; cursor:pointer }
 .accent-options button[aria-pressed="true"] { border-color:var(--share-text) }
 .accent-options button:hover { background:color-mix(in srgb,var(--share-text) 8%,transparent) }
@@ -107,7 +111,7 @@ aside input { font-size:13px; padding:8px; margin-bottom:14px }
 .sidebar-resizer { position:absolute; top:0; bottom:0; right:-5px; width:10px; cursor:col-resize; touch-action:none; z-index:3 }
 .sidebar-resizer:hover,.sidebar-resizer:focus-visible { background:color-mix(in srgb,var(--share-muted) 20%,transparent) }
 body.resizing-sidebar { cursor:col-resize; user-select:none }
-main { font-family:inherit; font-size:15px; line-height:1.5; letter-spacing:0; max-width:860px }
+main { font-family:var(--reader-font,inherit); font-size:15px; line-height:1.5; letter-spacing:0; max-width:860px }
 #content :is(p,ul,ol,blockquote) { max-width:none }
 main p { margin:.7em 0 }
 main ul,main ol { margin:.6em 0; padding-left:1.65em }
@@ -215,8 +219,8 @@ if (header) {
   const picker = document.createElement("details");
   picker.className = "accent-picker";
   const summary = document.createElement("summary");
-  summary.setAttribute("aria-label", "选择主题色");
-  summary.title = "主题色";
+  summary.setAttribute("aria-label", "选择主题色和字体");
+  summary.title = "主题色与字体";
   const swatch = document.createElement("span");
   swatch.className = "accent-swatch";
   swatch.setAttribute("aria-hidden", "true");
@@ -224,7 +228,10 @@ if (header) {
   const options = document.createElement("div");
   options.className = "accent-options";
   options.setAttribute("role", "group");
-  options.setAttribute("aria-label", "主题色");
+  options.setAttribute("aria-label", "主题色与字体");
+  const colorOptions = document.createElement("div");
+  colorOptions.className = "accent-colors";
+  options.append(colorOptions);
   const colors = { pink: "#fb7299", blue: "#2563eb", purple: "#7c3aed" };
   const darkColors = { blue: "#80b4ff", purple: "#b69aff", pink: "#fb7299" };
   const names = { pink:"B 站粉", blue:"蓝色", purple:"紫色" };
@@ -238,7 +245,7 @@ if (header) {
     const palette = dark?.matches ? darkColors : colors;
     document.documentElement.style.setProperty("--share-accent", palette[selected]);
     swatch.style.setProperty("--swatch", palette[selected]);
-    summary.setAttribute("aria-label", `主题色：${names[selected]}，点击选择`);
+    summary.setAttribute("aria-label", `主题色：${names[selected]}，点击选择主题色和字体`);
     options.querySelectorAll("button").forEach(button => {
       button.style.setProperty("--swatch", palette[button.dataset.color]);
       button.setAttribute("aria-pressed", String(button.dataset.color === selected));
@@ -258,8 +265,34 @@ if (header) {
       selected = value; applyColor(); picker.open = false; summary.focus();
       try { window.localStorage.setItem("simple-reader-theme-color", value); } catch { /* Optional preference. */ }
     });
-    options.append(button);
+    colorOptions.append(button);
   }
+  const fontControl = document.createElement("label");
+  fontControl.className = "reader-font-control";
+  fontControl.append("字体");
+  const fontSelect = document.createElement("select");
+  fontSelect.setAttribute("aria-label", "正文字体");
+  fontSelect.title = "使用设备已安装的字体；未安装时使用默认字体";
+  const fonts = { default: { name: "默认", family: "" }, yahei: { name: "微软雅黑", family: '"Microsoft YaHei", "微软雅黑", sans-serif' }, jinkai: { name: "仓耳今楷", family: '"仓耳今楷01", "TsangerJinKai01", "Microsoft YaHei", sans-serif' } };
+  for (const [value, font] of Object.entries(fonts)) {
+    const option = document.createElement("option");
+    option.value = value; option.textContent = font.name; fontSelect.append(option);
+  }
+  const applyFont = () => {
+    const family = fonts[fontSelect.value].family;
+    if (family) document.documentElement.style.setProperty("--reader-font", family);
+    else document.documentElement.style.removeProperty("--reader-font");
+  };
+  try {
+    const saved = window.localStorage.getItem("simple-reader-font");
+    if (Object.prototype.hasOwnProperty.call(fonts, saved)) fontSelect.value = saved;
+  } catch { /* Font selection also works without browser storage. */ }
+  applyFont();
+  fontSelect.addEventListener("change", () => {
+    applyFont();
+    try { window.localStorage.setItem("simple-reader-font", fontSelect.value); } catch { /* Optional preference. */ }
+  });
+  fontControl.append(fontSelect); options.append(fontControl);
   picker.addEventListener("keydown", event => {
     if (event.key === "Escape") { picker.open = false; summary.focus(); }
   });
