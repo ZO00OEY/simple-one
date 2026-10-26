@@ -49,16 +49,19 @@ export class ReformatRuleModal extends Modal {
     actions.settingEl.addClass("simple-reformat-editor-actions");
     let saveButton: HTMLButtonElement;
     if (this.options.onDelete) {
-      actions.addButton(button => button.setButtonText("删除").setWarning().onClick(async () => {
-        button.setDisabled(true);
-        try {
-          await this.options.onDelete!();
-          this.close();
-        } catch (reason) {
-          error.setText(reason instanceof Error ? reason.message : String(reason));
-          button.setDisabled(false);
-        }
-      }));
+      actions.addButton(button => {
+        button.buttonEl.addClass("mod-warning");
+        return button.setButtonText("删除").onClick(async () => {
+          button.setDisabled(true);
+          try {
+            await this.options.onDelete!();
+            this.close();
+          } catch (reason) {
+            error.setText(reason instanceof Error ? reason.message : String(reason));
+            button.setDisabled(false);
+          }
+        });
+      });
     }
     actions.addButton(button => button.setButtonText("取消").onClick(() => this.close()));
     actions.addButton(button => {

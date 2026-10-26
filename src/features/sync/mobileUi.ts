@@ -46,7 +46,6 @@ export function mobileConflictFile(c: MobileConflict): PreviewFile {
 export class MobileSyncModal {
   private choices: Record<string, ConflictChoice> = {};
   constructor(private app: App, private engine: MobileGithub, private plan: MobilePlan,
-    private auto = false,
     private review?: (live: LiveReview) => Promise<Record<string, ConflictChoice> | null>,
     private flow?: MobileSyncFlow) {}
 
@@ -247,7 +246,7 @@ function renderCompactSyncRules(root: HTMLElement, options: MobileOptions, save:
   mobileCheckbox(root, "追踪文件改名与移动", "识别文件改名和移动，关联移动前后的内容。", options.trackPaths, async value => { options.trackPaths = value; await save(); });
 }
 
-export function renderMobileSettings(root: HTMLElement, host: MobileHost, guide = false, rerender?: () => void): void {
+export function renderMobileSettings(root: HTMLElement, host: MobileHost, guide = false): void {
   const options = host.options;
   if (!guide) root.addClass("simple-lightweight-sync-settings");
   const section = (title: string): HTMLElement => guide ? settingsSection(root, title) : compactSection(root, title);
@@ -293,7 +292,7 @@ export function renderMobileSettings(root: HTMLElement, host: MobileHost, guide 
     status.hidden = false; status.setText(message); status.toggleClass("simple-one-sync-setup-error", error);
   };
   new Setting(account).setName("核验仓库与 token").setDesc("只读取指定仓库信息和文件树，不列出账号全部仓库，不下载正文。")
-    .addButton((button) => button.setIcon("play").setTooltip("核验仓库与 Token").setDisabled(!host.active()).onClick(async () => {
+    .addButton((button) => button.setIcon("play").setTooltip("核验仓库与 token").setDisabled(!host.active()).onClick(async () => {
       button.setDisabled(true);
       report("正在检查 Token 与仓库…");
       try {

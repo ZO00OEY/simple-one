@@ -2,36 +2,87 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Everyday tools for writing, organizing, syncing, and sharing in Obsidian.
-Simple One brings them together in one plugin, with features you can enable as needed.
+**Writing, organization, daily notes, sync, and public sharing in one configurable Obsidian toolkit.**
+
+Format a note, capture a webpage, track daily tasks, or move notes between a computer and a phone. Enable the features you need. Desktop and mobile display settings can be saved separately. The settings interface is currently primarily in Chinese.
+
+[Latest release](https://github.com/ZO00OEY/simple-one/releases/latest) · [User guide](USAGE.md) · [Changelog](RELEASE_NOTES.md) · [Report an issue](https://github.com/ZO00OEY/simple-one/issues)
 
 ## Features
 
-- **Writing and formatting:** Quickly apply headings, quotes, and Callouts; clean up notes with configurable formatting rules.
-- **Links and webpage capture:** Turn pasted URLs into readable links, clean page titles, and capture webpages as notes with your own templates.
-- **Calendar and daily notes:** Write daily notes, carry forward unfinished tasks, and keep track of recurring reminders, anniversaries, and holidays.
-- **Reading and display:** Adjust text width and image size, use columns, enlarge images, and preview HTML, colors, and diagrams.
-- **Attachments and organization:** Find unused attachments, organize file names and locations, filter search folders, and fill properties for new notes.
-- **Vault sync:** Desktop Git backups and history, plus lightweight sync for phones and computers without Git. Review differences, resolve conflicts, choose how to combine both sides, and resume large downloads.
-- **Public note sharing:** Publish selected notes to GitHub Pages, with optional Tencent EdgeOne hosting. Keep stable links, organize public folders and names, choose what to copy, and customize the website with HTML templates. Publishing works on desktop and mobile.
-- **Desktop conveniences:** Copy note links or file paths and keep supported popout windows within the screen.
+| Workflow | Tools |
+| --- | --- |
+| Writing and cleanup | Heading, quote and Callout actions; configurable text formatting; pasted URL titles and link cleanup. |
+| Webpage capture | Extract site fields into templates; create notes from a URL or supported site search; import, export and test rules. |
+| Calendar and daily notes | Date navigation, templates, unfinished-task carryover, recurring events, anniversaries and yearly holiday schedules. |
+| Reading and display | Text width, image size, columns, image zoom, and HTML, color and diagram previews. |
+| Organization | New-note properties, search-folder filters, attachment scanning and cleanup. |
+| Vault sync | Native desktop Git or lightweight GitHub API sync for phones and computers without Git; previews, conflict resolution and interrupted-download recovery. |
+| Public sharing | Publish selected notes to a separate repository; stable links, public folders and names, HTML templates and optional EdgeOne hosting. |
 
-Desktop and mobile display options can be configured separately. The settings interface is currently in Chinese. Token-based sharing and EdgeOne authorization require Obsidian 1.11.4 or later; the website can be read on any device.
+Web capture depends on the target website, access restrictions and configured rules. Some rendered-page capture requires desktop capabilities. Published pages may look different from notes inside Obsidian.
 
-## Get Simple One
+## Install or update
 
-Find **Simple One** in Obsidian's community plugins, or download it from [Releases](https://github.com/ZO00OEY/simple-one/releases).
+1. Download **main.js, manifest.json and styles.css** from the same [Release](https://github.com/ZO00OEY/simple-one/releases).
+2. Put the three files in `.obsidian/plugins/simple-one/` inside your vault. Substitute your configuration directory if customized.
+3. Enable **Simple One** in Obsidian's community-plugin settings.
 
-See the [English user guide](USAGE.md) or [中文使用说明](USAGE.zh-CN.md) for setup and everyday use.
+To update, replace these files and reload the plugin. Keep your existing configuration; do not delete the plugin directory. The default share reader and licenses are embedded, so no separate HTML download is required.
 
-For source development, `npm install` creates a local `.gitignore` in the standalone Git repository to protect dependencies, credentials, and personal settings. This file is not committed, and existing local rules are preserved.
+The base plugin requires **Obsidian 1.7.2**. Token-based sharing and EdgeOne authorization using Secret Storage require **1.11.4 or later**. Native desktop sync also requires Git. See the user guide for authorization details.
+
+## Find the settings
+
+Open **Settings → Simple One**:
+
+- **Display / Theme**: reading and editing appearance.
+- **Shortcuts and editing**: actions, editing options, paste handling and columns. Row-end gears open formatting and quick-note settings.
+- **Feature optimization**: search and attachment tools, plus switches that show the sync/sharing and calendar/daily-note entries.
+- **Calendar and daily notes**: separate daily-note and calendar tabs, with event, anniversary and yearly holiday management.
+- **Sync and sharing**: select a sync method or configure public sharing separately. State buttons enable or disable a method; arrows open its settings.
+
+Start with the features you need. Many concise settings expose extra explanations on hover.
+
+## Choose a sync method
+
+| Method | Devices | Purpose |
+| --- | --- | --- |
+| Desktop Git | Computers with Git | A local Git repository, history, automatic backups and remote updates. |
+| Lightweight Git sync | Android, iOS and desktop | GitHub API access without local Git; file previews, sync scope and download recovery. |
+| Public sharing | Desktop and mobile | Publish selected notes for readers; configured separately from private vault sync. |
+
+Choose one vault sync method per device. Avoid multiple tools writing to the same vault concurrently. Review first-sync, deletion and conflict previews. Keep an independent backup before sync setup or bulk attachment operations.
 
 ## Access and privacy
 
-Sync requires GitHub authorization; sharing publishes selected notes publicly. Web capture contacts the requested website. Sync and attachment tools scan vault files, copy actions use the clipboard, and desktop Git uses local files and commands. No telemetry. See [review notes](docs/automated-review-notes.md) for technical details.
+- **No telemetry.** Web capture contacts the requested site. GitHub sync and sharing contact their configured services. EdgeOne is optional.
+- **Sync requires authorization.** Credentials and runtime state are local data. Do not commit them to public repositories or attach full configuration files to issues.
+- **Shared means public.** Selected notes and referenced attachments become accessible. Withdrawing a note does not erase Git history, caches or other people's copies. Body text and ordinary external links are not automatically anonymized: review them before publishing.
+- **Local tools need file access.** Sync, diary and attachment tools read or write vault files; copy actions use the clipboard; desktop Git runs local commands.
+- **Source and vault repositories differ.** This standalone plugin repository excludes personal settings, credentials, logs, runtime state, share records and custom templates. A private vault's settings-sync policy is separate; do not copy source-repository exclusions blindly into vault sync rules.
 
-## Feedback and license
+See the [user guide](USAGE.md) and [technical review notes](docs/automated-review-notes.md).
 
-Questions, problems, or ideas? Visit [GitHub Issues](https://github.com/ZO00OEY/simple-one/issues).
+## In 1.0.23
+
+This release reorganizes settings, diary/calendar tools, sync rules and share management. It adds regression coverage for template rule checks, property ordering and import merging. Review fixes protect edits made while diary automation or HTML clipboard operations are waiting, and remove unused settings code and obsolete styles.
+
+See the [release notes](RELEASE_NOTES.md) and [review record](docs/release-review-1.0.23.md) for scope and limitations. Not every website rule, device or third-party theme combination has been validated.
+
+## Development and feedback
+
+Use Node.js 22:
+
+```sh
+npm ci
+npm run check
+```
+
+Use `npm run dev` for watch builds and `npm run build` for release output. Builds enforce strict TypeScript and unused-code checks. The full check includes production dependency auditing, ESLint/CSS checks and regression tests.
+
+Installation in a standalone Git checkout creates missing local ignore rules and preserves existing rules. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Include reproduction steps, platform and Obsidian version in [Issues](https://github.com/ZO00OEY/simple-one/issues). Use sanitized examples rather than private notes or credentials.
 
 [MIT License](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)

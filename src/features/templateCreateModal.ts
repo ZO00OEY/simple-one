@@ -89,7 +89,7 @@ export class TemplateCreateModal extends Modal {
         const choose = tag.createEl("button", { text: property, attr: { type: "button", "aria-pressed": String(property === filenameField), "aria-label": `${property}，${property === filenameField ? "当前用于文件名" : "设为文件名"}` } });
         if (property === filenameField) choose.createSpan({ text: "文件名", cls: "simple-template-property-badge" });
         choose.addEventListener("click", () => { filenameField = property; renderTags(); });
-        choose.title = "单击设为文件名，长按拖动排序；Alt + 上下方向键排序";
+        choose.title = "单击设为文件名，长按拖动排序；alt + 上下方向键排序";
         choose.addEventListener("keydown", event => {
           if (!event.altKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
           event.preventDefault();

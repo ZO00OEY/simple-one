@@ -93,9 +93,14 @@ class HtmlPreviewWidget extends WidgetType {
     const cutButton = createActionButton("剪贴", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      const original = view.state.doc;
       void navigator.clipboard.writeText(this.source).then(() => {
+        if (!view.state.doc.eq(original)) {
+          new Notice("笔记内容已变化，HTML 已复制；本次未删除原文。");
+          return;
+        }
         view.dispatch({ changes: { from: this.from, to: this.to, insert: "" } });
-      });
+      }).catch(() => { new Notice("复制失败，未删除 HTML 原文。"); });
     });
     actions.append(cutButton);
 

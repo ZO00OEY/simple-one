@@ -35,3 +35,27 @@ existing = { path: "test.md" };
 assert.equal(await openDiary(plugin, date, false), existing);
 assert.equal(opened, 1, "disabled creation still opens existing diaries");
 console.log("Calendar date click: disabling creation preserves opening existing diaries.");
+
+const carryFunction = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'carryUnfinishedToActiveDiary');
+const carryOutput = await transform(carryFunction.getText(parsed), { loader: 'ts' });
+let currentContent = 'original';
+let releaseAutomation;
+const carryNotices = [];
+const carry = new Function('Notice', 'dateFromDiaryPath', 'applyDiaryAutomation', 'hasDiaryAutomationChanges', 'diaryAutomationNotice', carryOutput.code + '\nreturn carryUnfinishedToActiveDiary;')(
+  class { constructor(text) { carryNotices.push(text); } }, () => date,
+  () => new Promise(resolve => { releaseAutomation = () => resolve({ content: 'with reminders' }); }), () => true, () => 'done'
+);
+const carryPlugin = { app: { workspace: { getActiveFile: () => ({ path: 'test.md' }) }, vault: {
+  read: async () => currentContent,
+  process: async (_file, update) => { currentContent = update(currentContent); }
+} } };
+const pending = carry(carryPlugin);
+await Promise.resolve();
+currentContent = 'new user edit';
+releaseAutomation();
+await assert.rejects(pending, /日记内容已变化/);
+assert.equal(currentContent, 'new user edit');
+assert.equal(carryNotices.length, 0, 'failed write must not report success');
+const retry = carry(carryPlugin); await Promise.resolve(); releaseAutomation(); await retry;
+assert.equal(currentContent, 'with reminders');
+console.log('Diary automation: edits during async calculation survive; unchanged notes update atomically.');

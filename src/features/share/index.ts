@@ -2,7 +2,6 @@ import { addIcon, Component, FuzzySuggestModal, ItemView, MarkdownView, Menu, Mo
 import type SimplePlugin from "../../main";
 import { runAsync } from "../../shared/async";
 import { confirmAction } from "../../shared/confirm";
-import { settingsSection } from "../../shared/settingsLayout";
 import { registerMarkdownAction } from "../../shared/markdownAction";
 import { ID_PATTERN, SHARE_FOLDER, emptyManifest, DEFAULT_SHARE_COPY_CONTENT, formatShareContent, newShareId, normalizeShareDirectory, normalizeShareDomainUrl, parseManifest, parsePublishState, pruneWithdrawnDirectories, serializeManifest, shareDomainNoteUrl, shareNotePath, siteUrl, sha256, type ShareCopyContent, type ShareManifest, type PublishState } from "./model";
 import { addLibrary, ensureLibraries, libraryOptions, removeLibrary, selectLibrary, selectedLibraryIds } from "./libraries";

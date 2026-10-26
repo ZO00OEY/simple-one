@@ -1,6 +1,7 @@
 // Keep the draft array and visible rows in the same order without rebuilding a held button.
 export function registerTemplatePropertyDrag(list: HTMLElement, properties: string[]): () => void {
   const doc = list.ownerDocument;
+  const ownerWindow = doc.defaultView ?? window;
   let stop = (): void => {};
   let suppressClick = false;
   const syncRows = (): void => {
@@ -32,7 +33,7 @@ export function registerTemplatePropertyDrag(list: HTMLElement, properties: stri
       doc.body.appendChild(ghost);
       row.classList.add("is-dragging");
     };
-    const timer = setTimeout(activate, 200);
+    const timer = ownerWindow.setTimeout(activate, 200);
     const move = (next: PointerEvent): void => {
       if (next.pointerId !== event.pointerId) return;
       if (!dragging) {
@@ -71,7 +72,7 @@ export function registerTemplatePropertyDrag(list: HTMLElement, properties: stri
       stop();
     };
     stop = () => {
-      clearTimeout(timer);
+      ownerWindow.clearTimeout(timer);
       ghost?.remove();
       row.classList.remove("is-dragging");
       doc.removeEventListener("pointermove", move);

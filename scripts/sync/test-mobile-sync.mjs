@@ -1292,7 +1292,7 @@ try {
   {
     const cloud = Object.fromEntries(Array.from({ length: 120 }, (_, i) => [`cloud/${i}.md`, `cloud ${i}`]));
     const f = await fixture({}, cloud);
-    const review = new MobileSyncModal({}, f.engine, await f.engine.preview(), false, undefined, {
+    const review = new MobileSyncModal({}, f.engine, await f.engine.preview(), undefined, {
       strategy: async () => 'remote', confirm: async () => true, transfer: async () => {}
     });
     assert.equal(await mobileFlowWait.call(review), true);
@@ -1304,7 +1304,7 @@ try {
   for (const strategy of ['merge', 'local', 'remote', 'custom', 'cancel', 'cancel-confirm']) {
     const f = await fixture({ 'local.md':'local', 'same.md':'local version' }, { 'remote.md':'remote', 'same.md':'remote version' });
     const stages=[];
-    const review = new MobileSyncModal({}, f.engine, await f.engine.preview(), false,
+    const review = new MobileSyncModal({}, f.engine, await f.engine.preview(),
       async live => Object.fromEntries(live.files.map(file=>[file.path,{choice:file.path==='new:remote.md'?'remote':'local'}])), {
         strategy:async()=>{stages.push('strategy');return strategy==='cancel'?null:strategy==='cancel-confirm'?'merge':strategy;},
         confirm:async plan=>{stages.push('confirm');if(strategy==='remote')assert(plan.localDeletes.includes('local.md'));return strategy!=='cancel-confirm';},
@@ -1324,7 +1324,7 @@ try {
   {
     const f = await fixture({}, Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`note-${i}.md`, String(i)])));
     const stages = [];
-    const review = new MobileSyncModal({}, f.engine, await f.engine.preview(), false, undefined, {
+    const review = new MobileSyncModal({}, f.engine, await f.engine.preview(), undefined, {
       strategy: async () => { stages.push('strategy'); return 'merge'; },
       confirm: async () => { stages.push('confirm'); return true; },
       transfer: async () => { stages.push('transfer'); }
@@ -1359,7 +1359,7 @@ try {
     const f=await fixture({'base.md':'base'},{'base.md':'base'});await align(f);
     for(let i=0;i<1001;i++)f.cloudEdit(`daily-${i}.md`,String(i));
     let transfers=0;
-    const review=new MobileSyncModal({},f.engine,await f.engine.preview(),false,undefined,{
+    const review=new MobileSyncModal({},f.engine,await f.engine.preview(),undefined,{
       strategy:async()=>{throw Error('daily sync should not require initial strategy');},confirm:async()=>true,
       transfer:async()=>{transfers++;}
     });

@@ -21,7 +21,6 @@ import {
 } from "obsidian";
 import { migrateLinkFiles, readLocalSyncSettings, writeLocalSyncSettings, legacySyncRunning } from "./storage";
 import { runAsync } from "../../shared/async";
-import { settingsSection } from "../../shared/settingsLayout";
 import type SimplePlugin from "../../main";
 import { assertNoPrivateSyncFiles, coalesceDirty, defaultSyncIgnorePatterns, DirtyEntry, shouldIgnore } from "./dirty";
 import {
@@ -495,7 +494,7 @@ export default class SyncFeature extends Component {
       this.activateFeature();
       this.setStatus("正在检查首次同步差异…");
       const plan = await engine.preview();
-      if (!await new MobileSyncModal(this.app, engine, plan, false, live => this.reviewLightweightDifferences(live), this.lightweightFlow()).wait()) {
+      if (!await new MobileSyncModal(this.app, engine, plan, live => this.reviewLightweightDifferences(live), this.lightweightFlow()).wait()) {
         if (engine.downloadTask) { this.setStatus("云端更新已确认 · 下载待办已保存，请从红色提醒继续"); return; }
         this.setStatus("首次同步未完成，请继续接入或手动同步");
         throw new Error("已保存连接，但同步已取消，接入尚未完成；请重试并确认同步以建立共同基线。");
@@ -1613,7 +1612,7 @@ export default class SyncFeature extends Component {
           }
           const plan = await engine.preview();
           if (showNotice) {
-            if (!await new MobileSyncModal(this.app, engine, plan, false, live => this.reviewLightweightDifferences(live), this.lightweightFlow()).wait()) return;
+            if (!await new MobileSyncModal(this.app, engine, plan, live => this.reviewLightweightDifferences(live), this.lightweightFlow()).wait()) return;
           } else {
             if (!engine.state.baseCommitSha || plan.conflicts.length || plan.localDeletes.length || plan.remoteDeletes.length) {
               throw new SyncDeferredError("有首次配对、冲突或删除待确认，请手动预览同步。");
@@ -3466,25 +3465,6 @@ export class SyncSettingsTab extends PluginSettingTab {
     this.displayDesktop(containerEl);
   }
 
-  private addDesktopEngineControls(parent: HTMLElement): void {
-    if (Platform.isMobile) return;
-    const row = new Setting(parent).setName("启用电脑端原生 Git 同步")
-      .setDesc("关闭后停止原生 Git 同步，下方设置暂停使用。")
-      .addToggle((toggle) => toggle.setValue(this.plugin.nativeGitEnabled()).onChange(async (enabled) => {
-        await this.plugin.setDesktopSyncMode(enabled ? "git" : this.plugin.useLightweightSync() ? "lightweight" : "off"); this.renderSettings();
-      }));
-    row.settingEl.addClass("simple-one-sync-engine-switch");
-  }
-
-  private addLightweightEngineControl(parent: HTMLElement): void {
-    const row = new Setting(parent).setName("启用轻量 Git 同步")
-      .setDesc("关闭后停止轻量同步，下方设置暂停使用。")
-      .addToggle((toggle) => toggle.setValue(this.plugin.useLightweightSync()).onChange(async (enabled) => {
-        await this.plugin.setLightweightSyncEnabled(enabled); this.renderSettings();
-      }));
-    row.settingEl.addClass("simple-one-sync-engine-switch");
-  }
-
   private syncSettingsBody(parent: HTMLElement, enabled: boolean): HTMLElement {
     const body = parent.createEl("fieldset", { cls: "simple-one-sync-engine-body" });
     body.disabled = !enabled;
@@ -4001,7 +3981,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     const page = containerEl.createDiv({ cls: "simple-one-sync-setup-layout" });
     this.displayDevicePreview(page, "轻量 Git 同步", "适用于安卓、iOS，也适用于电脑");
     const body = this.syncSettingsBody(page, this.plugin.useLightweightSync());
-    renderMobileSettings(body, this.plugin.mobileHost(), false, () => this.renderSettings());
+    renderMobileSettings(body, this.plugin.mobileHost(), false);
     if (this.plugin.settings.mobile.mode === "server") this.displayMobile(body);
   }
 

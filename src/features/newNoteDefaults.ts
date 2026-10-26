@@ -141,7 +141,7 @@ function stringValue(value: unknown): string {
 
 class BaseChoiceModal extends Modal {
   constructor(
-    private readonly plugin: SimplePlugin,
+    plugin: SimplePlugin,
     private readonly folder: string,
     private readonly bases: TFile[],
     private readonly onChoose: (base: TFile) => Promise<void>

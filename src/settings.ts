@@ -399,7 +399,6 @@ export class SimpleSettingTab extends PluginSettingTab {
 
   private renderOverviewInlineSettings(
     container: HTMLElement,
-    preserveLayout: (update: () => void) => void = update => update(),
   ): void {
     const shortcuts = container.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
     shortcuts.createEl("legend", { text: "快捷键" });
@@ -852,7 +851,7 @@ export class SimpleSettingTab extends PluginSettingTab {
         if (tabs[index].id === "display") this.renderDisplayPanel(panel);
         else if (tabs[index].id === "theme") this.renderThemePanel(panel);
         else if (tabs[index].id === "shortcuts") {
-          this.renderOverviewInlineSettings(panel, preserveLayout);
+          this.renderOverviewInlineSettings(panel);
           this.renderEditingOptimizationSettings(panel);
           this.renderPasteLinkSettings(panel);
           this.renderNotionColumnsSettings(panel);
@@ -1433,50 +1432,6 @@ export class SimpleSettingTab extends PluginSettingTab {
     }
   }
 
-  private renderPasteLinkModeSetting(
-    container: HTMLElement,
-    name: string,
-    description: string,
-    enabled: boolean,
-    onEnabledChange: (value: boolean) => Promise<void>,
-    bypassOnPlainTextPaste: boolean,
-    onBypassChange: (value: boolean) => Promise<void>
-  ): void {
-    new Setting(container)
-      .setName(name)
-      .setDesc(description)
-      .addToggle((toggle) => toggle.setValue(enabled).onChange(onEnabledChange));
-    const label = container.createEl("label", {
-      cls: "simple-paste-mode-bypass simple-quiet-checkbox setting-item-description",
-    });
-    const input = label.createEl("input", {
-      type: "checkbox",
-      attr: { "aria-label": `${name}：Ctrl+Shift+V 仅粘贴原始文本` },
-    });
-    input.checked = bypassOnPlainTextPaste;
-    const box = label.createSpan({ cls: "simple-quiet-checkbox-box" });
-    setIcon(box, "check");
-    label.createSpan({ text: "使用 Ctrl+Shift+V 粘贴时，仅粘贴原始文本，不处理任何 URL" });
-    input.addEventListener("change", () => void onBypassChange(input.checked));
-  }
-
-  private renderReformatQuickRuleCheckbox(
-    container: HTMLElement,
-    name: string,
-    checked: boolean,
-    onChange: (value: boolean) => Promise<void>
-  ): void {
-    const label = container.createEl("label", {
-      cls: "simple-reformat-quick-rule simple-quiet-checkbox setting-item-description",
-    });
-    const input = label.createEl("input", { type: "checkbox", attr: { "aria-label": name } });
-    input.checked = checked;
-    const box = label.createSpan({ cls: "simple-quiet-checkbox-box" });
-    setIcon(box, "check");
-    label.createSpan({ text: name });
-    input.addEventListener("change", () => void onChange(input.checked));
-  }
-
   private openFilterRulesModal(): void {
     const modal = new Modal(this.app);
     modal.modalEl.addClass("simple-filter-rules-modal");
@@ -1711,7 +1666,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     container = container.createDiv({ cls: "simple-template-rules-body" });
 
     const heading = container.createDiv({ cls: "simple-template-manager-heading" });
-    heading.createEl("h4", { text: inline ? "快速新建笔记设置" : "笔记模板与生成规则" });
+    new Setting(heading).setName(inline ? "快速新建笔记设置" : "笔记模板与生成规则").setHeading();
     const actions = heading.createDiv({ cls: "simple-template-manager-actions" });
     const iconButton = (icon: string, label: string): HTMLButtonElement => {
       const button = actions.createEl("button", { cls: "clickable-icon", attr: { type: "button", title: label, "aria-label": label } });
@@ -2180,76 +2135,6 @@ export class SimpleSettingTab extends PluginSettingTab {
       await onChange(input.value);
     }));
     return input;
-  }
-
-  private renderLockedTextSetting(
-    container: HTMLElement,
-    options: {
-      name: string;
-      desc: string;
-      value: string;
-      placeholder: string;
-      onSave: (value: string) => Promise<void>;
-    }
-  ): void {
-    let editing = false;
-    let savedValue = options.value;
-    let input!: HTMLInputElement;
-    let editButton!: HTMLButtonElement;
-
-    const setEditing = (value: boolean): void => {
-      editing = value;
-      input.disabled = !value;
-      editButton.setText(value ? "保存" : "修改");
-      editButton.toggleClass("mod-cta", value);
-      if (value) {
-        input.focus();
-        input.select();
-      }
-    };
-
-    const save = async (): Promise<void> => {
-      const value = input.value.trim();
-      editButton.disabled = true;
-      try {
-        await options.onSave(value);
-        savedValue = value;
-        input.value = value;
-        setEditing(false);
-      } finally {
-        editButton.disabled = false;
-      }
-    };
-
-    new Setting(container)
-      .setClass("simple-locked-field-setting")
-      .setName(options.name)
-      .setDesc(options.desc)
-      .addText((text) => {
-        input = text.inputEl;
-        text.setPlaceholder(options.placeholder).setValue(options.value).setDisabled(true);
-        input.addEventListener("keydown", (event) => {
-          if (!editing) return;
-          if (event.key === "Enter") {
-            event.preventDefault();
-            void save();
-          } else if (event.key === "Escape") {
-            event.preventDefault();
-            input.value = savedValue;
-            setEditing(false);
-          }
-        });
-      })
-      .addButton((button) => {
-        editButton = button.buttonEl;
-        button.setButtonText("修改").onClick(async () => {
-          if (!editing) {
-            setEditing(true);
-            return;
-          }
-          await save();
-        });
-      });
   }
 
   private renderJsonActions(
@@ -2788,23 +2673,6 @@ export class SimpleSettingTab extends PluginSettingTab {
     });
   }
 
-  private decorateCalloutSetting(setting: Setting, icon: string | undefined, color: string): void {
-    if (!icon) return;
-    const iconEl = setting.nameEl.createSpan({ cls: "simple-callout-setting-icon" });
-    iconEl.style.color = color;
-    setIcon(iconEl, icon);
-    setting.nameEl.prepend(iconEl);
-  }
-
-  private renderSettingsPreservingScroll(): void {
-    const positions: { element: HTMLElement; top: number }[] = [];
-    for (let element: HTMLElement | null = this.containerEl; element; element = element.parentElement) {
-      positions.push({ element, top: element.scrollTop });
-    }
-    this.renderSettings();
-    for (const { element, top } of positions) element.scrollTop = top;
-  }
-
   private setQuickFormatModeVisible(mode: QuickFormatMode, visible: boolean): void {
     const quickFormat = this.plugin.settings.enhancements.quickFormat;
     quickFormat.visibleModes = visible
@@ -2872,7 +2740,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       const modal = new Modal(this.app);
       modal.onOpen = () => {
         modal.contentEl.addClass("simple-settings");
-        modal.contentEl.createEl("h2", { text: "用 AI 整理假期安排" });
+        modal.titleEl.setText("用 AI 整理假期安排");
         this.renderHolidayImportGuide(modal.contentEl);
       };
       modal.onClose = () => modal.contentEl.empty();
@@ -3102,7 +2970,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     let previousYear: number | undefined;
     for (const schedule of filteredSchedules) {
       if (selected === "all" && schedule.year !== previousYear) {
-        card.createEl("h4", { text: `${schedule.year} 年`, cls: "simple-holiday-year-heading" });
+        new Setting(card).setName(`${schedule.year} 年`).setHeading().setClass("simple-holiday-year-heading");
         previousYear = schedule.year;
       }
       this.renderHolidayScheduleCard(card, schedules, schedule);
@@ -3483,7 +3351,7 @@ class JsonEditModal extends Modal {
       panel.hidden = true;
       const inputs = panel.createDiv({ cls: "simple-site-test-inputs" });
       const urlLabel = inputs.createEl("label", { text: "详情页 URL" });
-      const url = urlLabel.createEl("input", { type: "url", attr: { placeholder: "https://…", "aria-label": "测试详情页 URL" } });
+      const url = urlLabel.createEl("input", { type: "url", attr: { placeholder: "HTTPS://…", "aria-label": "测试详情页 URL" } });
       const queryLabel = inputs.createEl("label", { text: "搜索关键词" });
       const query = queryLabel.createEl("input", { type: "text", attr: { "aria-label": "测试搜索关键词" } });
       query.value = "我的";

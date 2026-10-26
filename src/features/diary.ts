@@ -1353,7 +1353,12 @@ async function carryUnfinishedToActiveDiary(plugin: SimplePlugin): Promise<void>
   }
   const content = await plugin.app.vault.read(file);
   const result = await applyDiaryAutomation(plugin, date, content);
-  if (hasDiaryAutomationChanges(result)) await plugin.app.vault.modify(file, result.content);
+  if (hasDiaryAutomationChanges(result)) {
+    await plugin.app.vault.process(file, current => {
+      if (current !== content) throw new Error("日记内容已变化，请重新补写提醒；本次未覆盖你的编辑。");
+      return result.content;
+    });
+  }
   new Notice(diaryAutomationNotice(result));
 }
 

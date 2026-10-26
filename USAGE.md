@@ -54,7 +54,7 @@ Directory mappings use the existing vault file `.obsidian/plugins/simple-one/sha
 
 The sidebar always shows public directories. Previously saved flat or vault-folder layouts automatically use public directories. Its settings control paths, original-note location buttons, and batch-directory buttons. In **笔记分享设置**, use **检查网站部署** if the website has not caught up with your latest push.
 
-The reader supports collapsible headings, Callouts, formulas, Mermaid, and Simple One columns. Under **笔记分享设置 → 界面设置**, you can import or export an HTML template, or restore the default. Push again to apply a template change. Custom templates must retain the reader's required elements and script references.
+The reader supports collapsible headings, Callouts, formulas, Mermaid, and Simple One columns. Under **笔记分享设置 → 分享管理 → 当前分享模板右侧齿轮**, you can import or export an HTML template, or restore the default. Push again to apply a template change. Custom templates must retain the reader's required elements and script references.
 
 Shared notes and their included attachments are public, with no password protection. Deleting a share removes it from the current website but does not erase repository history or copies others have saved. Themes and plugin content may look different online.
 
