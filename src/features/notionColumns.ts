@@ -1264,27 +1264,45 @@ export function registerNotionColumns(plugin: SimplePlugin): void {
     editor.replaceSelection(`${before ? "\n" : ""}${block}${atEnd ? "\n\n" : after ? "\n" : ""}`);
   };
   // Native insert submenus expose their section IDs only through runtime menu items.
-  type InsertMenu = Menu & { items?: { section?: string; submenu?: InsertMenu }[] };
+  type RuntimeMenuItem = { section?: string; submenu?: InsertMenu; dom?: HTMLElement };
+  type InsertMenu = Menu & { items?: RuntimeMenuItem[] };
   plugin.registerEvent(plugin.app.workspace.on("editor-menu", (menu, editor) => {
-    if (!plugin.settings.enableNotionColumns || !plugin.settings.enableNotionColumnsContextMenu) return;
+    if (!plugin.settings.enableNotionColumns) return;
     // Obsidian finishes constructing the Insert submenu after editor-menu listeners run.
     queueMicrotask(() => {
-      if (!plugin.settings.enableNotionColumns || !plugin.settings.enableNotionColumnsContextMenu) return;
-      const insertMenu = (menu as InsertMenu).items?.find(item =>
-        item.submenu?.items?.some(child => child.section === "insert.basic"))?.submenu;
-      if (!insertMenu) return;
-      insertMenu.addItem(item => item.setTitle("双列").setIcon(COLUMN_VIEW_ICON)
-        .setSection("insert.basic")
+      if (!plugin.settings.enableNotionColumns) return;
+      const runtimeMenu = menu as InsertMenu;
+      const insertItem = runtimeMenu.items?.find(item =>
+        item.submenu?.items?.some(child => child.section === "insert.basic"));
+      const inSubmenu = plugin.settings.notionColumnsContextMenuPosition === "insert";
+      const target = inSubmenu ? insertItem?.submenu : runtimeMenu;
+      if (!target) return;
+      let added: RuntimeMenuItem | undefined;
+      target.addItem(item => {
+        added = item as unknown as RuntimeMenuItem;
+        item.setTitle("创建双列").setIcon(COLUMN_VIEW_ICON)
+        .setSection(inSubmenu ? "insert.basic" : insertItem?.section ?? "insert")
         .onClick(() => {
-          if (plugin.settings.enableNotionColumns && plugin.settings.enableNotionColumnsContextMenu) insertColumns(editor);
-        }));
+          if (plugin.settings.enableNotionColumns) insertColumns(editor);
+        });
+      });
+      if (!inSubmenu && added && insertItem) {
+        // Keep both runtime ordering and the already-rendered menu next to Insert.
+        const items = runtimeMenu.items;
+        const index = items?.indexOf(added) ?? -1;
+        if (items && index >= 0) {
+          items.splice(index, 1);
+          items.splice(items.indexOf(insertItem) + 1, 0, added);
+        }
+        if (insertItem.dom && added.dom) insertItem.dom.after(added.dom);
+      }
     });
   }));
   plugin.addCommand({
     id: "create-two-column-view",
-    name: "在当前位置创建双列视图",
+    name: "创建双列",
     editorCheckCallback: (checking, editor) => {
-      if (!plugin.settings.enableNotionColumns) return false;
+      if (!plugin.settings.enableNotionColumns || !plugin.settings.enableNotionColumnsKeyboard) return false;
       if (!checking) insertColumns(editor);
       return true;
     },

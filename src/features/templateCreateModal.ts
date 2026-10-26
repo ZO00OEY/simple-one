@@ -1,6 +1,7 @@
-import { AbstractInputSuggest, App, Modal, Notice, Setting, TFolder, normalizePath } from "obsidian";
+import { AbstractInputSuggest, App, Modal, Notice, Setting, TFolder, normalizePath, setIcon } from "obsidian";
 import { nextId, type TemplateCategory } from "../types";
 import { runAsync } from "../shared/async";
+import { registerTemplatePropertyDrag } from "./templatePropertyDrag";
 
 export function templatePropertyNames(template: TemplateCategory): string[] {
   return template.propertyFields ? [...template.propertyFields] : [...new Set([
@@ -27,7 +28,8 @@ class TemplateFolderSuggest extends AbstractInputSuggest<string> {
 
 export class TemplateCreateModal extends Modal {
   private folderSuggest?: TemplateFolderSuggest;
-  constructor(app: App, private readonly onSave: (template: TemplateCategory) => Promise<void>, private readonly template?: TemplateCategory) {
+  private cleanupPropertyDrag?: () => void;
+  constructor(app: App, private readonly onSave: (template: TemplateCategory) => Promise<void>, private readonly template?: TemplateCategory, private readonly onDelete?: () => Promise<boolean>, private readonly onExport?: () => void) {
     super(app);
   }
 
@@ -63,12 +65,12 @@ export class TemplateCreateModal extends Modal {
     propertySection.createDiv({ cls: "setting-item-name", text: "笔记属性" });
     const tags = propertySection.createDiv({ cls: "simple-template-property-tags" });
     const tagList = tags.createSpan({ cls: "simple-template-property-tag-list" });
-    if (this.template) tagList.addClass("simple-template-property-rows");
+    tagList.addClass("simple-template-property-rows");
     const editor = tags.createSpan({ cls: "simple-template-property-editor" });
     editor.hidden = true;
     const input = editor.createEl("input", { type: "text", attr: { placeholder: "属性名称", "aria-label": "新增属性名称" } });
     const confirm = editor.createEl("button", { text: "✓", attr: { type: "button", "aria-label": "确认添加属性" } });
-    const add = tags.createEl("button", { text: "+", cls: "simple-template-property-add", attr: { type: "button", "aria-label": "添加属性" } });
+    const add = tags.createEl("button", { text: "＋ 添加属性", cls: "simple-template-property-add", attr: { type: "button", "aria-label": "添加属性" } });
     const renderTags = () => {
       if (!properties.includes(filenameField)) filenameField = "";
       filenameSelect.empty();
@@ -82,23 +84,25 @@ export class TemplateCreateModal extends Modal {
       tagList.empty();
       for (const property of properties) {
         const tag = tagList.createSpan({ cls: "simple-template-property-tag" });
+        tag.dataset.property = property;
         tag.toggleClass("is-filename", property === filenameField);
         const choose = tag.createEl("button", { text: property, attr: { type: "button", "aria-pressed": String(property === filenameField), "aria-label": `${property}，${property === filenameField ? "当前用于文件名" : "设为文件名"}` } });
         if (property === filenameField) choose.createSpan({ text: "文件名", cls: "simple-template-property-badge" });
         choose.addEventListener("click", () => { filenameField = property; renderTags(); });
-        if (this.template) {
-          for (const step of [-1, 1]) {
-            const index = properties.indexOf(property);
-            const move = tag.createEl("button", { text: step < 0 ? "↑" : "↓", attr: { type: "button", "aria-label": `${step < 0 ? "上移" : "下移"} ${property}` } });
-            move.disabled = index + step < 0 || index + step >= properties.length;
-            move.addEventListener("click", () => {
-              [properties[index], properties[index + step]] = [properties[index + step], properties[index]];
-              renderTags();
-            });
-          }
-        }
-        tag.createEl("button", { text: "×", cls: "simple-template-property-remove", attr: { type: "button", "aria-label": `移除属性 ${property}` } })
-          .addEventListener("click", () => { properties.splice(properties.indexOf(property), 1); renderTags(); });
+        choose.title = "单击设为文件名，长按拖动排序；Alt + 上下方向键排序";
+        choose.addEventListener("keydown", event => {
+          if (!event.altKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
+          event.preventDefault();
+          const from = properties.indexOf(property);
+          const to = from + (event.key === "ArrowUp" ? -1 : 1);
+          if (to < 0 || to >= properties.length) return;
+          [properties[from], properties[to]] = [properties[to], properties[from]];
+          renderTags();
+          (tagList.children[to]?.firstElementChild as HTMLElement)?.focus();
+        });
+        const removeProperty = tag.createEl("button", { cls: "simple-template-property-remove", attr: { type: "button", "aria-label": `移除属性 ${property}`, title: "删除属性" } });
+        setIcon(removeProperty, "trash-2");
+        removeProperty.addEventListener("click", () => { properties.splice(properties.indexOf(property), 1); renderTags(); });
       }
     };
     const commitProperty = (): boolean => {
@@ -120,13 +124,34 @@ export class TemplateCreateModal extends Modal {
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); input.value = ""; editor.hidden = true; add.hidden = false; add.focus(); }
     });
     renderTags();
+    this.cleanupPropertyDrag = registerTemplatePropertyDrag(tagList, properties);
     if (this.template) {
       form.createEl("p", { cls: "setting-item-description", text: "属性与网站规则中的同名字段对应，未获取的内容可手动填写。提取与正则替换在各网站规则中设置。" });
 
     }
     const footer = root.createDiv({ cls: "simple-json-modal-footer" });
+    const setBusy = (busy: boolean): void => {
+      form.disabled = busy;
+      footer.querySelectorAll("button").forEach(button => { button.disabled = busy; });
+    };
+    if (this.template && this.onDelete) {
+      const remove = footer.createEl("button", { cls: "simple-template-delete", attr: { type: "button", "aria-label": "删除模板", title: "删除模板" } });
+      setIcon(remove, "trash-2");
+      remove.addEventListener("click", runAsync(async () => {
+        setBusy(true);
+        try {
+          if (await this.onDelete?.()) this.close();
+        } finally { setBusy(false); }
+      }));
+    }
+    if (this.onExport) {
+      footer.addClass("simple-template-export-footer");
+      const download = footer.createEl("button", { cls: "clickable-icon simple-template-export", attr: { type: "button", title: "导出已保存模板", "aria-label": "导出已保存模板" } });
+      setIcon(download, "download");
+      download.addEventListener("click", this.onExport);
+    }
     footer.createEl("button", { text: "取消" }).addEventListener("click", () => this.close());
-    const save = footer.createEl("button", { text: this.template ? "保存模板" : "创建模板", cls: "mod-cta" });
+    const save = footer.createEl("button", { text: "保存", cls: "mod-cta" });
     save.addEventListener("click", runAsync(async () => {
       if (!commitProperty()) return;
       if (!filenameField) {
@@ -147,16 +172,18 @@ export class TemplateCreateModal extends Modal {
       const outputFolder = path ? normalizePath(path) : "";
       const existing = outputFolder ? this.app.vault.getAbstractFileByPath(outputFolder) : null;
       if (existing && !(existing instanceof TFolder)) { new Notice("保存目录不能指向已有文件"); return; }
-      save.disabled = form.disabled = true;
+      setBusy(true);
       try {
         await this.onSave({ ...(this.template ?? { id: nextId(), siteRules: [] }), name: name.trim(), outputFolder, filenameField,
           propertyFields: !this.template || JSON.stringify(fields) !== originalProperties ? fields : this.template.propertyFields, noteFormat });
         this.close();
-      } finally { save.disabled = form.disabled = false; }
+      } finally { setBusy(false); }
     }));
   }
 
   onClose(): void {
+    this.cleanupPropertyDrag?.();
+    this.cleanupPropertyDrag = undefined;
     this.folderSuggest?.close();
     this.folderSuggest = undefined;
     this.contentEl.empty();

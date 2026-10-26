@@ -1,4 +1,4 @@
-import type { SimplePluginSettings } from "../types";
+import type { DisplayParameter, SimplePluginSettings } from "../types";
 import { normalizePopupScalePercent } from "./popupSizing";
 
 export type DisplayProfile = Pick<SimplePluginSettings, "readableLineWidth" | "imageMaxHeight" | "popupWindowScale">;
@@ -20,6 +20,22 @@ export function loadMobileDisplayProfile(value: Partial<SimplePluginSettings["mo
   };
 }
 
+export function displayParameterEnabled(settings: SimplePluginSettings, mobile: boolean, key: DisplayParameter): boolean {
+  const saved = settings.displayParameterSwitches?.[mobile ? "mobile" : "desktop"]?.[key];
+  if (typeof saved === "boolean") return saved;
+  if (key === "fontSize" || key === "lineHeight" || key === "letterSpacing" || key === "paragraphSpacing") {
+    return !mobile && settings.desktopTypography.enabled;
+  }
+  if (key === "headerButtonSize") return mobile && !!settings.mobileDisplay.headerButtonSize;
+  const profile = mobile ? settings.mobileDisplay : settings;
+  return !!profile[key] && Number(profile[key]) > 0;
+}
+
 export function activeDisplayProfile(settings: SimplePluginSettings, mobile: boolean): DisplayProfile {
-  return mobile ? settings.mobileDisplay : settings;
+  const profile = mobile ? settings.mobileDisplay : settings;
+  return {
+    readableLineWidth: displayParameterEnabled(settings, mobile, "readableLineWidth") ? profile.readableLineWidth : "",
+    imageMaxHeight: displayParameterEnabled(settings, mobile, "imageMaxHeight") ? profile.imageMaxHeight : "",
+    popupWindowScale: displayParameterEnabled(settings, mobile, "popupWindowScale") ? profile.popupWindowScale : "",
+  };
 }

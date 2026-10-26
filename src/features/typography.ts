@@ -2,6 +2,7 @@ import { syntaxTree } from "@codemirror/language";
 import { Decoration, ViewPlugin, type DecorationSet, type EditorView, type ViewUpdate } from "@codemirror/view";
 import type SimplePlugin from "../main";
 import { isStandaloneBoldLine, normalizeTypography } from "../shared/typography";
+import { displayParameterEnabled } from "../shared/displayProfile";
 
 // Each manually entered body line gets a first-line indent; soft wraps do not.
 export function paragraphDecorations(view: EditorView): DecorationSet {
@@ -80,6 +81,7 @@ export function registerTypography(plugin: SimplePlugin): () => void {
   const clear = (doc: Document): void => {
     doc.body.classList.remove("simple-desktop-typography", "simple-chinese-reading");
     for (const property of properties) doc.body.style.removeProperty('--simple-typography-' + property);
+    for (const property of properties) doc.body.classList.remove(`simple-typography-${property}`);
   };
   const apply = (doc: Document): void => {
     documents.add(doc);
@@ -88,13 +90,18 @@ export function registerTypography(plugin: SimplePlugin): () => void {
     if (settings.paragraphStyle === "indent") {
       doc.body.classList.add("simple-chinese-reading");
     }
-    if (!settings.enabled) return;
+    const keys = ["fontSize", "lineHeight", "letterSpacing", "paragraphSpacing"] as const;
+    if (!keys.some(key => displayParameterEnabled(plugin.settings, false, key))) return;
     doc.body.classList.add("simple-desktop-typography");
     const values = [
       settings.fontSize + 'px', String(settings.lineHeight),
       settings.letterSpacing + 'px', settings.paragraphSpacing + 'em',
     ];
-    properties.forEach((property, i) => doc.body.style.setProperty('--simple-typography-' + property, values[i]));
+    properties.forEach((property, i) => {
+      if (!displayParameterEnabled(plugin.settings, false, keys[i])) return;
+      doc.body.classList.add(`simple-typography-${property}`);
+      doc.body.style.setProperty('--simple-typography-' + property, values[i]);
+    });
   };
   plugin.registerEditorExtension(ViewPlugin.fromClass(class {
     decorations: DecorationSet;

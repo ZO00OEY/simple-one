@@ -101,12 +101,20 @@ try {
   assert.equal(errors.length, 1);
   assert.ok(globalThis.__simpleTest.notices[0].includes("check failure"));
 } finally { console.error = originalConsoleError; delete globalThis.__simpleTest; }
-const { addAttachmentFolderToSearchExclusions } = await load("src/features/searchFolderFilter.ts", `
+const { addAttachmentFolderToSearchExclusions, buildFolderFilter, searchFolderSummary } = await load("src/features/searchFolderFilter.ts", `
   export class Modal {} export class Setting {} export class TFile {} export class TFolder {}
   export class Notice {} export function setIcon() {}
   export function normalizePath(path) { return path.replace(/\\\\/g, '/').replace(/\\/+/g, '/').replace(/^\\/|\\/$/g, ''); }
 `);
 const searchConfig = { enabled: false, includeFolders: ["Notes"], excludeFolders: ["Private"] };
+const activeSearchConfig = { ...searchConfig, enabled: true, includeEnabled: true, excludeEnabled: true };
+assert.equal(buildFolderFilter(activeSearchConfig), 'path:"Notes/" -path:"Private/"');
+assert.equal(buildFolderFilter({ ...activeSearchConfig, includeEnabled: false }), '-path:"Private/"');
+assert.equal(buildFolderFilter({ ...activeSearchConfig, excludeEnabled: false }), 'path:"Notes/"');
+assert.equal(buildFolderFilter({ ...activeSearchConfig, includeEnabled: false, excludeEnabled: false }), "");
+assert.equal(buildFolderFilter(searchConfig), 'path:"Notes/" -path:"Private/"', "legacy configs keep both conditions enabled");
+assert.equal(searchFolderSummary({ ...activeSearchConfig, includeEnabled: false }), "屏蔽 1");
+assert.deepEqual(activeSearchConfig.includeFolders, ["Notes"], "disabling a condition must preserve its folders");
 let attachmentFolder = "Attachments";
 const searchPlugin = { settings: { searchFolders: searchConfig }, app: { vault: { getConfig: () => attachmentFolder } } };
 assert.equal(addAttachmentFolderToSearchExclusions(searchPlugin), true);

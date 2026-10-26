@@ -18,20 +18,45 @@ const MODE_ICONS: Record<QuickCopyLinkMode, string> = {
 const ACTION_ATTR = "data-simple-quick-copy-link";
 const NOTEBOOK_NAVIGATOR_ID = "notebook-navigator";
 
-export function registerQuickCopyLink(plugin: SimplePlugin): void {
+export function registerQuickCopyLink(plugin: SimplePlugin): () => void {
   let openMenu: Menu | null = null;
 
   const syncAllActions = registerMarkdownAction(
     plugin,
     ACTION_ATTR,
-    () => !plugin.isMobile && plugin.settings.enhancements.quickCopyLink.enabled,
+    () => plugin.settings.enhancements.quickCopyLink.enabled,
     (view) => {
+      let suppressClick = false;
       const action = view.addAction(modeIcon(plugin.settings.enhancements.quickCopyLink.lastMode), actionTitle(plugin), async () => {
+        if (suppressClick) { suppressClick = false; return; }
         await copyLink(plugin, view, plugin.settings.enhancements.quickCopyLink.lastMode);
       });
+      let timer: number | undefined;
+      let startX = 0;
+      let startY = 0;
+      const cancelLongPress = (): void => { window.clearTimeout(timer); };
+      action.addEventListener("pointerdown", evt => {
+        if (evt.pointerType !== "touch" || !plugin.isMobile) return;
+        suppressClick = false;
+        startX = evt.clientX;
+        startY = evt.clientY;
+        timer = window.setTimeout(() => {
+          suppressClick = true;
+          openMenu?.hide();
+          openMenu = createModeMenu(plugin, view, syncAllActions);
+          openMenu.showAtPosition({ x: startX, y: startY });
+        }, 500);
+      });
+      action.addEventListener("pointermove", evt => {
+        if (Math.hypot(evt.clientX - startX, evt.clientY - startY) > 10) cancelLongPress();
+      });
+      action.addEventListener("pointerup", cancelLongPress);
+      action.addEventListener("pointercancel", cancelLongPress);
+      plugin.register(cancelLongPress);
       action.addEventListener("contextmenu", (evt) => {
         evt.preventDefault();
         evt.stopPropagation();
+        cancelLongPress();
         openMenu?.hide();
         openMenu = createModeMenu(plugin, view, syncAllActions);
         openMenu.showAtMouseEvent(evt);
@@ -41,6 +66,7 @@ export function registerQuickCopyLink(plugin: SimplePlugin): void {
     (action) => syncActionButton(plugin, action)
   );
   plugin.register(() => openMenu?.hide());
+  return syncAllActions;
 }
 
 function createModeMenu(plugin: SimplePlugin, view: MarkdownView, syncAllActions: () => void): Menu {

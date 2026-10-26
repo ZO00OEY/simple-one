@@ -263,7 +263,7 @@ export class DiaryView extends ItemView {
         button.addEventListener("click", runAsync(async () => {
           this.selectedDate = startOfDay(day);
           this.visibleDate = startOfMonth(day);
-          await openOrCreateDiaryNote(this.plugin, day);
+          await openOrCreateDiaryNote(this.plugin, day, this.plugin.settings.diary.createDiaryOnDateClick !== false);
           this.render();
         }));
       }
@@ -924,7 +924,7 @@ export async function openDiaryView(plugin: SimplePlugin): Promise<void> {
   if (leaf) await workspace.revealLeaf(leaf);
 }
 
-async function openOrCreateDiaryNote(plugin: SimplePlugin, date: Date): Promise<TFile | null> {
+async function openOrCreateDiaryNote(plugin: SimplePlugin, date: Date, allowCreate = true): Promise<TFile | null> {
   const path = diaryPathForDate(plugin.settings.diary, date);
   const existing = diaryFileForDate(plugin, date);
   if (existing) {
@@ -932,6 +932,7 @@ async function openOrCreateDiaryNote(plugin: SimplePlugin, date: Date): Promise<
     return existing;
   }
 
+  if (!allowCreate) return null;
   await ensureFolder(plugin, parentPath(path));
   const content = await buildNewDiaryContent(plugin, date);
   const automated = await applyDiaryAutomation(plugin, date, content);
@@ -997,6 +998,7 @@ function insertRecurringPlansIntoContent(
   date: Date,
   content: string
 ): { content: string; added: number } {
+  if (plugin.settings.diary.autoRemindersEnabled === false) return { content, added: 0 };
   const lines = plugin.settings.diary.recurringRules
     .filter((rule) => rule.enabled)
     .flatMap((rule) => recurringLinesForDate(rule, date));
@@ -1036,6 +1038,7 @@ function insertDateRemindersIntoContent(
   content: string
 ): { content: string; added: number } {
   const diary = plugin.settings.diary;
+  if (diary.autoRemindersEnabled === false) return { content, added: 0 };
   const lines = [
     ...anniversaryReminderLinesForDate(diary, date),
     ...(diary.dateManagement.holidaySetupReminder.writeToTips ? holidaySetupReminderLinesForDate(diary, date) : []),
@@ -1053,6 +1056,7 @@ function insertDateRemindersIntoContent(
 }
 
 function anniversaryReminderLinesForDate(settings: DiarySettings, date: Date): string[] {
+  if (settings.autoRemindersEnabled === false) return [];
   if (!settings.dateManagement?.reminderWriting.enabled) return [];
   const lines: string[] = [];
   for (const anniversary of settings.anniversaries ?? []) {

@@ -222,7 +222,7 @@ export class TemplateFillView extends ItemView {
     this.searchFilterKey = "all";
     this.searchGroups = [];
     const groups = await searchNovelGroups(query, this.plugin.settings.templateCategories, (group) => {
-      if (this.urlInput.value.trim() !== query || (!this.plugin.settings.showEmptySearchGroups && group.candidates.length === 0)) return;
+      if (this.urlInput.value.trim() !== query || group.candidates.length === 0) return;
       this.searchGroups.push(group);
       this.infoEl.empty();
       this.infoEl.createDiv({ text: `书名搜索：${query}` });
@@ -239,9 +239,7 @@ export class TemplateFillView extends ItemView {
     }
 
     if (this.searchGroups.length === 0) {
-      this.searchGroups = this.plugin.settings.showEmptySearchGroups
-        ? groups
-        : groups.filter((group) => group.candidates.length > 0);
+      this.searchGroups = groups.filter((group) => group.candidates.length > 0);
     }
     this.infoEl.empty();
     this.infoEl.createDiv({ text: `书名搜索：${query}` });
@@ -431,31 +429,7 @@ export class TemplateFillView extends ItemView {
       return;
     }
 
-    this.extractedFields = {};
-    for (const field of siteRule.fields || []) {
-      const page = field.page
-        ? pageMap.get(field.page)
-        : pageMap.get(firstPageId(siteRule)) ?? firstPage(pageMap);
-      if (field.source === "inputUrl" || field.source === "原始网址") {
-        this.extractedFields[field.fieldName] = applyFieldRegex(pageMap.get("input")?.url ?? url, field);
-      } else if (field.source === "baseUrl" || field.source === "网址") {
-        this.extractedFields[field.fieldName] = applyFieldRegex(pageMap.get("base")?.url ?? url, field);
-      } else {
-        this.extractedFields[field.fieldName] = page ? extractField(page.html, field) : "";
-      }
-    }
-
-    this.extractedFields["网址"] = pageMap.get("base")?.url ?? url;
-    if (isQidianRule(siteRule)) {
-      const qidianFields = extractBestQidianBookData(pageMap);
-      for (const [name, value] of Object.entries(qidianFields)) {
-        if (name === "文案") {
-          if (value) this.extractedFields[name] = value;
-        } else if (!this.extractedFields[name] && value) {
-          this.extractedFields[name] = value;
-        }
-      }
-    }
+    this.extractedFields = extractRuleFields(pageMap, siteRule, url);
     if (this.pendingSearchFields) {
       for (const [name, value] of Object.entries(this.pendingSearchFields)) {
         if (!this.extractedFields[name] && value) this.extractedFields[name] = value;
@@ -808,6 +782,68 @@ function webviewElementWaitScript(selector: string, waitMs: number, resultExpres
       }
     }, 300);
   })`;
+}
+
+function extractRuleFields(pageMap: Map<string, PageMapEntry>, siteRule: SiteRule, url: string): Record<string, string> {
+    const fields: Record<string, string> = {};
+    for (const field of siteRule.fields || []) {
+      const page = field.page
+        ? pageMap.get(field.page)
+        : pageMap.get(firstPageId(siteRule)) ?? firstPage(pageMap);
+      if (field.source === "inputUrl" || field.source === "原始网址") {
+        fields[field.fieldName] = applyFieldRegex(pageMap.get("input")?.url ?? url, field);
+      } else if (field.source === "baseUrl" || field.source === "网址") {
+        fields[field.fieldName] = applyFieldRegex(pageMap.get("base")?.url ?? url, field);
+      } else {
+        fields[field.fieldName] = page ? extractField(page.html, field) : "";
+      }
+    }
+
+    fields["网址"] = pageMap.get("base")?.url ?? url;
+    if (isQidianRule(siteRule)) {
+      const qidianFields = extractBestQidianBookData(pageMap);
+      for (const [name, value] of Object.entries(qidianFields)) {
+        if (name === "文案") {
+          if (value) fields[name] = value;
+        } else if (!fields[name] && value) {
+          fields[name] = value;
+        }
+      }
+    }
+    return fields;
+}
+
+export async function testTemplateSiteRule(rule: SiteRule, inputUrl: string, query: string): Promise<string[]> {
+  const results: string[] = [];
+  if (inputUrl) {
+    try {
+      if (!/^https?:\/\//i.test(inputUrl) || !new RegExp(rule.urlPattern).test(inputUrl)) throw new Error("测试 URL 与规则不匹配");
+      const pages = await fetchPageMap(inputUrl, rule);
+      const extracted = extractRuleFields(pages, rule, inputUrl);
+      const fields = rule.fields.filter(field => field.source).map(field => ({
+        name: field.fieldName,
+        value: extracted[field.fieldName] || "",
+      }));
+      const filled = fields.filter(field => field.value);
+      results.push(`URL 转笔记：${filled.length === fields.length && fields.length ? "通过" : "未通过"}，提取 ${filled.length}/${fields.length} 个属性${filled.length < fields.length ? `；未提取：${fields.filter(field => !field.value).map(field => field.name).join("、")}` : ""}`);
+    } catch (error) { results.push(`URL 转笔记：未通过，${error instanceof Error ? error.message : String(error)}`); }
+  }
+  if (query) {
+    try {
+      const search = rule.search;
+      if (!search || search.enabled === false || !search.searchUrl || !search.resultList) throw new Error("搜索未配置完整或未启用");
+      const url = applySearchUrlTemplate(search.searchUrl, query, search.pageStart ?? 1, search.resultLimit || 10, search.queryEncoding);
+      const cat: TemplateCategory = { id: "test", name: "测试", outputFolder: "", filenameField: "", siteRules: [rule] };
+      const result = await searchSitePage(query, cat, rule, url, search.pageStart ?? 1);
+      const withIntro = result.candidates.filter(candidate => candidate.intro);
+      results.push(`搜索：${result.candidates.length ? "通过" : "未通过"}，返回 ${result.candidates.length} 项，其中 ${withIntro.length} 项带简介${withIntro.length ? `（首条 ${withIntro[0].intro.length} 字符）` : ""}`);
+      if (search.resultIntro || rule.handler === "fanqieNovel" || search.type === "fanqieApi") results.push(`搜索简介：${withIntro.length ? "通过" : "未通过"}，${withIntro.length ? `${withIntro.length} 项提取到简介` : "未获取到简介"}。`);
+    } catch (error) {
+      results.push(`搜索：未通过，${error instanceof Error ? error.message : String(error)}`);
+      if (rule.search?.resultIntro || rule.handler === "fanqieNovel" || rule.search?.type === "fanqieApi") results.push("搜索简介：未通过，搜索请求失败。");
+    }
+  }
+  return results;
 }
 
 async function searchNovelGroups(

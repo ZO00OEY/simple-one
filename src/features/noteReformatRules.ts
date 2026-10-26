@@ -1,5 +1,16 @@
 import type { TextReformatRule } from "../types";
 
+export function parseReformatExpression(value: string): { pattern: string; flags: string } {
+  if (!value.startsWith("/")) throw new Error("正则须使用 /匹配内容/标记 格式");
+  const end = value.lastIndexOf("/");
+  if (end < 1) throw new Error("缺少正则结束符 /");
+  const pattern = value.slice(1, end);
+  const flags = value.slice(end + 1);
+  if (!pattern) throw new Error("匹配内容不能为空");
+  new RegExp(pattern, flags);
+  return { pattern, flags };
+}
+
 export function applyTextReformatRules(text: string, rules: TextReformatRule[]): string {
   let output = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 

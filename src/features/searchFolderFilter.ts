@@ -85,6 +85,10 @@ export function registerSearchFolderFilter(plugin: SimplePlugin): () => void {
       ?.setText(searchFolderSummary(config));
     syncFolderRow(root, "include", config.includeFolders);
     syncFolderRow(root, "exclude", config.excludeFolders);
+    for (const kind of ["include", "exclude"] as const) {
+      const checkbox = root.querySelector<HTMLInputElement>(`.simple-search-${kind}-folders input[type="checkbox"]`);
+      if (checkbox) checkbox.checked = config[`${kind}Enabled`] !== false;
+    }
   };
 
   const syncAllUi = (): void => {
@@ -134,6 +138,14 @@ export function registerSearchFolderFilter(plugin: SimplePlugin): () => void {
       .setClass("simple-search-include-folders")
       .setName("仅搜索所选文件夹")
       .setDesc(folderListDescription(plugin.settings.searchFolders.includeFolders))
+      .then(setting => {
+        const checkbox = setting.nameEl.createEl("input", { type: "checkbox", attr: { "aria-label": "仅搜索所选文件夹" } });
+        setting.nameEl.prepend(checkbox);
+        checkbox.checked = plugin.settings.searchFolders.includeEnabled !== false;
+        checkbox.addEventListener("change", () => {
+          void updateConfig(config => { config.includeEnabled = checkbox.checked; });
+        });
+      })
       .addButton((button) =>
         button.setButtonText("选择").onClick(() => {
           openSearchFolderPicker(
@@ -149,6 +161,14 @@ export function registerSearchFolderFilter(plugin: SimplePlugin): () => void {
       .setClass("simple-search-exclude-folders")
       .setName("屏蔽所选文件夹")
       .setDesc(folderListDescription(plugin.settings.searchFolders.excludeFolders))
+      .then(setting => {
+        const checkbox = setting.nameEl.createEl("input", { type: "checkbox", attr: { "aria-label": "屏蔽所选文件夹" } });
+        setting.nameEl.prepend(checkbox);
+        checkbox.checked = plugin.settings.searchFolders.excludeEnabled !== false;
+        checkbox.addEventListener("change", () => {
+          void updateConfig(config => { config.excludeEnabled = checkbox.checked; });
+        });
+      })
       .addButton((button) =>
         button.setButtonText("选择").onClick(() => {
           openSearchFolderPicker(
@@ -258,8 +278,8 @@ export function registerSearchFolderFilter(plugin: SimplePlugin): () => void {
 export function searchFolderSummary(config: SearchFolderSettings): string {
   if (!config.enabled) return "已关闭";
   const parts: string[] = [];
-  if (config.includeFolders.length) parts.push("限定 " + config.includeFolders.length);
-  if (config.excludeFolders.length) parts.push("屏蔽 " + config.excludeFolders.length);
+  if (config.includeEnabled !== false && config.includeFolders.length) parts.push("限定 " + config.includeFolders.length);
+  if (config.excludeEnabled !== false && config.excludeFolders.length) parts.push("屏蔽 " + config.excludeFolders.length);
   return parts.length ? parts.join(" · ") : "全部文件夹";
 }
 
@@ -272,9 +292,9 @@ export function openSearchFolderPicker(
   new SearchFolderPickerModal(plugin, selected, onSave, title).open();
 }
 
-function buildFolderFilter(config: SearchFolderSettings): string {
-  const includes = normalizeFolderList(config.includeFolders);
-  const excludes = normalizeFolderList(config.excludeFolders);
+export function buildFolderFilter(config: SearchFolderSettings): string {
+  const includes = config.includeEnabled !== false ? normalizeFolderList(config.includeFolders) : [];
+  const excludes = config.excludeEnabled !== false ? normalizeFolderList(config.excludeFolders) : [];
   const includeClauses = includes.map((folder) => folderPathClause(folder));
   const excludeClauses = excludes.map((folder) => "-" + folderPathClause(folder));
   const includeFilter = includeClauses.length > 1

@@ -280,6 +280,7 @@ export default class ShareFeature extends Component {
   private templateFile = DEFAULT_TEMPLATE_FILE;
   private templateFiles: Record<string, string> = { [DEFAULT_TEMPLATE_FILE]: "默认模板" };
   private templateMessage = "";
+  private renderTemplateModal?: () => void;
   private templateBusy = false;
   private token = "";
   private async hasCli(): Promise<boolean> {
@@ -467,6 +468,11 @@ export default class ShareFeature extends Component {
     if (!this.manifest.libraries && this.manifest.site.initialized) this.manifest.site.guideProgress = 7;
     ensureLibraries(this.manifest);
   }
+  async setFeatureEnabled(enabled: boolean): Promise<void> {
+    if (this.isPublishing || this.checkingDeployment) throw new Error("请等待当前分享或部署检查完成。");
+    await this.change(manifest => { manifest.enabled = enabled; });
+  }
+
   async change(edit: (manifest: ShareManifest) => void | Promise<void>, refresh = true, preserveDeployment = false): Promise<void> {
     if (this.busy) throw new Error("发布正在进行，请稍后修改分享设置。");
     if (!preserveDeployment) this.stopDeploymentCheck();
@@ -905,7 +911,7 @@ export default class ShareFeature extends Component {
     this.error = "";
     return true;
   }
-  renderLibrarySelector(parent: HTMLElement, settings = false, guide = false): void {
+  renderLibrarySelector(parent: HTMLElement, settings = false, guide = false, allowCreate = true): void {
     const row = new Setting(parent).setName("当前分享库").setClass("simple-share-library-selector");
     if (settings) row.setDesc(`此处切换查看库；右键笔记分享按钮选择发布目标（已选 ${selectedLibraryIds(this.manifest).length} 个）。`);
     const hasLibraries = Object.values(ensureLibraries(this.manifest).entries).some(value => !!value.site.repo) || !!this.manifest.site.repo;
@@ -923,7 +929,7 @@ export default class ShareFeature extends Component {
           else if (id) void this.switchLibrary(id).catch(error => this.fail(error));
         });
     });
-    if (settings) {
+    if (settings && allowCreate) {
       row.addButton(button => button.setButtonText("新建分享库").setDisabled(this.isPublishing || this.setupBusy || this.edgeone.busy)
         .onClick(() => { void this.newLibrary().catch(error => this.fail(error)); }));
     }
@@ -1475,6 +1481,7 @@ export default class ShareFeature extends Component {
     if (this.manifest.site.repo) void this.refreshPublished().catch(error => this.fail(error));
   }
   private renderViews(): void {
+    this.renderTemplateModal?.();
     this.refreshActions();
     for (const leaf of this.host.app.workspace.getLeavesOfType(VIEW)) if (leaf.view instanceof ShareView) leaf.view.render();
     if (this.setupHost?.isConnected) this.renderSettings(this.setupHost, this.setupGuide, this.setupShowTitle, this.setupTitleChanged);
@@ -1645,6 +1652,28 @@ export default class ShareFeature extends Component {
       this.templateFile = DEFAULT_TEMPLATE_FILE;
       this.templateMessage = "已恢复默认模板，点击「推送新分享」后网站生效。";
     } finally { this.templateBusy = false; this.renderViews(); }
+  }
+  private openTemplateManagement(): void {
+    const modal = new Modal(this.host.app);
+    modal.titleEl.setText("分享模板管理");
+    modal.contentEl.addClass("simple-share-template-modal");
+    const render = (): void => {
+      modal.contentEl.empty();
+      const disabled = !this.manifest.enabled || this.isPublishing || this.templateBusy;
+      new Setting(modal.contentEl).setName("当前分享模板")
+        .addDropdown(dropdown => dropdown.addOptions(this.templateFiles).setValue(this.templateFile)
+          .setDisabled(disabled).onChange(value => { void this.selectTemplate(value).catch(error => this.fail(error)); }));
+      new Setting(modal.contentEl).setName("模板操作")
+        .addButton(button => button.setIcon("upload").setTooltip("导入 HTML 模板").setDisabled(disabled).onClick(() => this.importTemplate()))
+        .addButton(button => button.setIcon("download").setTooltip("导出当前模板").setDisabled(disabled)
+          .onClick(() => { void this.exportTemplate().catch(error => this.fail(error)); }))
+        .addButton(button => button.setIcon("rotate-ccw").setTooltip("恢复默认模板").setDisabled(disabled)
+          .onClick(() => { void this.restoreDefaultTemplate().catch(error => this.fail(error)); }));
+      modal.contentEl.createEl("p", { text: this.templateMessage || "模板变更后，推送新分享即可更新网站。", attr: { role: "status", "aria-live": "polite" } });
+    };
+    modal.onClose = () => { this.renderTemplateModal = undefined; modal.contentEl.empty(); };
+    this.renderTemplateModal = render;
+    render(); modal.open();
   }
   private importTemplate(): void {
     const input = createEl("input"); input.type = "file"; input.accept = ".html,.htm,text/html";
@@ -1914,45 +1943,45 @@ export default class ShareFeature extends Component {
       return;
     }
     if (!guide) {
-      const card = page.createDiv({ cls: "simple-card simple-share-settings-card" });
-      new Setting(card).setName("启用笔记分享").setDesc("关闭后暂停本机分享操作，已发布的网站仍然保留。")
-        .addToggle(toggle => toggle.setValue(this.manifest.enabled).setDisabled(this.isPublishing || this.checkingDeployment).onChange(async value => { try { await this.change(manifest => { manifest.enabled = value; }); if (value) await this.open(); } catch (error) { this.fail(error); } }));
-      const dependent = card.createDiv({ cls: `simple-one-sync-engine-body simple-share-settings-dependent${this.manifest.enabled ? "" : " is-disabled"}` });
-      dependent.inert = !this.manifest.enabled;
-      this.renderLibrarySelector(dependent, true);
-      new Setting(dependent).setName("笔记分享后路径（默认路径）").setDesc("设置新分享笔记在分享专用库中的默认目录，已有分享的目录保留。")
-        .addDropdown(dropdown => dropdown.addOptions({ root: "在分享仓库的根目录", source: "跟随原笔记库路径" }).setValue(this.manifest.defaultPath || "source").setDisabled(!this.manifest.enabled || this.isPublishing).onChange(value => {
-          if (value === "root" || value === "source") void this.change(manifest => { manifest.defaultPath = value; }).catch(error => this.fail(error));
-        }));
-      const management = settingsSection(page, "分享库管理");
-      management.addClass("simple-share-settings-card");
+      page.addClass("simple-share-compact-settings");
+      const group = (title: string): HTMLElement => {
+        const fieldset = page.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
+        fieldset.createEl("legend", { text: title });
+        return fieldset;
+      };
+      const management = group("分享管理");
+      this.renderLibrarySelector(management, true, false, false);
+      const selector = management.querySelector<HTMLElement>(".simple-share-library-selector")!;
+      selector.title = "切换当前查看的分享库；发布目标可在笔记分享按钮的右键菜单中选择。";
+      selector.querySelector(".setting-item-description")?.remove();
+      new Setting(management).setName("当前分享模板")
+        .addDropdown(dropdown => dropdown.addOptions(this.templateFiles).setValue(this.templateFile)
+          .setDisabled(!this.manifest.enabled || this.isPublishing || this.templateBusy)
+          .onChange(value => { void this.selectTemplate(value).catch(error => this.fail(error)); }))
+        .addButton(button => button.setIcon("settings").setTooltip("管理分享模板")
+          .onClick(() => this.openTemplateManagement()));
+      new Setting(management).setName("默认分享路径")
+        .addDropdown(dropdown => dropdown.addOptions({ root: "分享库根目录", source: "跟随原笔记路径" })
+          .setValue(this.manifest.defaultPath || "source").setDisabled(!this.manifest.enabled || this.isPublishing)
+          .onChange(value => {
+            if (value === "root" || value === "source") void this.change(manifest => { manifest.defaultPath = value; }).catch(error => this.fail(error));
+          }));
+      const librariesGroup = group("分享库管理");
       const libraries = ensureLibraries(this.manifest);
       for (const [id, stored] of Object.entries(libraries.entries)) {
         const library = id === libraries.active ? this.manifest : stored;
-        const name = library.site.repo ? `${library.site.owner}/${library.site.repo}` : `未完成接入的分享库 · ${id.slice(0, 8)}`;
+        const name = library.site.repo ? library.site.owner + "/" + library.site.repo : "未完成接入 · " + id.slice(0, 8);
         const labels = [id === libraries.active ? "当前查看" : "", selectedLibraryIds(this.manifest).includes(id) ? "分享目标" : ""].filter(Boolean).join(" · ");
-        new Setting(management).setName(name).setDesc(labels || "已保存的分享库")
-          .addButton(button => button.setButtonText("管理").setDisabled(this.isPublishing || this.setupBusy || this.edgeone.busy)
-            .onClick(() => { try { this.openShareLibraryDetails(id); } catch (error) { this.fail(error); } }));
+        const row = new Setting(librariesGroup).setName(name);
+        row.controlEl.createSpan({ text: labels, cls: "simple-share-library-labels" });
+        row.addButton(button => button.setIcon("settings").setTooltip("管理分享库：" + name)
+          .setDisabled(this.isPublishing || this.setupBusy || this.edgeone.busy)
+          .onClick(() => { try { this.openShareLibraryDetails(id); } catch (error) { this.fail(error); } }));
       }
-      const appearance = settingsSection(page, "分享模板");
-      appearance.addClass("simple-share-settings-card");
-      appearance.toggleClass("is-disabled", !this.manifest.enabled); appearance.inert = !this.manifest.enabled;
-      const templateDisabled = !this.manifest.enabled || this.isPublishing || this.templateBusy;
-      const templateSetting = new Setting(appearance).setName("HTML 模板")
-        .setClass("simple-wrapping-setting")
-        .setClass("simple-share-template-setting")
-        .addDropdown(dropdown => dropdown.addOptions(this.templateFiles).setValue(this.templateFile).setDisabled(templateDisabled).onChange(value => {
-          void this.selectTemplate(value).catch(error => { this.fail(error); this.renderViews(); });
-        }))
-        .addButton(button => button.setButtonText("导入模板").setDisabled(templateDisabled).onClick(() => this.importTemplate()))
-        .addButton(button => button.setButtonText("导出模板").setDisabled(templateDisabled).onClick(() => { void this.exportTemplate().catch(error => this.fail(error)); }))
-        .addButton(button => button.setButtonText("恢复默认模板").setDisabled(templateDisabled).onClick(() => {
-          void this.restoreDefaultTemplate().catch(error => {
-            this.templateMessage = error instanceof Error ? error.message : String(error); this.renderViews(); new Notice(this.templateMessage);
-          });
-        }));
-      templateSetting.infoEl.createEl("p", { text: this.templateFile === DEFAULT_TEMPLATE_FILE ? "当前使用默认 HTML 模板。" : `当前使用自定义 HTML 模板：${this.templateFile}`, cls: "simple-share-template-status", attr: { role: "status", "aria-live": "polite" } });
+      new Setting(librariesGroup).setClass("simple-share-library-add")
+        .addButton(button => button.setIcon("plus").setTooltip("新增分享库")
+          .setDisabled(this.isPublishing || this.setupBusy || this.edgeone.busy)
+          .onClick(() => { void this.newLibrary().catch(error => this.fail(error)); }));
       return;
     }
     const steps = [{ id: 1, label: "安装与授权" }, { id: 2, label: "选择仓库" }, { id: 3, label: "接入 EdgeOne Makers" },

@@ -10,6 +10,10 @@ type ReformatResult = {
 };
 
 export async function reformatCurrentNote(plugin: SimplePlugin): Promise<void> {
+  if (!plugin.settings.enhancements.currentNoteLinkConverter.enabled) {
+    new Notice("请先启用自动排版");
+    return;
+  }
   const editor = plugin.app.workspace.activeEditor?.editor;
   if (!editor) {
     new Notice("没有打开的编辑器");

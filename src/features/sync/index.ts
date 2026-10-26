@@ -17,7 +17,6 @@ import {
   SettingDefinitionItem,
   TAbstractFile,
   TFile,
-  type ToggleComponent,
   WorkspaceLeaf
 } from "obsidian";
 import { migrateLinkFiles, readLocalSyncSettings, writeLocalSyncSettings, legacySyncRunning } from "./storage";
@@ -37,6 +36,7 @@ import { LiveReview, ZoeySyncConflictPreviewModal } from "./conflictPreview";
 import { SetupDifferencesModal } from "./setupDifferences";
 import { GitSetup, OverlapChoice, SetupOverlapContent, SetupPreview, VerifiedRepo, setupGitIgnore, missingSetupIgnoreRules, pathBatches, explainSetupError, parseGithubRepoUrl } from "./onboarding";
 import { preserveUntrackedFiles } from "./untrackedFiles";
+import { transferProgress } from "./transferProgress";
 import { hasCaseInsensitivePathCollisions, isInvalidGitPathError, repairRemoteFilenames } from "./remoteFilenameRepair";
 import { findNestedRepos, nestedGitIgnoreRules, nestedRepoFiles, rebuildNestedRepoTracking } from "./nestedRepos";
 
@@ -2256,10 +2256,11 @@ export default class SyncFeature extends Component {
     this.setSyncActivity("正在检查云端更新…", "checking");
     await this.ensureDesktopGit();
     await this.ensureNormalGitState();
-    this.setSyncActivity("正在下载云端更新…", "fetch");
+    this.setSyncActivity("正在下载", "fetch");
     try {
       await this.traceDesktopGitStep("Git fetch（连接并下载远端分支）", () =>
-        this.git(["fetch", "origin", this.settings.gitBranch], true)
+        this.exec("git", ["fetch", "--progress", "origin", this.settings.gitBranch], true, true, 120000,
+          transferProgress("下载", text => this.setSyncActivity(text, "fetch")))
       );
     } catch (error) {
       if (!isMissingRemoteRefError(error)) throw error;
@@ -2361,9 +2362,10 @@ export default class SyncFeature extends Component {
       return false;
     }
     this.desktopGitTrace.push("上传检查：存在待上传 Commit");
-    this.setSyncActivity("正在同步本机修改…", "push");
+    this.setSyncActivity("正在上传", "push");
     await this.traceDesktopGitStep("Git push（上传本机提交）", () =>
-      this.git(["push", "-u", "origin", `HEAD:${this.settings.gitBranch}`], true)
+      this.exec("git", ["push", "--progress", "-u", "origin", `HEAD:${this.settings.gitBranch}`], true, true, 120000,
+        transferProgress("上传", text => this.setSyncActivity(text, "push")))
     );
     this.clearDesktopPushRetry();
     this.settings.pendingMergePushAfterResolve = false;
@@ -3461,20 +3463,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     if (!Platform.isMobile && this.desktopPage === "desktop-settings") { this.displayDesktopSettings(containerEl); return; }
 
     this.displayBeginner(containerEl);
-    const overview = containerEl.createDiv({ cls: "simple-one-sync-repository-overview" });
-    this.addEnableSetting(overview);
-    this.addDefaultRepoSetting(overview);
     this.displayDesktop(containerEl);
-  }
-
-  private addDefaultRepoSetting(parent: HTMLElement): void {
-    const row = new Setting(parent).setName("当前绑定 Git 仓库")
-      .addText((input) => input.setPlaceholder("https://github.com/用户名/仓库.git")
-        .setValue(this.plugin.settings.boundRepoUrl).onChange(async (value) => {
-          this.plugin.settings.boundRepoUrl = value.trim();
-          await this.plugin.saveSettings();
-        }));
-    row.settingEl.addClass("simple-one-sync-stacked-setting");
   }
 
   private addDesktopEngineControls(parent: HTMLElement): void {
@@ -3502,18 +3491,6 @@ export class SyncSettingsTab extends PluginSettingTab {
     body.inert = !enabled;
     body.toggleClass("is-disabled", !enabled);
     return body;
-  }
-
-  private addEnableSetting(parent: HTMLElement): void {
-    new Setting(parent)
-      .setName("启用同步")
-      .setDesc("显示右侧同步面板，并允许手动或定时同步。关闭后保留配置，但停止本插件的同步工作。")
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.enabled).onChange(async (value) => {
-          await this.plugin.setFeatureEnabled(value);
-          this.renderSettings();
-        })
-      );
   }
 
   private displayMobile(containerEl: HTMLElement): void {
@@ -3568,11 +3545,22 @@ export class SyncSettingsTab extends PluginSettingTab {
     return Platform.isMobile ? "mobile" : "git";
   }
 
-  private addSyncBadges(button: HTMLButtonElement, recommended: boolean, active: boolean): void {
-    if (!recommended && !active) return;
-    const badges = button.createSpan({ cls: "simple-one-sync-device-badges" });
+  private addSyncBadges(parent: HTMLElement, recommended: boolean, active: boolean, onToggle: () => Promise<void>): void {
+    const badges = parent.createSpan({ cls: "simple-one-sync-device-badges" });
     if (recommended) badges.createSpan({ text: "当前平台推荐", cls: "simple-one-sync-device-badge" });
-    if (active) badges.createSpan({ text: "当前应用", cls: "simple-one-sync-device-badge is-applied" });
+    const state = badges.createEl("button", { text: active ? "当前启用" : "当前未启用", cls: `simple-one-sync-device-badge simple-one-sync-state-toggle${active ? " is-applied" : ""}`, attr: { type: "button", "aria-pressed": String(active), "aria-label": active ? "关闭此功能" : "启用此功能" } });
+    state.addEventListener("click", () => void (async () => {
+      state.disabled = true;
+      try { await onToggle(); }
+      catch (error) { new Notice(`切换失败：${messageOf(error)}`); }
+      finally { this.renderSettings(); }
+    })());
+  }
+
+  private addSettingsArrow(parent: HTMLElement, page: "desktop-settings" | "mobile" | "server", title: string): void {
+    const arrow = parent.createEl("button", { cls: "clickable-icon simple-one-sync-entry-arrow", attr: { type: "button", "aria-label": `打开${title}`, title: `打开${title}` } });
+    setIcon(arrow, "chevron-right");
+    arrow.addEventListener("click", () => this.navigateTo(page));
   }
 
   private addBeginnerLink(parent: HTMLElement, title: string, icon: string, page: "setup" | "beginner-desktop" | "beginner-mobile" | "beginner-server"): void {
@@ -3917,7 +3905,10 @@ export class SyncSettingsTab extends PluginSettingTab {
       body.createEl("p", { text: "选择本机同步范围，完成后可在轻量 Git 同步设置中调整。", cls: "simple-one-sync-setup-step-desc" });
       body.createEl("p", { text: `${options.repoUrl} · ${options.branch}` });
       if (!this.lightweightGuideVerified) body.createEl("p", { text: "正在回看已保存的同步规则；如需重新接入，请先返回核验 token 和仓库。" });
-      renderMobileSyncRules(body, options, () => {}, () => engine.listCloudPlugins(), this.plugin.manifest.id);
+      const rulesPanel = body.createDiv({ cls: "simple-lightweight-sync-settings" });
+      const rules = rulesPanel.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
+      rules.createEl("legend", { text: "同步规则" });
+      renderMobileSyncRules(rules, options, () => {}, () => engine.listCloudPlugins(), this.plugin.manifest.id, this.plugin.mobileHost());
       body.createEl("p", { text: "完成后绑定并启用轻量同步；首次同步请查看文件预览，再确认执行。" });
     }
     let next: HTMLButtonElement | undefined;
@@ -3953,7 +3944,6 @@ export class SyncSettingsTab extends PluginSettingTab {
   private displayDesktopSettings(containerEl: HTMLElement): void {
     const page = containerEl.createDiv({ cls: "simple-one-sync-setup-layout" });
     this.renderDeviceHeader(page, "电脑端 Git 同步");
-    this.addDesktopEngineControls(page.createDiv({ cls: "simple-card" }));
     const body = this.syncSettingsBody(page, this.plugin.nativeGitEnabled());
     this.displayDesktopAdvanced(body);
   }
@@ -3969,19 +3959,26 @@ export class SyncSettingsTab extends PluginSettingTab {
     for (const entry of entries) {
       const isCurrent = currentDevice === entry.page;
       const accessible = isCurrent || !Platform.isMobile;
-      const button = containerEl.createEl("button", {
+      const button = containerEl.createDiv( {
         cls: `simple-one-sync-page-link simple-one-sync-device-link${accessible ? "" : " is-disabled"}`,
-        attr: { type: "button" }
+        attr: { "aria-disabled": String(!accessible) }
       });
-      button.disabled = !accessible;
       setIcon(button.createSpan({ cls: "simple-one-sync-page-link__icon" }), entry.icon);
       const copy = button.createSpan({ cls: "simple-one-sync-page-link__copy" });
       copy.createSpan({ text: entry.title, cls: "simple-one-sync-page-link__title" });
       copy.createSpan({ text: entry.desc, cls: "simple-one-sync-page-link__desc" });
       if (accessible) {
-        if (entry.page === "mobile") this.addSyncBadges(button, isCurrent, this.plugin.settings.enabled && this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github");
-        setIcon(button.createSpan({ cls: "simple-one-sync-page-link__chevron" }), "chevron-right");
-        button.addEventListener("click", () => this.navigateTo(entry.page));
+        if (entry.page === "mobile") {
+          const active = this.plugin.settings.enabled && this.plugin.useLightweightSync();
+          this.addSyncBadges(button, isCurrent, active, async () => {
+            await this.plugin.setLightweightSyncEnabled(!active);
+            if (!active && !this.plugin.settings.enabled) await this.plugin.setFeatureEnabled(true);
+          });
+        } else {
+          const share = this.plugin.host?.share;
+          if (share) this.addSyncBadges(button, false, share.manifest.enabled, () => share.setFeatureEnabled(!share.manifest.enabled));
+        }
+        this.addSettingsArrow(button, entry.page, entry.title);
       }
     }
   }
@@ -4003,25 +4000,24 @@ export class SyncSettingsTab extends PluginSettingTab {
   private displayMobilePreview(containerEl: HTMLElement): void {
     const page = containerEl.createDiv({ cls: "simple-one-sync-setup-layout" });
     this.displayDevicePreview(page, "轻量 Git 同步", "适用于安卓、iOS，也适用于电脑");
-    this.addLightweightEngineControl(settingsSection(page, "同步开关"));
     const body = this.syncSettingsBody(page, this.plugin.useLightweightSync());
     renderMobileSettings(body, this.plugin.mobileHost(), false, () => this.renderSettings());
     if (this.plugin.settings.mobile.mode === "server") this.displayMobile(body);
   }
 
   private addSetupEntry(parent: HTMLElement, isCurrent: boolean): void {
-    const button = parent.createEl("button", { cls: `simple-one-sync-page-link simple-one-sync-device-link simple-one-sync-device-link--desktop${isCurrent ? "" : " is-disabled"}`, attr: { type: "button" } });
-    button.disabled = !isCurrent;
+    const button = parent.createDiv( { cls: `simple-one-sync-page-link simple-one-sync-device-link simple-one-sync-device-link--desktop${isCurrent ? "" : " is-disabled"}`, attr: { "aria-disabled": String(!isCurrent) } });
     setIcon(button.createSpan({ cls: "simple-one-sync-page-link__icon" }), "monitor");
     const copy = button.createSpan({ cls: "simple-one-sync-page-link__copy" });
     copy.createSpan({ text: "电脑端 Git 同步设置", cls: "simple-one-sync-page-link__title" });
     copy.createSpan({ text: "界面、自动同步时间与 Git 设置", cls: "simple-one-sync-page-link__desc" });
     if (!isCurrent) return;
-    this.addSyncBadges(button, isCurrent, this.plugin.settings.enabled && this.plugin.nativeGitEnabled());
-    setIcon(button.createSpan({ cls: "simple-one-sync-page-link__chevron" }), "chevron-right");
-    button.addEventListener("click", () => {
-      this.navigateTo("desktop-settings");
+    const active = this.plugin.settings.enabled && this.plugin.nativeGitEnabled();
+    this.addSyncBadges(button, isCurrent, active, async () => {
+      await this.plugin.setDesktopSyncMode(active ? "off" : "git");
+      if (!active && !this.plugin.settings.enabled) await this.plugin.setFeatureEnabled(true);
     });
+    this.addSettingsArrow(button, "desktop-settings", "电脑端 Git 同步设置");
   }
 
   private setupLink(parent: HTMLElement, label: string, href: string): void {
@@ -4621,39 +4617,36 @@ export class SyncSettingsTab extends PluginSettingTab {
   }
 
   private displayDesktopAdvanced(containerEl: HTMLElement): void {
+    containerEl.addClass("simple-desktop-git-settings");
     const preview = this.currentDevice() !== "git";
     const section = (title: string): HTMLElement => {
-      const card = settingsSection(containerEl, title);
+      const card = containerEl.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
+      card.createEl("legend", { text: title });
       card.addClass("simple-one-sync-advanced__body");
       return card;
     };
-    let backupStartupToggle: ToggleComponent;
-    let pullStartupToggle: ToggleComponent;
-    let advancedBody = section("自动备份与更新设置");
-    new Setting(advancedBody)
-      .setName("启动后自动获取云端更新")
-      .setDesc("启动后先获取云端更新，稍后按备份设置时间推送到云端。")
-      .addToggle(toggle => (pullStartupToggle = toggle).setValue(this.plugin.settings.pullOnStartup).onChange(async value => {
-        this.plugin.settings.pullOnStartup = value;
-        if (value) {
-          this.plugin.settings.backupOnStartup = false;
-          backupStartupToggle.setValue(false);
+    let advancedBody = section("自动备份与更新");
+    const startup = (name: string, desc: string, key: "pullOnStartup" | "backupOnStartup", other: "pullOnStartup" | "backupOnStartup"): HTMLInputElement => {
+      const setting = new Setting(advancedBody).setName(name).setDesc(desc);
+      setting.settingEl.addClass("simple-sync-checkbox-row");
+      const input = setting.settingEl.createEl("input", { type: "checkbox", attr: { "aria-label": name } });
+      input.checked = this.plugin.settings[key];
+      setting.settingEl.prepend(input);
+      setting.nameEl.addEventListener("click", () => input.click());
+      input.addEventListener("change", () => void (async () => {
+        this.plugin.settings[key] = input.checked;
+        if (input.checked) {
+          this.plugin.settings[other] = false;
+          (key === "pullOnStartup" ? backup : pull).checked = false;
         }
         await this.plugin.saveSettings();
-      }));
+      })().catch(error => new Notice(`保存启动同步设置失败：${messageOf(error)}`)));
+      return input;
+    };
+    const pull = startup("启动时获取云端更新", "启动后先获取云端更新，本机改动按下方备份时间上传。与下一项互斥。", "pullOnStartup", "backupOnStartup");
+    const backup = startup("启动时获取更新并备份", "启动后先获取云端更新，再备份本机改动。与上一项互斥。", "backupOnStartup", "pullOnStartup");
     new Setting(advancedBody)
-      .setName("启动后自动获取云端更新并备份至云端")
-      .setDesc("启动后先获取云端更新，再将本机改动备份至云端。")
-      .addToggle(toggle => (backupStartupToggle = toggle).setValue(this.plugin.settings.backupOnStartup).onChange(async value => {
-        this.plugin.settings.backupOnStartup = value;
-        if (value) {
-          this.plugin.settings.pullOnStartup = false;
-          pullStartupToggle.setValue(false);
-        }
-        await this.plugin.saveSettings();
-      }));
-    new Setting(advancedBody)
-      .setName("间隔多久检查云端更新（分钟）")
+      .setName("检查云端更新间隔（分钟）")
       .setDesc("每隔多久检查云端更新并下载。填 0 关闭定时检查。")
       .addText((text) => this.addTimingInput(text, "autoPullIntervalMinutes", 5));
     new Setting(advancedBody)
@@ -4666,8 +4659,15 @@ export class SyncSettingsTab extends PluginSettingTab {
       .addText((text) => this.addTimingInput(text, "maxUncommittedMinutes", 60));
 
     advancedBody = section("Git 上传设置");
+    new Setting(advancedBody).setName("仓库地址")
+      .setDesc("电脑端 Git 同步使用的远程仓库地址。")
+      .addText(text => text.setPlaceholder("https://github.com/用户名/仓库.git")
+        .setValue(this.plugin.settings.gitRemoteUrl).onChange(async value => {
+          this.plugin.settings.gitRemoteUrl = value.trim();
+          await this.plugin.saveSettings();
+        }));
     new Setting(advancedBody)
-      .setName("分支")
+      .setName("上传分支")
       .setDesc("默认使用 master；只有仓库使用其他分支时才需要修改。")
       .addText((text) =>
         text.setValue(this.plugin.settings.gitBranch).onChange(async (value) => {
@@ -4695,11 +4695,11 @@ export class SyncSettingsTab extends PluginSettingTab {
       );
 
     advancedBody = section("故障排查");
-    new Setting(advancedBody).setName("按忽略规则修复追踪")
+    new Setting(advancedBody).setName("检查忽略规则与文件追踪")
       .setDesc("先检查 .gitignore 和已追踪文件，再只让应忽略的文件退出 Git 跟踪。本机文件保留；不会立即 commit 或 push。若有未解决的合并冲突，请先处理。")
-      .addButton((button) => button.setButtonText("检查并修复文件追踪").setDisabled(preview).onClick(async () => {
+      .addButton((button) => button.setIcon("play").setTooltip("检查忽略规则与文件追踪").setDisabled(preview).onClick(async () => {
         button.setDisabled(true);
-        button.setButtonText("正在检查…");
+        button.setIcon("loader-circle").setTooltip("正在检查…");
         try {
           const result = await this.plugin.inspectFileTracking();
           new FileTrackingModal(this.app, this.plugin, result).open();
@@ -4707,16 +4707,16 @@ export class SyncSettingsTab extends PluginSettingTab {
           new Notice(`同步：无法检查文件追踪。${messageOf(error)}`, 10000);
         } finally {
           button.setDisabled(false);
-          button.setButtonText("检查并修复文件追踪");
+          button.setIcon("play").setTooltip("检查忽略规则与文件追踪");
         }
       }));
     new Setting(advancedBody)
-      .setName("异常修复")
+      .setName("检查并恢复未完成的 Git 操作")
       .setDesc("恢复未完成的 rebase、merge 等 Git 操作，以当前本机内容重新 commit，再 fetch 并 merge；不会立即 push。")
       .addButton((button) =>
-        button.setButtonText("恢复正常同步").setDisabled(preview).onClick(async () => {
+        button.setIcon("play").setTooltip("检查并恢复未完成的 Git 操作").setDisabled(preview).onClick(async () => {
           button.setDisabled(true);
-          button.setButtonText("正在检查…");
+          button.setIcon("loader-circle").setTooltip("正在检查…");
           try {
             const operation = await this.plugin.getInterruptedGitOperationLabel();
             if (!operation) {
@@ -4728,17 +4728,17 @@ export class SyncSettingsTab extends PluginSettingTab {
             new Notice(`同步：无法检查 Git 状态。${messageOf(error)}`, 10000);
           } finally {
             button.setDisabled(false);
-            button.setButtonText("恢复正常同步");
+            button.setIcon("play").setTooltip("检查并恢复未完成的 Git 操作");
           }
         })
       );
     new Setting(advancedBody)
-      .setName("本地 Git 历史瘦身")
+      .setName("预览清理本地旧历史（保留近 30 天）")
       .setDesc("默认保留最近 30 天的本地历史。先联网确认当前 commit 已上传，再清理本机旧历史；不会删除 GitHub 上的版本。")
       .addButton((button) =>
-        button.setButtonText("检查并预览").setDisabled(preview).onClick(async () => {
+        button.setIcon("play").setTooltip("检查并预览旧历史清理").setDisabled(preview).onClick(async () => {
           button.setDisabled(true);
-          button.setButtonText("正在核验…");
+          button.setIcon("loader-circle").setTooltip("正在核验…");
           try {
             const result = await this.plugin.inspectLocalHistory();
             new LocalHistorySlimModal(this.app, this.plugin, result).open();
@@ -4746,22 +4746,29 @@ export class SyncSettingsTab extends PluginSettingTab {
             new Notice(`同步：无法预览本地历史。${messageOf(error)}`, 12000);
           } finally {
             button.setDisabled(false);
-            button.setButtonText("检查并预览");
+            button.setIcon("play").setTooltip("检查并预览旧历史清理");
           }
         })
       );
     const logs = this.plugin.getRecentErrorLogs();
     const errorCount = logs.filter((entry) => entry.status !== "success").length;
     new Setting(advancedBody)
-      .setName("最近同步日志")
+      .setName(errorCount > 0 ? `同步日志（${errorCount} 条错误）` : "查看最近 24 小时同步日志")
       .setDesc(
         errorCount > 0
           ? `最近 24 小时共 ${logs.length} 条记录，其中 ${errorCount} 条错误。`
           : `最近 24 小时共 ${logs.length} 条记录，没有错误。`
       )
       .addButton((button) =>
-        button.setButtonText("查看日志").onClick(() => new ErrorLogModal(this.app, this.plugin).open())
+        button.setIcon("play").setTooltip("查看同步日志").onClick(() => new ErrorLogModal(this.app, this.plugin).open())
       );
+    for (const row of Array.from(containerEl.querySelectorAll<HTMLElement>(".simple-one-sync-advanced__body > .setting-item"))) {
+      const description = row.querySelector<HTMLElement>(".setting-item-description");
+      if (description?.textContent) row.title = description.textContent;
+      const input = row.querySelector<HTMLInputElement>("input[type=number], input[type=text]");
+      if (input && row.title) input.title = row.title;
+    }
+
   }
 
   private addTimingInput(

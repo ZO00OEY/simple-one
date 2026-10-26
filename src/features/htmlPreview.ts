@@ -14,6 +14,7 @@ export const refreshHtmlPreview = StateEffect.define<void>();
 const toggleHtmlSource = StateEffect.define<number>();
 const inlineHtmlSources = new WeakMap<HTMLElement, Node[]>();
 const previewStyles = new WeakMap<HTMLElement, CSSStyleSheet>();
+const replacementSources = new WeakMap<HTMLElement, Text>();
 
 type HtmlPreviewState = {
   decorations: DecorationSet;
@@ -219,13 +220,10 @@ export function observeRenderedHtmlPreviews(
 ): MutationObserver {
   const update = (node: Node) => {
     if (!(node.instanceOf(HTMLElement))) return;
-    if (isEnabled()) {
-      decorateHtmlPreviews(node, getRules());
-      decorateInlineHtmlEmbeds(node, getRules());
-    } else {
-      clearHtmlPreviews(node);
-      clearInlineHtmlEmbeds(node);
-    }
+    if (node.closest(".simple-html-preview, .simple-html-preview-live-container, .simple-display-replacement")) return;
+    decorateHtmlPreviews(node, getRules(), isEnabled());
+    decorateInlineHtmlEmbeds(node, getRules());
+    decorateTextReplacements(node, getRules());
   };
 
   update(root);
@@ -246,31 +244,26 @@ export function refreshRenderedHtmlPreviews(
   enabled: boolean,
   rules: HtmlPreviewRule[] = []
 ): void {
-  if (!enabled) {
-    clearHtmlPreviews(root);
-    return;
-  }
-
   clearHtmlPreviews(root);
   clearInlineHtmlEmbeds(root);
-  decorateHtmlPreviews(root, rules);
+  clearTextReplacements(root);
+  decorateHtmlPreviews(root, rules, enabled);
   decorateInlineHtmlEmbeds(root, rules);
+  decorateTextReplacements(root, rules);
 }
 
-function buildHtmlDecorations(
+export function buildHtmlDecorations(
   state: EditorState,
   enabled: boolean,
   expanded: Set<number>,
   rules: HtmlPreviewRule[] = []
 ): DecorationSet {
-  if (!enabled) return Decoration.none;
-
   const decorations: Array<ReturnType<Decoration["range"]>> = [];
   const ranges: PreviewRange[] = [];
   const doc = state.doc;
   let lineNo = 1;
 
-  while (lineNo <= doc.lines) {
+  while (enabled && lineNo <= doc.lines) {
     const startLine = doc.line(lineNo);
     if (!/^```html\s*$/i.test(startLine.text.trim())) {
       lineNo++;
@@ -336,11 +329,10 @@ function buildHtmlDecorations(
       const sourceRange = expandFenceRange(doc, from, to);
       if (ranges.some((range) => sourceRange.from < range.to && sourceRange.to > range.from)) continue;
       const html = unwrapHtmlFence(match[0].replace(makeRuleRegex(rule), rule.replaceWith));
-      if (!looksLikeHtml(html)) continue;
       ranges.push(sourceRange);
       const isExpanded = expanded.has(sourceRange.from);
       const widget = new HtmlPreviewWidget(
-        html,
+        displayReplacementHtml(html),
         sourceRange.from,
         sourceRange.to,
         doc.sliceString(sourceRange.from, sourceRange.to),
@@ -388,15 +380,17 @@ function expandFenceRange(doc: EditorState["doc"], from: number, to: number): Pr
   return { from: start, to: end };
 }
 
-function decorateHtmlPreviews(root: HTMLElement, rules: HtmlPreviewRule[] = []): void {
+function decorateHtmlPreviews(root: HTMLElement, rules: HtmlPreviewRule[] = [], enabled = true): void {
   for (const pre of findHtmlCodeBlocks(root)) {
     if (pre.dataset.simpleHtmlPreview === "true") continue;
 
     const raw = unwrapHtmlFence(pre.textContent ?? "");
-    if (!looksLikeHtml(raw)) continue;
+    const replacement = applyHtmlPreviewRules(raw, rules);
+    if (!enabled && replacement === raw) continue;
+    if (replacement === raw && !looksLikeHtml(raw)) continue;
 
     pre.dataset.simpleHtmlPreview = "true";
-    pre.before(createHtmlPreview(applyHtmlPreviewRules(raw, rules)));
+    pre.before(createHtmlPreview(displayReplacementHtml(replacement)));
   }
 }
 
@@ -417,10 +411,51 @@ function decorateInlineHtmlEmbeds(root: HTMLElement, rules: HtmlPreviewRule[] = 
     if (embed.dataset.simpleHtmlRulePreview === "true") continue;
     const raw = embed.innerHTML;
     const html = applyHtmlPreviewRules(raw, rules);
-    if (html === raw || !looksLikeHtml(html)) continue;
+    if (html === raw) continue;
     embed.dataset.simpleHtmlRulePreview = "true";
     inlineHtmlSources.set(embed, Array.from(embed.childNodes));
-    embed.replaceChildren(renderHtmlPreview(html));
+    embed.replaceChildren(renderHtmlPreview(displayReplacementHtml(html)));
+  }
+}
+
+function displayReplacementHtml(value: string): string {
+  if (looksLikeHtml(value)) return value;
+  const text = createSpan();
+  text.textContent = value;
+  return `<span style="white-space: pre-wrap">${text.innerHTML}</span>`;
+}
+
+function decorateTextReplacements(root: HTMLElement, rules: HtmlPreviewRule[]): void {
+  if (!rules.some((rule) => rule.enabled && rule.pattern)) return;
+  const selector = ".markdown-rendered, .markdown-preview-view";
+  if (!root.matches(selector) && !root.closest(selector)) {
+    root.querySelectorAll<HTMLElement>(selector).forEach((node) => decorateTextReplacements(node, rules));
+    return;
+  }
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+  for (const node of nodes) {
+    if (node.parentElement?.closest("pre, code, script, style, textarea, .simple-html-preview, .simple-html-preview-live-container, .simple-display-replacement")) continue;
+    const raw = node.data;
+    const replacement = applyHtmlPreviewRules(raw, rules);
+    if (replacement === raw) continue;
+    const wrap = createSpan();
+    wrap.className = "simple-display-replacement";
+    replacementSources.set(wrap, node);
+    wrap.append(renderHtmlPreview(displayReplacementHtml(replacement)));
+    node.replaceWith(wrap);
+  }
+}
+
+function clearTextReplacements(root: HTMLElement): void {
+  const wrappers = root.matches(".simple-display-replacement")
+    ? [root] : Array.from(root.querySelectorAll<HTMLElement>(".simple-display-replacement"));
+  for (const wrap of wrappers) {
+    clearPreviewStyles(wrap);
+    const source = replacementSources.get(wrap);
+    if (source) wrap.replaceWith(source);
+    replacementSources.delete(wrap);
   }
 }
 
@@ -534,7 +569,7 @@ function applyHtmlPreviewRules(raw: string, rules: HtmlPreviewRule[]): string {
   return html;
 }
 
-function makeRuleRegex(rule: HtmlPreviewRule, forceGlobal = false): RegExp {
+export function makeRuleRegex(rule: Pick<HtmlPreviewRule, "pattern" | "flags">, forceGlobal = false): RegExp {
   const flags = forceGlobal && !(rule.flags || "").includes("g")
     ? `${rule.flags || ""}g`
     : rule.flags || "g";

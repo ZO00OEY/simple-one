@@ -1,4 +1,4 @@
-import { App, Notice, Platform, Setting } from "obsidian";
+import { App, Modal, Notice, Platform, Setting, setIcon } from "obsidian";
 import { settingsSection } from "../../shared/settingsLayout";
 import { MobileOptions, sameContent } from "./linkDiff";
 import { ConflictChoice, MobileConflict, MobileGithub, MobilePlan } from "./mobileGithub";
@@ -126,7 +126,8 @@ export function mobileCheckbox(root: HTMLElement, name: string, description: str
 }
 
 export function renderMobileSyncRules(root: HTMLElement, options: MobileOptions, save: () => Promise<void> | void,
-  loadPlugins: () => Promise<string[]>, currentPluginId = "simple-one"): void {
+  loadPlugins: () => Promise<string[]>, currentPluginId = "simple-one", compactHost?: MobileHost): void {
+  if (compactHost) { renderCompactSyncRules(root, options, save, loadPlugins, compactHost); return; }
   root = root.createDiv({ cls: "simple-one-sync-sync-rules" });
   const image = mobileCheckbox(root, "同步图片", "慎关：关闭后所有图片均不参与同步，笔记可能出现缺图，其他设备的新图片也不会下载到本机。",
     options.syncImages, async (value) => { options.syncImages = value; await save(); });
@@ -183,8 +184,73 @@ export function renderMobileSyncRules(root: HTMLElement, options: MobileOptions,
     options.trackPaths, async (value) => { options.trackPaths = value; await save(); });
 }
 
+function compactSection(root: HTMLElement, title: string): HTMLElement {
+  const section = root.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
+  section.createEl("legend", { text: title });
+  return section;
+}
+
+function renderCompactSyncRules(root: HTMLElement, options: MobileOptions, save: () => Promise<void> | void, loadPlugins: () => Promise<string[]>, host: MobileHost): void {
+  root = root.createDiv({ cls: "simple-one-sync-sync-rules" });
+  const image = mobileCheckbox(root, "同步图片", "关闭后，所有图片都不参与同步。", options.syncImages, async value => { options.syncImages = value; await save(); });
+  image.nameEl.createSpan({ text: "（慎关：关闭后所有图片不参与同步）", cls: "simple-lightweight-image-warning" });
+  const plugins = mobileCheckbox(root, "同步插件及配置", "同步选中的插件程序与共享配置；本机凭据和运行状态不参与同步。", options.syncPlugins, async value => { options.syncPlugins = value; await save(); });
+  const manage = plugins.settingEl.createEl("button", { cls: "clickable-icon simple-lightweight-action", attr: { type: "button", title: "选择同步插件", "aria-label": "选择同步插件" } });
+  setIcon(manage, "settings");
+  manage.addEventListener("click", () => {
+    const modal = new Modal(host.app);
+    const selected = new Set(options.plugins);
+    const source = JSON.stringify([options.repoUrl, options.branch, options.token]);
+    let closed = false;
+    let loading = false;
+    modal.onOpen = () => {
+      const content = modal.contentEl;
+      content.addClass("simple-lightweight-plugin-modal");
+      content.createEl("h2", { text: "选择同步插件" });
+      const refresh = content.createEl("button", { text: "重新获取插件", attr: { type: "button" } });
+      const status = content.createDiv({ cls: "setting-item-description", attr: { role: "status" } });
+      const list = content.createDiv();
+      const footer = content.createDiv({ cls: "simple-json-modal-footer" });
+      footer.createEl("button", { text: "取消" }).addEventListener("click", () => modal.close());
+      const confirm = footer.createEl("button", { text: "确认", cls: "mod-cta" });
+      const load = async (): Promise<void> => {
+        if (loading) return;
+        loading = true; refresh.disabled = confirm.disabled = true;
+        status.setText("正在获取云端插件…");
+        try {
+          const remote = await loadPlugins();
+          if (closed) return;
+          list.empty();
+          for (const id of [...new Set([...remote, ...selected])].sort()) {
+            mobileCheckbox(list, id, remote.includes(id) ? "" : "已选插件，当前云端列表中未找到。", selected.has(id), value => { if (value) selected.add(id); else selected.delete(id); });
+          }
+          status.setText(`云端 ${remote.length} 个插件；勾选后点击确认保存。`);
+        } catch (error) { if (!closed) status.setText(`获取失败：${error instanceof Error ? error.message : String(error)}`); }
+        finally { loading = false; refresh.disabled = confirm.disabled = false; }
+      };
+      refresh.addEventListener("click", () => void load());
+      confirm.addEventListener("click", () => void (async () => {
+        if (source !== JSON.stringify([options.repoUrl, options.branch, options.token])) { new Notice("仓库配置已变化，请关闭后重新打开插件选择。"); return; }
+        const previous = options.plugins;
+        refresh.disabled = confirm.disabled = true;
+        options.plugins = [...selected];
+        try { await save(); modal.close(); }
+        catch (error) { options.plugins = previous; new Notice(error instanceof Error ? error.message : String(error)); }
+        finally { refresh.disabled = confirm.disabled = false; }
+      })());
+      void load();
+    };
+    modal.onClose = () => { closed = true; modal.contentEl.empty(); };
+    modal.open();
+  });
+  mobileCheckbox(root, "缓存文件校验结果，加快同步", "复用已校验文件的哈希，减少重复计算；关闭后每次重新计算。", options.cacheEnabled, async value => { options.cacheEnabled = value; await save(); });
+  mobileCheckbox(root, "追踪文件改名与移动", "识别文件改名和移动，关联移动前后的内容。", options.trackPaths, async value => { options.trackPaths = value; await save(); });
+}
+
 export function renderMobileSettings(root: HTMLElement, host: MobileHost, guide = false, rerender?: () => void): void {
   const options = host.options;
+  if (!guide) root.addClass("simple-lightweight-sync-settings");
+  const section = (title: string): HTMLElement => guide ? settingsSection(root, title) : compactSection(root, title);
   if (guide) root.createEl("h3", { text: "配置 GitHub 轻量同步" });
   if (guide && !Platform.isMobile) root.createEl("p", { text: "电脑可启用轻量同步运行相同流程；此模式会实际读写仓库，确认预览后才执行同步。" });
   if (guide) {
@@ -196,11 +262,12 @@ export function renderMobileSettings(root: HTMLElement, host: MobileHost, guide 
   }
   const persist = async (): Promise<void> => { await host.save(); host.restart(); };
   if (options.mode === "server") { root.createEl("p", { text: "服务器地址和密码在下方原服务器设置中填写。" }); return; }
-  const account = settingsSection(root, "账户设置");
+  const account = section( "账户设置");
   account.addClass("simple-one-sync-lightweight-account");
   const engine = host.engine();
   const quota = new Setting(account).setName("GitHub API 剩余额度");
   const updateQuota = (remaining: number | null): void => {
+    if (!guide) quota.setName(remaining === null ? "GitHub API 额度：尚未获取" : `GitHub API 剩余额度：${remaining.toLocaleString()} 次`);
     quota.setDesc(remaining === null
       ? "尚未获取；与 GitHub 交互后自动更新。"
       : `剩余 ${remaining.toLocaleString()} 次请求（最近一次 GitHub 响应）。`);
@@ -219,14 +286,14 @@ export function renderMobileSettings(root: HTMLElement, host: MobileHost, guide 
   new Setting(account).setName("分支").setDesc("留空使用仓库默认分支；不自动创建或重置仓库。")
     .addText((text) => text.setValue(options.branch).onChange(async (value) => { options.branch = value.trim(); options.bound = false; await host.save(); }));
   new Setting(account).setName("完整哈希校验").setDesc("只重新核对同步范围内的文件，不推进共同基准、不上传。")
-    .addButton((button) => button.setButtonText("重新校验全部同步文件").setDisabled(!host.active()).onClick(() => void host.calibrate()));
+    .addButton((button) => button.setIcon("play").setTooltip("重新校验全部同步文件").setDisabled(!host.active()).onClick(() => void host.calibrate()));
   const status = account.createEl("p", { cls: "simple-one-sync-setup-feedback", attr: { role: "status", "aria-live": "polite" } });
   status.hidden = true;
   const report = (message: string, error = false): void => {
     status.hidden = false; status.setText(message); status.toggleClass("simple-one-sync-setup-error", error);
   };
   new Setting(account).setName("核验仓库与 token").setDesc("只读取指定仓库信息和文件树，不列出账号全部仓库，不下载正文。")
-    .addButton((button) => button.setButtonText("检查").setDisabled(!host.active()).onClick(async () => {
+    .addButton((button) => button.setIcon("play").setTooltip("核验仓库与 Token").setDisabled(!host.active()).onClick(async () => {
       button.setDisabled(true);
       report("正在检查 Token 与仓库…");
       try {
@@ -236,39 +303,49 @@ export function renderMobileSettings(root: HTMLElement, host: MobileHost, guide 
       } catch (error) { report(error instanceof Error ? error.message : String(error), true); }
       finally { button.setDisabled(false); }
     }));
-  const timing = settingsSection(root, "同步设置");
+  const timing = section( "同步设置");
   new Setting(timing).setName("自动同步间隔（分钟）").setDesc("默认 0，仅手动同步；自动同步发现冲突或删除时等待手动预览。")
     .addText((text) => text.setValue(String(options.autoSyncMinutes)).onChange(async (value) => {
       const minutes = Number(value); if (!Number.isFinite(minutes) || minutes < 0) return;
       options.autoSyncMinutes = minutes; await persist();
     }));
-  const rules = settingsSection(root, "基础规则");
-  renderMobileSyncRules(rules, options, persist, () => host.engine().listCloudPlugins());
-  new Setting(rules).setName("本机额外忽略规则").setDesc("每行一个目录或通配符，例如 私人目录/。不改云端 .gitignore，排除项不会被当成删除。")
-    .addTextArea((text) => text.setValue(options.ignorePatterns.join("\n")).onChange(async (value) => {
-      options.ignorePatterns = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean); await persist();
+  const rules = section( "基础规则");
+  renderMobileSyncRules(rules, options, persist, () => host.engine().listCloudPlugins(), "simple-one", guide ? undefined : host);
+  if (guide) {
+    new Setting(rules).setName("本机额外忽略规则").setDesc("每行一个目录或通配符，仅影响本机。")
+      .addTextArea(text => text.setValue(options.ignorePatterns.join("\n")).onChange(async value => { options.ignorePatterns = value.split(/\r?\n/).map(line => line.trim()).filter(Boolean); await persist(); }));
+  } else {
+    const row = new Setting(rules).setName("本机额外排除").setDesc("仅影响这台设备，不改云端 .gitignore，排除项不作为删除。");
+    const count = row.controlEl.createSpan({ text: `${options.ignorePatterns.length} 条` });
+    row.addButton(button => button.setIcon("settings").setTooltip("编辑本机额外排除规则").onClick(() => {
+      const modal = new Modal(host.app);
+      modal.onOpen = () => {
+        modal.contentEl.addClass("simple-lightweight-plugin-modal");
+        modal.contentEl.createEl("h2", { text: "本机额外排除" });
+        modal.contentEl.createEl("p", { text: "每行一个目录或通配符，例如 私人目录/。只影响本机，不改云端规则，也不会删除文件。" });
+        const input = modal.contentEl.createEl("textarea", { attr: { "aria-label": "本机额外排除规则", rows: "8" } });
+        input.value = options.ignorePatterns.join("\n");
+        const footer = modal.contentEl.createDiv({ cls: "simple-json-modal-footer" });
+        footer.createEl("button", { text: "取消" }).addEventListener("click", () => modal.close());
+        const confirm = footer.createEl("button", { text: "确认", cls: "mod-cta" });
+        confirm.addEventListener("click", () => void (async () => {
+          const previous = options.ignorePatterns;
+          confirm.disabled = true;
+          options.ignorePatterns = [...new Set(input.value.split(/\r?\n/).map(line => line.trim()).filter(Boolean))];
+          try { await persist(); count.setText(`${options.ignorePatterns.length} 条`); modal.close(); }
+          catch (error) { options.ignorePatterns = previous; new Notice(error instanceof Error ? error.message : String(error)); }
+          finally { confirm.disabled = false; }
+        })());
+      };
+      modal.onClose = () => modal.contentEl.empty();
+      modal.open();
     }));
+  }
   if (guide) root.createEl("h3", { text: "3 · link diff 缓存与路径" });
   if (!guide) {
-    const troubleshooting = settingsSection(root, "故障排查");
-    const confirmation = troubleshooting.createDiv();
-    confirmation.hidden = true;
-    new Setting(troubleshooting).setName("清除所有同步基准并重新配对")
-      .setDesc("重新检查本地与云端文件，预览并确认后通过 GitHub API 逐文件同步。")
-      .addButton(button => button.setButtonText("重新配对").setDisabled(!host.active() || !options.bound)
-        .onClick(() => { confirmation.hidden = false; }));
-    troubleshooting.appendChild(confirmation);
-    confirmation.createEl("p", { text: "将清除全部同步基准、缓存与未完成进度，保留本机和云端实际文件、仓库绑定及同步规则。随后重新检查全库，确认同步范围和处理方式后才写入文件。" });
-    const feedback = confirmation.createEl("p", { attr: { role: "status", "aria-live": "polite" } });
-    const cancel = confirmation.createEl("button", { text: "取消", attr: { type: "button" } });
-    cancel.addEventListener("click", () => { confirmation.hidden = true; });
-    const confirm = confirmation.createEl("button", { text: "确认清除基准并重新配对", attr: { type: "button" } });
-    confirm.addEventListener("click", () => {
-      confirm.disabled = true; cancel.disabled = true;
-      feedback.setText("正在清除基准并检查全库…");
-      void host.reimport().then(() => { confirmation.hidden = true; rerender?.(); })
-        .catch((error: unknown) => { feedback.setText(error instanceof Error ? error.message : String(error)); })
-        .finally(() => { confirm.disabled = false; cancel.disabled = false; });
-    });
+    for (const row of Array.from(root.querySelectorAll<HTMLElement>(".setting-item"))) {
+      const desc = row.querySelector<HTMLElement>(".setting-item-description");
+      if (desc?.textContent) row.title = desc.textContent;
+    }
   }
 }

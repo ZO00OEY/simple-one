@@ -1,0 +1,24 @@
+import assert from "node:assert/strict";
+import { build } from "esbuild";
+
+const output = await build({ entryPoints: ["src/features/templateImportMerge.ts"], bundle: true, format: "esm", write: false });
+const { mergeSiteImports, mergeTemplateImports } = await import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString("base64")}`);
+const site = { id: "one", name: "Site", urlPattern: "example.com", fields: [{ id: "field-one", fieldName: "Title", source: "title", regex: "", replaceWith: "" }] };
+const sites = structuredClone([site]);
+const duplicate = { ...structuredClone(site), id: "other", fields: [{ ...site.fields[0], id: "other-field" }] };
+assert.deepEqual(mergeSiteImports(sites, [duplicate]), { added: 0, updated: 0, skipped: 1 });
+assert.deepEqual(mergeSiteImports(sites, [{ ...duplicate, bodySuffix: "new" }]), { added: 0, updated: 1, skipped: 0 });
+assert.equal(sites[0].id, "one", "Updating a matching rule retains its local ID");
+assert.deepEqual(mergeSiteImports(sites, [{ ...site, id: "new-site", name: "Second", urlPattern: "second.com" }]), { added: 1, updated: 0, skipped: 0 });
+const template = { id: "template", name: "Notes", outputFolder: "Notes", filenameField: "Title", propertyFields: ["Title"], siteRules: [site] };
+const templates = structuredClone([template]);
+assert.deepEqual(mergeTemplateImports(templates, [{ ...structuredClone(template), id: "new-template", siteRules: [duplicate] }]), { added: 0, updated: 0, skipped: 1 });
+const imported = { ...structuredClone(template), id: "different", outputFolder: "Updated", siteRules: [{ ...site, id: "two", name: "Second", urlPattern: "second.com" }] };
+assert.deepEqual(mergeTemplateImports(templates, [imported]), { added: 0, updated: 1, skipped: 0 });
+assert.equal(templates[0].id, "template");
+assert.equal(templates[0].siteRules.length, 2, "Partial imports must retain existing websites");
+assert.deepEqual(mergeTemplateImports(templates, [imported]), { added: 0, updated: 0, skipped: 1 }, "Repeated full imports are idempotent");
+const empty = [];
+assert.deepEqual(mergeTemplateImports(empty, [template, template]), { added: 1, updated: 0, skipped: 1 });
+assert.equal(template.siteRules.length, 1, "Incoming objects are not mutated");
+console.log("Template import merge: semantic deduplication, updates, repeated imports and local-rule preservation passed.");

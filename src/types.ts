@@ -111,12 +111,17 @@ export interface TypographySettings {
 }
 
 export interface SimplePluginSettings {
+  showSyncSharingEntry: boolean;
+  showCalendarDiaryEntry: boolean;
+  displayParameterSwitches: {
+    desktop: Partial<Record<DisplayParameter, boolean>>;
+    mobile: Partial<Record<DisplayParameter, boolean>>;
+  };
   desktopTypography: TypographySettings;
   autoProcessPaste: boolean;
   autoProcessObsidian: boolean;
   autoProcessPastedTextLinks: boolean;
-  plainTextPasteSkipsSingleLinkProcessing: boolean;
-  plainTextPasteSkipsContentLinkScan: boolean;
+  extractLinkTitle: boolean;
   enableTemplateFill: boolean;
   enableTemplateFillAction: boolean;
   showEmptySearchGroups: boolean;
@@ -138,11 +143,14 @@ export interface SimplePluginSettings {
   enableImageZoom: boolean;
   enableInlineCodeCopy: boolean;
   enableHtmlPreview: boolean;
+  enableTextDisplayReplacement: boolean;
   enableReadableCustomTags: boolean;
   themeFormatting: ThemeFormattingSettings;
   enableNotionColumns: boolean;
   enableNotionColumnsMouseGesture: boolean;
   enableNotionColumnsContextMenu: boolean;
+  notionColumnsContextMenuPosition: "main" | "insert";
+  enableNotionColumnsKeyboard: boolean;
   htmlPreviewRules: HtmlPreviewRule[];
   enhancements: EnhancementSettings;
   diary: DiarySettings;
@@ -152,8 +160,13 @@ export interface SimplePluginSettings {
   templateCategories: TemplateCategory[];
 }
 
+export type DisplayParameter = "readableLineWidth" | "imageMaxHeight" | "popupWindowScale" | "headerButtonSize"
+  | "fontSize" | "lineHeight" | "letterSpacing" | "paragraphSpacing";
+
 export interface SearchFolderSettings {
   enabled: boolean;
+  includeEnabled?: boolean;
+  excludeEnabled?: boolean;
   includeFolders: string[];
   excludeFolders: string[];
   /** Legacy fields kept only for settings migration. */
@@ -182,6 +195,7 @@ export interface HtmlPreviewRule {
   pattern: string;
   flags: string;
   replaceWith: string;
+  sampleText?: string;
 }
 
 export type QuickCopyLinkMode = "obsidian-url" | "absolute-path" | "navigator-folder-absolute-path";
@@ -294,6 +308,8 @@ export interface DiarySettings {
   showQuarter: boolean;
   showYearCalendar: boolean;
   carryUnfinishedTasks: boolean;
+  createDiaryOnDateClick?: boolean;
+  autoRemindersEnabled?: boolean;
   carryFromPreviousDays: number;
   reminderTargetMode: "heading" | "callout";
   tipsHeading: string;
@@ -687,12 +703,14 @@ function makeSolarTermAnniversary(
 }
 
 export const DEFAULT_SETTINGS: SimplePluginSettings = {
+  showSyncSharingEntry: true,
+  showCalendarDiaryEntry: true,
+  displayParameterSwitches: { desktop: {}, mobile: {} },
   desktopTypography: { enabled: true, fontSize: 15, lineHeight: 1.7, letterSpacing: 0, paragraphSpacing: 0.8, paragraphStyle: "spaced" },
   autoProcessPaste: true,
   autoProcessObsidian: true,
   autoProcessPastedTextLinks: false,
-  plainTextPasteSkipsSingleLinkProcessing: true,
-  plainTextPasteSkipsContentLinkScan: false,
+  extractLinkTitle: true,
   enableTemplateFill: true,
   enableTemplateFillAction: true,
   showEmptySearchGroups: false,
@@ -707,6 +725,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   enableImageZoom: true,
   enableInlineCodeCopy: true,
   enableHtmlPreview: true,
+  enableTextDisplayReplacement: true,
   enableReadableCustomTags: true,
   themeFormatting: {
     boldColor: "",
@@ -719,6 +738,8 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   enableNotionColumns: true,
   enableNotionColumnsMouseGesture: true,
   enableNotionColumnsContextMenu: true,
+  notionColumnsContextMenuPosition: "main",
+  enableNotionColumnsKeyboard: true,
   htmlPreviewRules: [],
   enhancements: {
     quickCopyLink: {
@@ -783,6 +804,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
     showQuarter: true,
     showYearCalendar: true,
     carryUnfinishedTasks: true,
+    createDiaryOnDateClick: true,
     carryFromPreviousDays: 1,
     reminderTargetMode: "callout",
     tipsHeading: "#### 小贴士",
@@ -828,6 +850,8 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   },
   searchFolders: {
     enabled: true,
+    includeEnabled: true,
+    excludeEnabled: true,
     includeFolders: [],
     excludeFolders: [],
   },

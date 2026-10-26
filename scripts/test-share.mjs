@@ -984,16 +984,26 @@ try {
     assert.equal(moves[1].directory, '公开/旧/新建文件夹');
     delete globalThis.shareModalElements; popup.remove();
     ui.manifest.enabled = false; ui.renderSettings(rootEl, false, false);
-    assert.deepEqual([...rootEl.querySelectorAll(".simple-section-title")].map(title => title.textContent), ["分享库管理", "分享模板"]);
-    assert.equal([...rootEl.querySelectorAll('button')].filter(button => button.textContent === '管理').length, 1);
+    assert.deepEqual([...rootEl.querySelectorAll("fieldset > legend")].map(title => title.textContent), ["分享管理", "分享库管理"]);
+    assert.equal(rootEl.querySelectorAll('button[title^="管理分享库："]').length, 1);
+    assert(rootEl.querySelector('button[title="管理分享模板"]'), 'template manager remains accessible while disabled');
+    assert.equal(rootEl.querySelectorAll('.simple-share-library-add button[data-icon="plus"]').length, 1);
     assert(![...rootEl.querySelectorAll('button')].some(button => button.textContent === '删除记录'), 'delete action is inside library management');
-    assert(rootEl.querySelector(".simple-share-settings-dependent").classList.contains("is-disabled"));
-    assert.equal(rootEl.querySelector(".simple-share-settings-dependent").inert, true, "dependent controls are disabled as a group");
+    assert([...rootEl.querySelectorAll("select")].slice(1).every(select => select.disabled), "template and path edits are disabled while sharing is off");
     assert(!rootEl.textContent.includes("默认分享库"));
     assert(!rootEl.textContent.includes("当前分享用仓库"));
     assert(!rootEl.textContent.includes("当前部署状态"));
     assert(!rootEl.querySelector(".simple-share-preview-area"));
     assert(!rootEl.textContent.includes("分享预览"));
+    const templatePopup = dom.window.document.body.createDiv();
+    globalThis.shareModalElements = () => ({ titleEl: templatePopup.createDiv(), contentEl: templatePopup.createDiv() });
+    rootEl.querySelector('button[title="管理分享模板"]').click();
+    assert.deepEqual([...templatePopup.querySelectorAll('button')].map(button => button.dataset.icon), ['upload', 'download', 'rotate-ccw']);
+    assert([...templatePopup.querySelectorAll('button')].every(button => button.disabled), 'template mutations stay disabled while sharing is off');
+    ui.templateMessage = '模板已导入'; ui.renderViews();
+    assert(templatePopup.textContent.includes('模板已导入'), 'open template modal refreshes operation feedback');
+    ui.renderTemplateModal = undefined;
+    delete globalThis.shareModalElements; templatePopup.remove();
     ui.manifest.enabled = true;
     ui.renderSettings(rootEl, false, false);
     const [detailGithub, detailAdapter, detailDomains] = [ui.github, ui.host.app.vault.adapter, ui.edgeone.customDomainsForProject];
@@ -1020,7 +1030,7 @@ try {
         : detailCache.get(path) ?? detailAdapter.read(path),
       write: async (path, content) => { detailCache.set(path, content); },
     };
-    const detailButton = [...rootEl.querySelectorAll('button')].find(button => button.textContent === '管理');
+    const detailButton = rootEl.querySelector('button[title^="管理分享库："]');
     assert(detailButton, 'each library offers a detail entry');
     detailButton.click();
     assert.equal(ui.isLibraryManagementOpen, true);
@@ -1100,7 +1110,7 @@ try {
     edgeArea = 'overseas';
     const callsBeforeCachedOpen = detailCalls.length;
     const domainCallsBeforeCachedOpen = domainCalls;
-    [...rootEl.querySelectorAll('button')].find(button => button.textContent === '管理').click();
+    rootEl.querySelector('button[title^="管理分享库："]').click();
     for (let attempt = 0; rootEl.textContent.includes('正在读取') && attempt < 100; attempt++) await new Promise(resolve => setTimeout(resolve, 0));
     assert(rootEl.textContent.includes('当前仓库为私有，GitHub Pages 不可用。'), 'a later opening shows the saved visibility');
     assert(!rootEl.querySelectorAll('.simple-share-library-detail__section')[1].querySelector('.simple-share-library-detail__notice'), 'overseas-only area has no mainland preview warning');
@@ -1110,7 +1120,7 @@ try {
     ui.manifest.edgeOneDomains = { projectId: 'makers-test-project', domains: [{ domain: 'updated.example.com', status: 'online' }] };
     domainResult = ui.manifest.edgeOneDomains.domains;
     assert.equal(ui.backFromShareLibraryManagement(), true);
-    [...rootEl.querySelectorAll('button')].find(button => button.textContent === '管理').click();
+    rootEl.querySelector('button[title^="管理分享库："]').click();
     for (let attempt = 0; rootEl.textContent.includes('正在读取') && attempt < 100; attempt++) await new Promise(resolve => setTimeout(resolve, 0));
     assert(rootEl.querySelector('a[href="https://updated.example.com"]'), 'the current manifest wins over an older local details cache');
     assert.equal(domainCalls, domainCallsBeforeCachedOpen + 2, 'reopening refreshes the custom domain list');

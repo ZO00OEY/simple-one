@@ -40,18 +40,13 @@ export function registerLinkFilter(plugin: SimplePlugin): void {
         const text = clipboardText.trim();
         if (!text) return;
         const isSingleLink = text.startsWith("obsidian://") || isURL(text);
-        const bypassLinkProcessing = usedPlainTextPasteShortcut && (
-          isSingleLink
-            ? plugin.settings.plainTextPasteSkipsSingleLinkProcessing
-            : plugin.settings.plainTextPasteSkipsContentLinkScan
-        );
-        if (plugin.settings.diary.reformat.autoReformatAfterPaste) {
+        const bypassLinkProcessing = usedPlainTextPasteShortcut;
+        if (plugin.settings.enhancements.currentNoteLinkConverter.enabled && plugin.settings.diary.reformat.autoReformatAfterPaste) {
           evt.preventDefault();
-          const settings = plugin.settings.diary.reformat;
           const shouldProcessLinks = !bypassLinkProcessing && (
             isSingleLink
               ? (text.startsWith("obsidian://") ? plugin.settings.autoProcessObsidian : plugin.settings.autoProcessPaste)
-              : plugin.settings.autoProcessPastedTextLinks || settings.runLinkConversion
+              : plugin.settings.autoProcessPastedTextLinks
           );
           void reformatPastedTextBeforeInsert(
             plugin,
@@ -72,9 +67,6 @@ export function registerLinkFilter(plugin: SimplePlugin): void {
           return;
         }
 
-        if (!plugin.settings.autoProcessPaste) {
-          return;
-        }
         if (!isURL(text)) {
           if (!plugin.settings.autoProcessPastedTextLinks || !hasConvertibleLinks(text)) {
             return;
@@ -88,13 +80,14 @@ export function registerLinkFilter(plugin: SimplePlugin): void {
           }).catch(reportError);
           return;
         }
+        if (!plugin.settings.autoProcessPaste) return;
         evt.preventDefault();
         const url = text;
         const cursor = editor.getCursor();
         const placeholder = `[⏳ 获取标题中...](${url})`;
         editor.replaceRange(placeholder, cursor);
-        void fetchPageTitle(url).then((title) => {
-          const filtered = applyRules(url, title ?? url, plugin.settings.filterRules);
+        void (plugin.settings.extractLinkTitle ? fetchPageTitle(url) : Promise.resolve(null)).then((title) => {
+          const filtered = plugin.settings.extractLinkTitle ? applyRules(url, title ?? url, plugin.settings.filterRules) : url;
           const result = `[${filtered}](${url})`;
           const line = editor.getLine(cursor.line);
           const index = line.indexOf(placeholder);
@@ -197,8 +190,8 @@ export async function convertTextLinks(
 
     let title = titleCache.get(link.url);
     if (title === undefined) {
-      title = await fetchPageTitle(link.url) ?? link.url;
-      title = applyRules(link.url, title, plugin.settings.filterRules);
+      title = plugin.settings.extractLinkTitle ? await fetchPageTitle(link.url) ?? link.url : link.url;
+      if (plugin.settings.extractLinkTitle) title = applyRules(link.url, title, plugin.settings.filterRules);
       titleCache.set(link.url, title);
     }
     replacements.set(link, `[${escapeMarkdownLinkText(title)}](${link.url})`);
@@ -261,7 +254,7 @@ async function reformatPastedTextBeforeInsert(
   const settings = plugin.settings.diary.reformat;
   const from = editor.getCursor("from");
   const to = editor.getCursor("to");
-  let output = applyTextReformatRules(pastedText, settings.formatRules);
+  let output = settings.runFormatReflow ? applyTextReformatRules(pastedText, settings.formatRules) : pastedText;
   if (processLinks && hasConvertibleLinks(output)) {
     output = (await convertTextLinks(plugin, output)).text;
   }
@@ -287,8 +280,8 @@ async function insertFilteredLink(plugin: SimplePlugin, url: string): Promise<vo
   const cursor = editor.getCursor();
   const placeholder = `[⏳ 获取标题中...](${url})`;
   editor.replaceRange(placeholder, cursor);
-  const title = await fetchPageTitle(url);
-  const filtered = applyRules(url, title ?? url, plugin.settings.filterRules);
+  const title = plugin.settings.extractLinkTitle ? await fetchPageTitle(url) : null;
+  const filtered = plugin.settings.extractLinkTitle ? applyRules(url, title ?? url, plugin.settings.filterRules) : url;
   const line = editor.getLine(cursor.line);
   const index = line.indexOf(placeholder);
   if (index !== -1) {

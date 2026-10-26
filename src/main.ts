@@ -42,7 +42,7 @@ import ShareFeature from "./features/share";
 import { reportError } from "./shared/async";
 import { SimpleSettingTab } from "./settings";
 import { normalizePopupScalePercent } from "./shared/popupSizing";
-import { activeDisplayProfile, loadMobileDisplayProfile } from "./shared/displayProfile";
+import { activeDisplayProfile, displayParameterEnabled, loadMobileDisplayProfile } from "./shared/displayProfile";
 import { normalizeTypography } from "./shared/typography";
 import { registerTypography } from "./features/typography";
 import { applySwitchStates, collectSwitchStates, isSharedSwitchPath, mobileSettingsForSave, type SwitchStates } from "./shared/platformSwitches";
@@ -94,7 +94,9 @@ export default class SimplePlugin extends Plugin {
   refreshSearchFolderControls: () => void = () => {};
   refreshMermaidEnhancements: () => void = () => {};
   refreshQuickFormatActions: () => void = () => {};
+  refreshQuickCopyLinkActions: () => void = () => {};
   refreshReformatActions: () => void = () => {};
+  openReformatSettings: () => void = () => {};
   refreshPopupWindowSizing: () => void = () => {};
   refreshTypography: () => void = () => {};
   private readableLineWidthDocuments = new Set<Document>();
@@ -174,7 +176,7 @@ export default class SimplePlugin extends Plugin {
     registerLinkFilter(this);
 
     // ── Feature 2: 快速笔记 ──
-    if (this.settings.enableTemplateFill) {
+    {
       this.registerView(VIEW_TYPE, (leaf) => new TemplateFillView(leaf, this));
       const ribbon = this.addRibbonIcon(TEMPLATE_FILL_ICON, "快速新建笔记", async () => {
         let input = "";
@@ -184,6 +186,12 @@ export default class SimplePlugin extends Plugin {
         await this.activateTemplateFill(input || undefined);
       });
       ribbon.setAttr("style", "order:999;");
+      ribbon.hidden = !this.settings.enableTemplateFill;
+      const refresh = registerTemplateFillAction(this);
+      this.refreshTemplateFillActions = () => {
+        ribbon.hidden = !this.settings.enableTemplateFill;
+        refresh();
+      };
     }
 
     // ── Feature 3: 颜色代码预览 ──
@@ -193,13 +201,13 @@ export default class SimplePlugin extends Plugin {
     this.registerEditorExtension(
       htmlPreviewExtension(
         () => this.settings.enableHtmlPreview,
-        () => this.settings.htmlPreviewRules
+        () => this.displayReplacementRules()
       )
     );
     this.registerRenderedPreviewObservers();
     this.registerMarkdownPostProcessor((el) => {
       this.decorateCustomTags(el);
-      refreshRenderedHtmlPreviews(el, this.settings.enableHtmlPreview, this.settings.htmlPreviewRules);
+      refreshRenderedHtmlPreviews(el, this.settings.enableHtmlPreview, this.displayReplacementRules());
     });
 
     // ── Feature 4: 日记 ──
@@ -215,10 +223,9 @@ export default class SimplePlugin extends Plugin {
     registerImageZoom(this);
     registerNotionColumns(this);
     this.refreshMermaidEnhancements = registerMermaidEnhancer(this);
-    this.refreshTemplateFillActions = registerTemplateFillAction(this);
     registerNewNoteDefaults(this);
     registerNoteFilenameFilter(this);
-    registerQuickCopyLink(this);
+    this.refreshQuickCopyLinkActions = registerQuickCopyLink(this);
     this.refreshQuickFormatActions = registerQuickFormat(this);
     this.refreshReformatActions = registerCurrentNoteLinkConverter(this);
     this.refreshSearchFolderControls = registerSearchFolderFilter(this);
@@ -257,6 +264,7 @@ export default class SimplePlugin extends Plugin {
     if (!this.isMobile) return;
     const body = document.body;
     const profile = loadMobileDisplayProfile(this.settings.mobileDisplay);
+    if (!displayParameterEnabled(this.settings, true, "headerButtonSize")) profile.headerButtonSize = "";
     body.classList.toggle("simple-mobile-header-size", !!profile.headerButtonSize);
     if (profile.headerButtonSize) body.style.setProperty("--simple-mobile-header-button-size", `${profile.headerButtonSize}px`);
     else body.style.removeProperty("--simple-mobile-header-button-size");
@@ -303,7 +311,9 @@ export default class SimplePlugin extends Plugin {
     const loadedSearchFolders = data?.searchFolders;
     const legacySearchFolders = normalizeSearchFolders(loadedSearchFolders?.folders);
     this.settings.searchFolders = {
-      enabled: loadedSearchFolders?.enabled ?? DEFAULT_SETTINGS.searchFolders.enabled,
+      enabled: true,
+      includeEnabled: loadedSearchFolders?.includeEnabled ?? true,
+      excludeEnabled: loadedSearchFolders?.excludeEnabled ?? true,
       includeFolders: Array.isArray(loadedSearchFolders?.includeFolders)
         ? normalizeSearchFolders(loadedSearchFolders.includeFolders)
         : loadedSearchFolders?.mode === "include" ? legacySearchFolders : [],
@@ -316,10 +326,6 @@ export default class SimplePlugin extends Plugin {
     this.settings.autoProcessPaste = enableUrlPaste;
     this.settings.autoProcessObsidian = enableUrlPaste;
     this.settings.autoProcessPastedTextLinks = data?.autoProcessPastedTextLinks ?? DEFAULT_SETTINGS.autoProcessPastedTextLinks;
-    this.settings.plainTextPasteSkipsSingleLinkProcessing =
-      data?.plainTextPasteSkipsSingleLinkProcessing ?? DEFAULT_SETTINGS.plainTextPasteSkipsSingleLinkProcessing;
-    this.settings.plainTextPasteSkipsContentLinkScan =
-      data?.plainTextPasteSkipsContentLinkScan ?? DEFAULT_SETTINGS.plainTextPasteSkipsContentLinkScan;
     this.settings.imageMaxHeight = normalizeImageMaxHeight(data?.imageMaxHeight);
     this.settings.readableLineWidth = normalizeReadableLineWidth(data?.readableLineWidth);
     this.settings.desktopTypography = normalizeTypography(data?.desktopTypography);
@@ -328,9 +334,14 @@ export default class SimplePlugin extends Plugin {
       DEFAULT_SETTINGS.popupWindowScale
     );
     this.settings.mobileDisplay = loadMobileDisplayProfile(data?.mobileDisplay);
+    this.settings.displayParameterSwitches = {
+      desktop: { ...data?.displayParameterSwitches?.desktop },
+      mobile: { ...data?.displayParameterSwitches?.mobile },
+    };
     this.settings.enableMermaidEnhancer = data?.enableMermaidEnhancer ?? DEFAULT_SETTINGS.enableMermaidEnhancer;
     this.settings.enableImageZoom = data?.enableImageZoom ?? DEFAULT_SETTINGS.enableImageZoom;
     this.settings.enableHtmlPreview = data?.enableHtmlPreview ?? DEFAULT_SETTINGS.enableHtmlPreview;
+    this.settings.enableTextDisplayReplacement = data?.enableTextDisplayReplacement ?? DEFAULT_SETTINGS.enableTextDisplayReplacement;
     this.settings.enableReadableCustomTags = data?.enableReadableCustomTags ?? DEFAULT_SETTINGS.enableReadableCustomTags;
     this.settings.themeFormatting = {
       ...DEFAULT_SETTINGS.themeFormatting,
@@ -405,6 +416,10 @@ export default class SimplePlugin extends Plugin {
     });
   }
 
+  private displayReplacementRules() {
+    return this.settings.enableTextDisplayReplacement ? this.settings.htmlPreviewRules : [];
+  }
+
   refreshHtmlPreviews(): void {
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       if (!(leaf.view instanceof MarkdownView)) continue;
@@ -412,7 +427,7 @@ export default class SimplePlugin extends Plugin {
         cm?: { dispatch: (spec: unknown) => void };
       }).cm;
       editorView?.dispatch({ effects: refreshHtmlPreview.of() });
-      refreshRenderedHtmlPreviews(leaf.view.containerEl, this.settings.enableHtmlPreview, this.settings.htmlPreviewRules);
+      refreshRenderedHtmlPreviews(leaf.view.containerEl, this.settings.enableHtmlPreview, this.displayReplacementRules());
     }
   }
 
@@ -430,13 +445,14 @@ export default class SimplePlugin extends Plugin {
     if (!targetDoc) this.app.workspace.iterateAllLeaves((leaf) => docs.add(leaf.getContainer().doc));
     const formats = [
       ["boldColor", "simple-format-bold-color", "--simple-format-bold-color"],
-      ["boldWeight", "simple-format-bold-weight", "--simple-format-bold-weight"],
       ["italicColor", "simple-format-italic-color", "--simple-format-italic-color"],
       ["highlightBackground", "simple-format-highlight-background", "--simple-format-highlight-background"],
       ["highlightColor", "simple-format-highlight-color", "--simple-format-highlight-color"],
       ["strikethroughColor", "simple-format-strikethrough-color", "--simple-format-strikethrough-color"],
     ] as const;
     for (const doc of docs) {
+      doc.body.classList.remove("simple-format-bold-weight");
+      doc.body.style.removeProperty("--simple-format-bold-weight");
       for (const [key, className, property] of formats) {
         const value = this.settings.themeFormatting[key].trim();
         doc.body.classList.toggle(className, !!value);
@@ -453,18 +469,13 @@ export default class SimplePlugin extends Plugin {
 
   applyReadableLineWidth(doc: Document = document): void {
     this.readableLineWidthDocuments.add(doc);
-    const width = this.isMobile
-      ? loadMobileDisplayProfile(this.settings.mobileDisplay).readableLineWidth
-      : normalizeReadableLineWidth(this.displaySettings.readableLineWidth);
+    const width = this.displaySettings.readableLineWidth;
     if (width) doc.body.style.setProperty("--file-line-width", `${width}px`);
     else doc.body.style.removeProperty("--file-line-width");
   }
 
   applyImageHeightLimit(): void {
-    const height = this.isMobile
-      ? loadMobileDisplayProfile(this.settings.mobileDisplay).imageMaxHeight
-      : normalizeImageMaxHeight(this.displaySettings.imageMaxHeight);
-    this.displaySettings.imageMaxHeight = height;
+    const height = this.displaySettings.imageMaxHeight;
     document.body.classList.toggle("simple-limit-image-height", height !== "");
     if (height) {
       document.body.style.setProperty("--simple-image-max-height", `${height}px`);
@@ -505,7 +516,7 @@ export default class SimplePlugin extends Plugin {
         observers.set(view, {
           root,
           color: observeRenderedColorPreviews(root, () => this.settings.enableColorPreview),
-          html: observeRenderedHtmlPreviews(root, () => this.settings.enableHtmlPreview, () => this.settings.htmlPreviewRules),
+          html: observeRenderedHtmlPreviews(root, () => this.settings.enableHtmlPreview, () => this.displayReplacementRules()),
         });
       });
 
@@ -620,6 +631,7 @@ function normalizeSearchFolders(value: unknown): string[] {
 
 function normalizeDiarySettings(settings: SimplePluginSettings, data: LoadedSettings | null): void {
   settings.diary = Object.assign({}, DEFAULT_SETTINGS.diary, data?.diary);
+  settings.diary.reminderTargetMode = "callout";
   settings.diary.dateManagement = {
     anniversaries: {
       ...DEFAULT_SETTINGS.diary.dateManagement.anniversaries,

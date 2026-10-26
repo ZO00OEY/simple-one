@@ -12,6 +12,23 @@ async function load(path) {
   return module.exports;
 }
 const { normalizeTypography, TYPOGRAPHY_DEFAULTS, isStandaloneBoldLine } = await load("src/shared/typography.ts");
+const { activeDisplayProfile, displayParameterEnabled } = await load("src/shared/displayProfile.ts");
+const { DEFAULT_SETTINGS } = await load("src/types.ts");
+const displaySettings = structuredClone(DEFAULT_SETTINGS);
+assert.equal(displayParameterEnabled(displaySettings, false, "readableLineWidth"), true);
+assert.equal(displayParameterEnabled(displaySettings, true, "readableLineWidth"), false);
+assert.equal(displayParameterEnabled(displaySettings, true, "popupWindowScale"), false);
+assert.equal(displayParameterEnabled(displaySettings, true, "headerButtonSize"), true);
+displaySettings.displayParameterSwitches.desktop.readableLineWidth = false;
+assert.equal(activeDisplayProfile(displaySettings, false).readableLineWidth, "");
+assert.equal(displaySettings.readableLineWidth, "900");
+displaySettings.displayParameterSwitches.desktop.readableLineWidth = true;
+assert.equal(activeDisplayProfile(displaySettings, false).readableLineWidth, "900");
+displaySettings.mobileDisplay.imageMaxHeight = "300";
+displaySettings.displayParameterSwitches.mobile.imageMaxHeight = false;
+assert.equal(activeDisplayProfile(displaySettings, true).imageMaxHeight, "");
+assert.equal(displaySettings.mobileDisplay.imageMaxHeight, "300");
+assert.equal(activeDisplayProfile(displaySettings, false).imageMaxHeight, "450");
 assert.equal(isStandaloneBoldLine("**队友设计**"), true);
 assert.equal(isStandaloneBoldLine("  __独立标题__  "), true);
 assert.equal(isStandaloneBoldLine("**女酒鬼剧情线完成度最高。**后面继续正文。"), false);
@@ -25,6 +42,9 @@ assert.equal(normalizeTypography({ paragraphStyle: "invalid" }).paragraphStyle, 
 
 const dom = new JSDOM("<html><head></head><body></body></html>");
 globalThis.document = dom.window.document;
+dom.window.HTMLElement.prototype.setCssProps = function (properties) {
+  for (const [key, value] of Object.entries(properties)) this.style.setProperty(key, value);
+};
 const { registerTypography, paragraphDecorations, decorateRenderedLineIndents } = await load("src/features/typography.ts");
 const state = EditorState.create({ doc: "第一段\n接续文字\n\n第二段\n\n# 标题\n\n- 列表\n\n> 引用" });
 const decorations = paragraphDecorations({ state, visibleRanges: [{ from: 0, to: state.doc.length }] });
@@ -97,6 +117,14 @@ plugin.settings.desktopTypography.paragraphStyle = "spaced";
 plugin.settings.desktopTypography.enabled = true;
 refresh();
 assert.ok(enabled());
+plugin.settings.displayParameterSwitches = { desktop: { fontSize: false, paragraphSpacing: false }, mobile: {} };
+refresh();
+assert.equal(document.body.classList.contains("simple-typography-font-size"), false);
+assert.equal(document.body.classList.contains("simple-typography-paragraph-spacing"), false);
+assert.equal(document.body.classList.contains("simple-typography-line-height"), true);
+assert.equal(document.body.style.getPropertyValue("--simple-typography-font-size"), "");
+assert.equal(document.body.style.getPropertyValue("--simple-typography-line-height"), "1.7");
+assert.equal(plugin.settings.desktopTypography.fontSize, 15);
 const second = new JSDOM("<html><head></head><body></body></html>");
 events["window-open"]({ doc: second.window.document });
 assert.ok(enabled(second.window.document));

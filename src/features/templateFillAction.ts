@@ -9,7 +9,7 @@ export function registerTemplateFillAction(plugin: SimplePlugin): () => void {
   return registerMarkdownAction(
     plugin,
     ACTION_ATTR,
-    () => plugin.settings.enableTemplateFill && plugin.settings.enableTemplateFillAction,
+    () => plugin.settings.enableTemplateFill,
     (view) => {
       const action = view.addAction(TEMPLATE_FILL_ICON, "快速新建笔记", async () => {
         const text = (await navigator.clipboard.readText()).trim();

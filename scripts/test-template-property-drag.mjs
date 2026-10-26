@@ -1,0 +1,54 @@
+import assert from "node:assert/strict";
+import { build } from "esbuild";
+import { JSDOM } from "jsdom";
+
+const output = await build({ entryPoints: ["src/features/templatePropertyDrag.ts"], bundle: true, format: "esm", write: false });
+const { registerTemplatePropertyDrag } = await import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString("base64")}`);
+const { window } = new JSDOM("<div id='list'></div>");
+const list = window.document.querySelector("#list");
+const properties = ["Title", "Author", "Summary"];
+let clicks = 0;
+for (const property of properties) {
+  const row = window.document.createElement("div");
+  row.className = "simple-template-property-tag";
+  row.dataset.property = property;
+  row.getBoundingClientRect = () => ({ top: Array.from(list.children).indexOf(row) * 50, height: 50 });
+  const button = row.appendChild(window.document.createElement("button"));
+  button.addEventListener("click", () => clicks++);
+  list.appendChild(row);
+}
+const cleanup = registerTemplatePropertyDrag(list, properties);
+const first = list.firstElementChild.firstElementChild;
+const pointer = (target, type, y = 10, x = 10) => {
+  const event = new window.Event(type, { bubbles: true, cancelable: true });
+  Object.assign(event, { button: 0, pointerId: 1, pointerType: "mouse", clientX: x, clientY: y });
+  target.dispatchEvent(event);
+};
+const hold = () => new Promise(resolve => setTimeout(resolve, 230));
+pointer(first, "pointerdown");
+pointer(window.document, "pointerup");
+first.click();
+assert.equal(clicks, 1, "A short click retains filename selection");
+pointer(first, "pointerdown");
+await hold();
+pointer(window.document, "pointermove", 140);
+assert.deepEqual(properties, ["Author", "Summary", "Title"], "Draft changes before releasing pointer");
+assert.deepEqual(Array.from(list.children, row => row.dataset.property), properties, "Visible preview matches draft");
+pointer(window.document, "pointerup", 140);
+first.click();
+assert.equal(clicks, 1, "Dragging must not select a different filename");
+pointer(first, "pointerdown", 140);
+await hold();
+pointer(window.document, "pointermove", 0);
+pointer(window.document, "pointercancel", 0);
+assert.deepEqual(properties, ["Author", "Summary", "Title"], "Cancelled drag restores its starting order");
+pointer(first, "pointerdown", 140);
+pointer(window.document, "pointermove", 130, 45);
+assert.equal(window.document.querySelector(".simple-template-property-drag-ghost").style.transform, "translate(35px, -10px)", "Mouse movement activates immediately and ghost follows both axes");
+pointer(window.document, "pointerup", 130, 45);
+assert.equal(window.document.querySelector(".simple-template-property-drag-ghost"), null, "Releasing removes the floating preview");
+pointer(first, "pointerdown");
+cleanup();
+await hold();
+assert.equal(list.querySelector(".is-dragging"), null, "Closing modal clears pending long press");
+console.log("Template property drag: click, live reorder, click suppression, cancellation and cleanup passed.");

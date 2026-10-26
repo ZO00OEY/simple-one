@@ -130,7 +130,7 @@ assert.equal(
   gitError.describeGitError("fatal: unable to access repository: schannel: SSL/TLS connection failed"),
   "与 GitHub 网络连接失败：fatal: unable to access repository: schannel: SSL/TLS connection failed"
 );
-const uncertainAuth = "X Failed to log in to github.com account ZO00OEY (keyring)\n- The token in keyring is invalid.";
+const uncertainAuth = "X Failed to log in to github.com account example-user (keyring)\n- The token in keyring is invalid.";
 assert.equal(gitError.isUncertainGitAuthError(uncertainAuth), true);
 assert.match(gitError.describeGitError(uncertainAuth), /^GitHub 认证状态检查失败（暂不能确认 Token 已失效/);
 assert.equal(gitError.isUncertainGitAuthError("remote: Invalid username or password."), false);
@@ -141,7 +141,7 @@ assert.equal(
   "认证失败：remote: Repository not found"
 );
 assert.equal(gitError.describeGitError("fatal: bad revision"), "fatal: bad revision");
-for (const lockPath of ["P:/Obsidian/.git/index.lock", "P:\\Obsidian\\.git\\index.lock", "/vault/.git/index.lock"]) {
+for (const lockPath of ["C:/ExampleVault/.git/index.lock", "C:\\ExampleVault\\.git\\index.lock", "/vault/.git/index.lock"]) {
   const raw = `fatal: Unable to create '${lockPath}': File exists. Another git process seems to be running in this repository.`;
   const translated = gitError.describeGitError(new Error(raw));
   assert(translated.includes(lockPath));
