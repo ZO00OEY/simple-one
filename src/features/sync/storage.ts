@@ -2,6 +2,8 @@ import type { App, DataAdapter } from "obsidian";
 
 const localPath = (configDir: string, pluginId: string) => `${configDir}/plugins/${pluginId}/sync-local.json`;
 const apiWrites = new WeakMap<DataAdapter, Promise<void>>();
+export type SyncSecrets = { getSecret(id: string): string | null; setSecret(id: string, value: string): void };
+const tokenKey = (pluginId: string, deviceId: string) => `${pluginId}-sync-github-${deviceId}`;
 export async function readApiLocal(adapter: DataAdapter, configDir: string, pluginId: string): Promise<Record<string, unknown>> {
   const path = `${configDir}/plugins/${pluginId}/sync-api-local.json`;
   for (const candidate of [path, path + ".recovery"]) {
@@ -31,11 +33,17 @@ function readObject(text: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-export async function readLocalSyncSettings(adapter: DataAdapter, configDir: string, pluginId: string): Promise<unknown> {
+export async function readLocalSyncSettings(adapter: DataAdapter, configDir: string, pluginId: string, secrets?: SyncSecrets): Promise<unknown> {
   const path = localPath(configDir, pluginId);
   const local = await adapter.exists(path) ? readObject(await adapter.read(path)) : {};
   const api = await readApiLocal(adapter, configDir, pluginId);
   if (api.settings && typeof api.settings === "object") Object.assign(local, api.settings);
+  const secretKey = typeof local.mobileTokenSecretId === "string" ? local.mobileTokenSecretId
+    : typeof local.deviceId === "string" ? tokenKey(pluginId, local.deviceId) : "";
+  if (secrets && secretKey && local.mobile && typeof local.mobile === "object") {
+    const token = secrets.getSecret(secretKey);
+    if (token !== null) local.mobile = { ...local.mobile, token };
+  }
   const logPath = `${configDir}/plugins/${pluginId}/sync-log.json`;
   if (await adapter.exists(logPath)) {
     const logs = readObject(await adapter.read(logPath));
@@ -44,10 +52,20 @@ export async function readLocalSyncSettings(adapter: DataAdapter, configDir: str
   return Object.keys(local).length ? local : null;
 }
 
-export async function writeLocalSyncSettings(adapter: DataAdapter, configDir: string, pluginId: string, value: unknown): Promise<void> {
+export async function writeLocalSyncSettings(adapter: DataAdapter, configDir: string, pluginId: string, value: unknown, secrets?: SyncSecrets): Promise<void> {
   const settings = { ...(value as Record<string, unknown>) };
+  if (secrets && typeof settings.deviceId === "string" && settings.mobile && typeof settings.mobile === "object") {
+    const mobile = settings.mobile as Record<string, unknown>;
+    const token = typeof mobile.token === "string" ? mobile.token : "";
+    const key = tokenKey(pluginId, settings.deviceId);
+    if ((secrets.getSecret(key) ?? "") !== token) secrets.setSecret(key, token);
+    if ((secrets.getSecret(key) ?? "") !== token) throw new Error("GitHub Token 未能保存到 Secret Storage，已保留原配置。");
+    // Store the secret first. Only then replace primary/recovery JSON with sanitized settings.
+    settings.mobile = { ...mobile, token: "" };
+    settings.mobileTokenSecretId = key;
+  }
   const apiSettings: Record<string, unknown> = {};
-  for (const key of ["mobile", "mobileSyncEnabled", "lightweightGuideProgress"]) {
+  for (const key of ["mobile", "mobileSyncEnabled", "lightweightGuideProgress", "mobileTokenSecretId"]) {
     if (settings[key] !== undefined) apiSettings[key] = settings[key];
     delete settings[key];
   }

@@ -1,4 +1,5 @@
 import { confirmAction } from "../shared/confirm";
+import { styleActionFooter } from "../shared/actionButton";
 import { Modal, Notice, TFile, TFolder, normalizePath } from "obsidian";
 import type SimplePlugin from "../main";
 import { applyModalScale, getMainAppWindow } from "../shared/popupSizing";
@@ -487,19 +488,38 @@ async function ensureFolder(plugin: SimplePlugin, path: string): Promise<void> {
   }
 }
 
+function attachmentModalHeader(modal: Modal, plugin: SimplePlugin, title: string, description: string, rename = false): void {
+  modal.modalEl.addClass("simple-attachment-modal");
+  if (rename) modal.modalEl.addClass("simple-rename-modal");
+  applyModalScale(modal.modalEl, plugin.displaySettings.popupWindowScale, getMainAppWindow(plugin.app));
+  modal.contentEl.empty();
+  modal.contentEl.createEl("h2", { text: title });
+  modal.contentEl.createDiv({ cls: "setting-item-description", text: description });
+}
+
+function attachmentModalActions<T extends { checked: boolean }>(modal: Modal, items: T[], title: string, apply: () => Promise<void>): void {
+  const actions = modal.contentEl.createDiv({ cls: "simple-json-actions simple-json-modal-footer" });
+  actions.createEl("button", { text: "全选" }).addEventListener("click", () => setChecked(modal.contentEl, items, true));
+  actions.createEl("button", { text: "反选" }).addEventListener("click", () => invertChecked(modal.contentEl, items));
+  actions.createEl("button", { text: "取消" }).addEventListener("click", () => modal.close());
+  const execute = actions.createEl("button", { text: title, cls: title.startsWith("删除") ? "mod-warning" : "mod-cta" });
+  execute.addEventListener("click", () => {
+    execute.disabled = true;
+    void apply().catch(error => new Notice(error instanceof Error ? error.message : String(error)))
+      .finally(() => { execute.disabled = false; });
+  });
+  styleActionFooter(actions);
+}
+
 class UnusedAttachmentModal extends Modal {
   constructor(private plugin: SimplePlugin, private items: UnusedAttachment[]) {
     super(plugin.app);
   }
 
   onOpen(): void {
-    this.modalEl.addClass("simple-attachment-modal");
-    applyModalScale(this.modalEl, this.plugin.displaySettings.popupWindowScale, getMainAppWindow(this.plugin.app));
-    this.contentEl.empty();
-    this.contentEl.createEl("h2", { text: "未引用附件" });
-    this.contentEl.createDiv({ cls: "setting-item-description", text: "附件目录内的图片默认勾选；根目录图片及 JSON、txt 等非图片默认不勾选。确认后删除到 Obsidian 回收站。" });
+    attachmentModalHeader(this, this.plugin, "未引用附件", "附件目录内的图片默认勾选；根目录图片及 JSON、txt 等非图片默认不勾选。确认后删除到 Obsidian 回收站。");
     renderChecklist(this.contentEl, this.items, (item) => item.file.path);
-    this.renderActions(async () => {
+    attachmentModalActions(this, this.items, "删除勾选项", async () => {
       const selected = this.items.filter((item) => item.checked);
       if (!selected.length) return;
       if (!await confirmAction(this.plugin.app, `删除选中的 ${selected.length} 个未引用附件？`)) return;
@@ -516,16 +536,28 @@ class UnusedAttachmentModal extends Modal {
     });
   }
 
-  private renderActions(onConfirm: () => Promise<void>): void {
-    const actions = this.contentEl.createDiv({ cls: "simple-json-actions" });
-    actions.createEl("button", { text: "全选" }).addEventListener("click", () => {
-      setChecked(this.contentEl, this.items, true);
-    });
-    actions.createEl("button", { text: "反选" }).addEventListener("click", () => {
-      invertChecked(this.contentEl, this.items);
-    });
-    actions.createEl("button", { text: "取消" }).addEventListener("click", () => this.close());
-    actions.createEl("button", { text: "删除勾选项" }).addEventListener("click", () => void onConfirm());
+}
+
+async function applyAttachmentMoves(
+  modal: Modal, plugin: SimplePlugin, plans: RenamePlan[], progress: HTMLElement | null,
+  confirmText: (count: number) => string, completedText: (count: number) => string,
+): Promise<void> {
+  const selected = plans.filter(plan => plan.checked);
+  if (!selected.length || !await confirmAction(plugin.app, confirmText(selected.length))) return;
+  document.body.classList.add("simple-hide-notices");
+  try {
+    for (let index = 0; index < selected.length; index++) {
+      const plan = selected[index];
+      progress?.setText(`处理进度：${index + 1} / ${selected.length}`);
+      await ensureFolder(plugin, plan.targetPath.split("/").slice(0, -1).join("/"));
+      await plugin.app.fileManager.renameFile(plan.file, plan.targetPath);
+    }
+    modal.close();
+    new Notice(completedText(selected.length));
+  } catch (error) {
+    progress?.setText(`处理失败：${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    document.body.classList.remove("simple-hide-notices");
   }
 }
 
@@ -537,40 +569,15 @@ class RenamePlanModal extends Modal {
   }
 
   onOpen(): void {
-    this.modalEl.addClass("simple-attachment-modal", "simple-rename-modal");
-    applyModalScale(this.modalEl, this.plugin.displaySettings.popupWindowScale, getMainAppWindow(this.plugin.app));
-    this.contentEl.empty();
-    this.contentEl.createEl("h2", { text: "图片重命名并按笔记归位清单" });
-    this.contentEl.createDiv({ cls: "setting-item-description", text: "只处理勾选项；执行时会让 Obsidian 更新引用。" });
+    attachmentModalHeader(this, this.plugin, "图片重命名并按笔记归位清单", "只处理勾选项；执行时会让 Obsidian 更新引用。", true);
     renderRenameChecklist(this.contentEl, this.plans);
-    const actions = this.contentEl.createDiv({ cls: "simple-json-actions" });
-    const execute = actions.createEl("button", { text: "执行", cls: "mod-cta" });
-    execute.addEventListener("click", () => {
-      execute.disabled = true;
-      void this.applyPlans().finally(() => { execute.disabled = false; });
-    });
+    attachmentModalActions(this, this.plans, "执行", () => this.applyPlans());
     this.progressEl = this.contentEl.createDiv({ cls: "simple-attachment-progress" });
   }
 
   private async applyPlans(): Promise<void> {
-    const selected = this.plans.filter((plan) => plan.checked);
-    if (!selected.length) return;
-    if (!await confirmAction(this.plugin.app, `重命名/移动选中的 ${selected.length} 张图片？`)) return;
-    document.body.classList.add("simple-hide-notices");
-    try {
-      for (let index = 0; index < selected.length; index++) {
-        const plan = selected[index];
-        if (this.progressEl) this.progressEl.setText(`处理进度：${index + 1} / ${selected.length}`);
-        await ensureFolder(this.plugin, plan.targetPath.split("/").slice(0, -1).join("/"));
-        await this.plugin.app.fileManager.renameFile(plan.file, plan.targetPath);
-      }
-      this.close();
-      new Notice(`已处理 ${selected.length} 张图片`);
-    } catch (error) {
-      if (this.progressEl) this.progressEl.setText(`处理失败：${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      document.body.classList.remove("simple-hide-notices");
-    }
+    await applyAttachmentMoves(this, this.plugin, this.plans, this.progressEl,
+      count => `重命名/移动选中的 ${count} 张图片？`, count => `已处理 ${count} 张图片`);
   }
 }
 
@@ -582,43 +589,15 @@ class AttachmentOrganizationModal extends Modal {
   }
 
   onOpen(): void {
-    this.modalEl.addClass("simple-attachment-modal", "simple-rename-modal");
-    applyModalScale(this.modalEl, this.plugin.displaySettings.popupWindowScale, getMainAppWindow(this.plugin.app));
-    this.contentEl.empty();
-    this.contentEl.createEl("h2", { text: "非图片附件按笔记归位清单" });
-    this.contentEl.createDiv({
-      cls: "setting-item-description",
-      text: "按引用笔记归位至附件目录/笔记所在目录/笔记名；多处引用时采用路径最靠前的笔记。",
-    });
+    attachmentModalHeader(this, this.plugin, "非图片附件按笔记归位清单", "按引用笔记归位至附件目录/笔记所在目录/笔记名；多处引用时采用路径最靠前的笔记。", true);
     renderRenameChecklist(this.contentEl, this.plans);
-    const actions = this.contentEl.createDiv({ cls: "simple-json-actions" });
-    const execute = actions.createEl("button", { text: "执行", cls: "mod-cta" });
-    execute.addEventListener("click", () => {
-      execute.disabled = true;
-      void this.applyPlans().finally(() => { execute.disabled = false; });
-    });
+    attachmentModalActions(this, this.plans, "执行", () => this.applyPlans());
     this.progressEl = this.contentEl.createDiv({ cls: "simple-attachment-progress" });
   }
 
   private async applyPlans(): Promise<void> {
-    const selected = this.plans.filter((plan) => plan.checked);
-    if (!selected.length) return;
-    if (!await confirmAction(this.plugin.app, `将选中的 ${selected.length} 个附件按笔记归位？`)) return;
-    document.body.classList.add("simple-hide-notices");
-    try {
-      for (let index = 0; index < selected.length; index++) {
-        const plan = selected[index];
-        if (this.progressEl) this.progressEl.setText(`处理进度：${index + 1} / ${selected.length}`);
-        await ensureFolder(this.plugin, plan.targetPath.split("/").slice(0, -1).join("/"));
-        await this.plugin.app.fileManager.renameFile(plan.file, plan.targetPath);
-      }
-      this.close();
-      new Notice(`已归位 ${selected.length} 个附件`);
-    } catch (error) {
-      if (this.progressEl) this.progressEl.setText(`处理失败：${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      document.body.classList.remove("simple-hide-notices");
-    }
+    await applyAttachmentMoves(this, this.plugin, this.plans, this.progressEl,
+      count => `将选中的 ${count} 个附件按笔记归位？`, count => `已归位 ${count} 个附件`);
   }
 }
 
@@ -630,21 +609,9 @@ class InlineImagePlanModal extends Modal {
   }
 
   onOpen(): void {
-    this.modalEl.addClass("simple-attachment-modal");
-    applyModalScale(this.modalEl, this.plugin.displaySettings.popupWindowScale, getMainAppWindow(this.plugin.app));
-    this.contentEl.empty();
-    this.contentEl.createEl("h2", { text: "内嵌图片转为附件清单" });
-    this.contentEl.createDiv({ cls: "setting-item-description", text: "把 Markdown 中直接嵌入的 base64 图片保存为独立附件，并替换为 Obsidian 图片链接。" });
+    attachmentModalHeader(this, this.plugin, "内嵌图片转为附件清单", "把 Markdown 中直接嵌入的 base64 图片保存为独立附件，并替换为 Obsidian 图片链接。");
     renderChecklist(this.contentEl, this.plans, (plan) => `${plan.source.path}\n→ ${plan.targetPath}`);
-    const actions = this.contentEl.createDiv({ cls: "simple-json-actions" });
-    actions.createEl("button", { text: "全选" }).addEventListener("click", () => {
-      setChecked(this.contentEl, this.plans, true);
-    });
-    actions.createEl("button", { text: "反选" }).addEventListener("click", () => {
-      invertChecked(this.contentEl, this.plans);
-    });
-    actions.createEl("button", { text: "取消" }).addEventListener("click", () => this.close());
-    actions.createEl("button", { text: "执行勾选项" }).addEventListener("click", () => void this.applyPlans());
+    attachmentModalActions(this, this.plans, "执行勾选项", () => this.applyPlans());
     this.progressEl = this.contentEl.createDiv({ cls: "simple-attachment-progress" });
   }
 

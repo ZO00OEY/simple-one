@@ -1,9 +1,9 @@
 {
   "id": "simple-one",
   "name": "Simple One",
-  "version": "1.0.23",
+  "version": "1.0.24",
   "minAppVersion": "1.7.2",
-  "description": "Format notes, manage diaries and attachments, and streamline links.",
+  "description": "Format and capture notes, manage diaries and attachments, sync vaults, and publish selected notes.",
   "author": "ZO.oEY",
   "isDesktopOnly": false
 }

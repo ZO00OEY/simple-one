@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 const output = await build({ entryPoints: ["src/features/sync/storage.ts"], bundle: true, format: "esm", platform: "node", write: false });
-const { migrateLinkFiles, readLocalSyncSettings, legacySyncRunning, writeApiLocal, readApiLocal } = await import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString("base64")}`);
+const { migrateLinkFiles, readLocalSyncSettings, legacySyncRunning, writeApiLocal, readApiLocal, writeLocalSyncSettings } = await import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString("base64")}`);
 const root = ".custom/plugins/", legacy = root + "simple-link/", current = root + "simple-one/";
 const files = new Map([
   [current + "data.json", JSON.stringify({ diary: { enabled: true }, token: "parent-private" })],
@@ -59,3 +59,36 @@ assert.equal(combined.settings.mobile.token, "local");
 files.set(current + "sync-api-local.json", "broken");
 assert.deepEqual(await readApiLocal(adapter, ".custom", "simple-one"), combined);
 console.log("API local: concurrent settings/state writes and recovery passed");
+
+const secretValues = new Map();
+const secrets = { getSecret: key => secretValues.get(key) ?? null, setSecret: (key, token) => secretValues.set(key, token) };
+const privateSettings = { deviceId: "device-one", mobile: { token: "legacy-token", repoUrl: "https://github.com/example/vault" } };
+await writeLocalSyncSettings(adapter, ".custom", "simple-one", privateSettings, secrets);
+assert.equal(secretValues.get("simple-one-sync-github-device-one"), "legacy-token");
+assert.equal(privateSettings.mobile.token, "legacy-token", "runtime authorization remains available");
+assert.equal((await readApiLocal(adapter, ".custom", "simple-one")).state.base.preserved, true);
+for (const name of ["sync-api-local.json", "sync-api-local.json.recovery", "sync-local.json"]) {
+  assert(!files.get(current + name).includes("legacy-token"), `no plaintext Token in ${name}`);
+}
+assert.equal((await readLocalSyncSettings(adapter, ".custom", "simple-one", secrets)).mobile.token, "legacy-token");
+const beforeSecretFailure = writes.length;
+await assert.rejects(writeLocalSyncSettings(adapter, ".custom", "simple-one", { ...privateSettings, mobile: { token: "new-token" } },
+  { getSecret: () => null, setSecret() { throw new Error("secret unavailable"); } }), /secret unavailable/);
+assert.equal(writes.length, beforeSecretFailure, "failed secret migration does not overwrite local data");
+await assert.rejects(writeLocalSyncSettings(adapter, ".custom", "simple-one", privateSettings,
+  { getSecret: () => null, setSecret() {} }), /Secret Storage/);
+assert.equal(writes.length, beforeSecretFailure, "read-back verification must succeed before JSON writes");
+await writeLocalSyncSettings(adapter, ".custom", "simple-one", { ...privateSettings, mobile: { token: "" } }, secrets);
+assert.equal((await readLocalSyncSettings(adapter, ".custom", "simple-one", secrets)).mobile.token, "");
+console.log("Lightweight Token: Secret Storage migration, recovery scrubbing, state preservation, failure guards and clearing passed.");
+
+// The API-local write may succeed before device settings fail to save.
+const partialFiles = new Map();
+const partialAdapter = { exists: async path => partialFiles.has(path), read: async path => partialFiles.get(path),
+  write: async (path, content) => {
+    if (path.endsWith("/sync-local.json")) throw new Error("device settings failed");
+    partialFiles.set(path, content);
+  } };
+await assert.rejects(writeLocalSyncSettings(partialAdapter, ".custom", "simple-one", privateSettings, secrets), /device settings failed/);
+assert.equal((await readLocalSyncSettings(partialAdapter, ".custom", "simple-one", secrets)).mobile.token, "legacy-token",
+  "the secret ID travels with sanitized API settings so a partial write cannot lose authorization");

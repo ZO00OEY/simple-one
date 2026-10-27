@@ -1,4 +1,6 @@
-import { setDeleteIcon, setActionIcon, styleActionFooter } from "./shared/actionButton";
+import { createActionButton, setDeleteIcon, setActionIcon, styleActionFooter } from "./shared/actionButton";
+import { checkboxRow, checkboxRowIcon } from "./shared/checkboxRow";
+import { settingsFieldset, settingsGroup, settingsHeading, settingsCard } from "./shared/settingsLayout";
 import { DiaryPathSuggest } from "./features/diaryPathSuggest";
 import { SyncSettingsTab } from "./features/sync";
 import { runAsync } from "./shared/async";
@@ -336,7 +338,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   private renderOverview(container: HTMLElement): void {
     for (const group of this.getSettingDefinitions()) {
       if (!("type" in group) || group.type !== "group") continue;
-      this.renderGroup(container, group.heading ?? "", (card) => {
+      settingsGroup(container, group.heading ?? "", (card) => {
         for (const [index, item] of (group.items ?? []).entries()) {
           if (item.name === "显示与预览") continue;
           if ("render" in item && item.render) {
@@ -359,8 +361,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   private renderOverviewInlineSettings(
     container: HTMLElement,
   ): void {
-    const shortcuts = container.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-    shortcuts.createEl("legend", { text: "快捷键" });
+    const shortcuts = settingsFieldset(container, "快捷键");
     const formatRow = this.renderDisplayCheckbox(shortcuts, "格式调整", "启用格式调整快捷操作。",
       this.plugin.settings.enhancements.quickFormat.enabled, async value => {
         this.plugin.settings.enhancements.quickFormat.enabled = value;
@@ -368,12 +369,7 @@ export class SimpleSettingTab extends PluginSettingTab {
         this.plugin.refreshQuickFormatActions();
       });
     formatRow.addClass("simple-shortcut-option");
-    const formatLabel = formatRow.querySelector("label");
-    if (formatLabel) {
-      const icon = createSpan({ cls: "simple-callout-setting-icon" });
-      setIcon(icon, QUICK_FORMAT_ICON);
-      formatLabel.insertBefore(icon, formatLabel.lastElementChild);
-    }
+    checkboxRowIcon(formatRow, QUICK_FORMAT_ICON);
     const automaticRow = this.renderDisplayCheckbox(shortcuts, "自动排版", "启用自动排版及其快捷操作。",
       this.plugin.settings.enhancements.currentNoteLinkConverter.enabled, async value => {
         this.plugin.settings.enhancements.currentNoteLinkConverter.enabled = value;
@@ -384,17 +380,10 @@ export class SimpleSettingTab extends PluginSettingTab {
     const automaticManage = automaticRow.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", title: "自动排版设置", "aria-label": "自动排版设置" } });
     setActionIcon(automaticManage, "settings", "bordered");
     automaticManage.addEventListener("click", () => this.openPage({ type: "automatic-reformat" }));
-    const automaticLabel = automaticRow.querySelector("label");
-    if (automaticLabel) {
-      const icon = createSpan({ cls: "simple-callout-setting-icon" });
-      setIcon(icon, REFORMAT_ICON);
-      automaticLabel.insertBefore(icon, automaticLabel.lastElementChild);
-    }
+    checkboxRowIcon(automaticRow, REFORMAT_ICON);
     const templateRow = this.renderDisplayCheckbox(shortcuts, "快速新建笔记", "启用快速新建笔记及其快捷按钮。",
       this.plugin.settings.enableTemplateFill, async value => {
         this.plugin.settings.enableTemplateFill = value;
-        this.plugin.settings.enableTemplateFillAction = value;
-        this.plugin.settings.showEmptySearchGroups = false;
         await this.plugin.saveSettings();
         this.plugin.refreshTemplateFillActions();
       });
@@ -403,12 +392,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     const templateManage = templateRow.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", title: "快速新建笔记设置", "aria-label": "快速新建笔记设置" } });
     setActionIcon(templateManage, "settings", "bordered");
     templateManage.addEventListener("click", () => this.openPage({ type: "template-rules" }));
-    const templateLabel = templateRow.querySelector("label");
-    if (templateLabel) {
-      const icon = createSpan({ cls: "simple-callout-setting-icon" });
-      setIcon(icon, TEMPLATE_FILL_ICON);
-      templateLabel.insertBefore(icon, templateLabel.lastElementChild);
-    }
+    checkboxRowIcon(templateRow, TEMPLATE_FILL_ICON);
     const copyRow = this.renderDisplayCheckbox(shortcuts, "复制当前笔记链接", "点击复制；电脑右键或手机长按选择复制类型。",
       this.plugin.settings.enhancements.quickCopyLink.enabled, async value => {
         this.plugin.settings.enhancements.quickCopyLink.enabled = value;
@@ -416,19 +400,15 @@ export class SimpleSettingTab extends PluginSettingTab {
         this.plugin.refreshQuickCopyLinkActions();
       });
     copyRow.addClass("simple-shortcut-option");
-    const copyIcon = copyRow.createSpan({ cls: "simple-callout-setting-icon" });
-    setIcon(copyIcon, quickCopyModeIcon(this.plugin.settings.enhancements.quickCopyLink.lastMode));
-    const copyLabel = copyRow.querySelector("label");
-    if (copyLabel) copyLabel.insertBefore(copyIcon, copyLabel.lastElementChild);
+    checkboxRowIcon(copyRow, quickCopyModeIcon(this.plugin.settings.enhancements.quickCopyLink.lastMode));
   }
 
   private renderInlineReformatSettings(container: HTMLElement, framed = false): void {
     const reformat = this.plugin.settings.diary.reformat;
     const group = framed
-      ? container.createEl("fieldset", { cls: "simple-preview-checkbox-group" })
+      ? settingsFieldset(container, "自动排版设置")
       : container.createDiv({ cls: "simple-reformat-expanded-settings" });
     group.addClass("simple-reformat-settings-group");
-    if (framed) group.createEl("legend", { text: "自动排版设置" });
     this.renderDisplayCheckbox(group, "将 URL 处理为超链接", "自动排版时处理文本中的 URL。",
       reformat.runLinkConversion, async value => {
         reformat.runLinkConversion = value;
@@ -451,8 +431,7 @@ export class SimpleSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         });
       row.addClass("simple-reformat-option");
-      const edit = row.createEl("button", { cls: "clickable-icon", attr: { title: "编辑规则", "aria-label": `编辑${rule.name}` } });
-      setActionIcon(edit, "pencil", "plain");
+      const edit = createActionButton(row, "pencil", `编辑${rule.name}`);
       edit.addEventListener("click", () => new ReformatRuleModal(this.app, rule, async updated => {
         Object.assign(rule, updated);
         await this.plugin.saveSettings();
@@ -460,8 +439,7 @@ export class SimpleSettingTab extends PluginSettingTab {
         this.renderInlineReformatSettings(container, framed);
       }).open());
       if (!BUILT_IN_TEXT_REFORMAT_RULE_IDS.has(rule.id)) {
-        const remove = row.createEl("button", { cls: "clickable-icon", attr: { title: "删除规则", "aria-label": `删除${rule.name}` } });
-        setDeleteIcon(remove, "plain");
+        const remove = createActionButton(row, "trash-2", `删除${rule.name}`);
         remove.addEventListener("click", runAsync(async () => {
           reformat.formatRules = reformat.formatRules.filter(item => item.id !== rule.id);
           await this.plugin.saveSettings();
@@ -471,8 +449,8 @@ export class SimpleSettingTab extends PluginSettingTab {
       }
     }
     const footer = group.createDiv({ cls: "simple-reformat-rule-footer" });
-    const add = footer.createEl("button", { cls: "clickable-icon simple-template-source-add", attr: { type: "button", title: "增加排版规则", "aria-label": "增加排版规则" } });
-    setActionIcon(add, "plus", "bordered");
+    const add = createActionButton(footer, "plus", "增加排版规则", "bordered");
+    add.addClass("simple-template-source-add");
     add.addEventListener("click", () => new ReformatRuleModal(this.app, makeTextReformatRule(), async rule => {
       reformat.formatRules.push(rule);
       await this.plugin.saveSettings();
@@ -488,8 +466,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderEditingOptimizationSettings(container: HTMLElement): void {
-    const basic = container.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-    basic.createEl("legend", { text: "编辑优化" });
+    const basic = settingsFieldset(container, "编辑优化");
     this.renderDisplayCheckbox(basic, "新建笔记自动补全属性", "沿用现有规则，按当前目录关联的 Obsidian 数据库视图自动补全属性。",
       this.plugin.settings.newNoteDefaults.enabled, async value => {
         this.plugin.settings.newNoteDefaults.enabled = value;
@@ -508,25 +485,17 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderBasicOptimizationSettings(container: HTMLElement): void {
-    const extensions = container.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-    extensions.createEl("legend", { text: "功能拓展" });
+    const extensions = settingsFieldset(container, "功能拓展");
     for (const [key, name] of [["showSyncSharingEntry", "同步"], ["showSharingEntry", "分享"], ["showCalendarDiaryEntry", "日程"]] as const) {
       const row = this.renderDisplayCheckbox(extensions, name, key === "showCalendarDiaryEntry" ? "在设置首页显示日程标签页。" : "在设置首页显示此入口。", this.plugin.settings[key], async value => {
         this.plugin.settings[key] = value;
         await this.plugin.saveSettings();
         this.renderSettings();
       });
-      const icons = key === "showSyncSharingEntry" ? ["refresh-cw"] : key === "showSharingEntry" ? ["share-2"] : ["calendar-days"];
-      const label = row.querySelector("label")!;
-      for (const icon of icons) {
-        const iconEl = label.createSpan({ cls: "simple-extension-option-icon", attr: { "aria-hidden": "true" } });
-        setIcon(iconEl, icon);
-        label.insertBefore(iconEl, label.children[1]);
-      }
+      checkboxRowIcon(row, key === "showSyncSharingEntry" ? "refresh-cw" : key === "showSharingEntry" ? "share-2" : "calendar-days");
     }
 
-    const search = container.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-    search.createEl("legend", { text: "搜索增强" });
+    const search = settingsFieldset(container, "搜索增强");
     const config = this.plugin.settings.searchFolders;
     for (const [key, foldersKey, name] of [
       ["includeEnabled", "includeFolders", "仅搜索所选文件夹"],
@@ -558,7 +527,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   private renderFeatureEnhancementSettings(container: HTMLElement): void {
     this.renderPageHeader(container, "编辑工具");
 
-    this.renderGroup(container, "编辑功能", (card) => {
+    settingsGroup(container, "编辑功能", (card) => {
       this.renderNavigationItem(card, REFORMAT_NAME, "处理粘贴内容、链接转换和笔记文本排版规则。", () => this.openPage({ type: "reformat" }), REFORMAT_ICON);
     });
 
@@ -571,7 +540,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.plugin.refreshTypography();
       await this.plugin.saveSettings();
     };
-    this.renderSettingCard(container, card => {
+    settingsCard(container, card => {
       new Setting(card).setName("启用排版优化")
         .setDesc("用于电脑端笔记的编辑和阅读视图；关闭后隐藏下方参数，字号与间距恢复 Obsidian / 主题设置。正文宽度和中文阅读版式由上一级独立控制。")
         .addToggle(toggle => toggle.setValue(settings.enabled).onChange(async value => {
@@ -584,7 +553,7 @@ export class SimpleSettingTab extends PluginSettingTab {
         }));
     });
     if (!settings.enabled) return;
-    this.renderGroup(container, "正文与段落", card => {
+    settingsGroup(container, "正文与段落", card => {
       const labels = {
         fontSize: ["正文字号", "单位 px；默认 15，可按阅读习惯调整。"],
         lineHeight: ["行高", "字号的倍数；建议 1.7。"],
@@ -626,11 +595,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     parent: HTMLElement, name: string, desc: string, checked: boolean,
     onChange: (value: boolean) => Promise<void>
   ): HTMLElement {
-    const row = parent.createDiv({ cls: "simple-preview-checkbox-row simple-display-option-row", attr: { title: desc } });
-    const label = row.createEl("label", { cls: "simple-display-checkbox-label" });
-    const checkbox = label.createEl("input", { type: "checkbox", attr: { "aria-description": desc } });
-    checkbox.checked = checked;
-    label.createSpan({ text: name });
+    const { row, input: checkbox } = checkboxRow(parent, name, desc, checked);
     checkbox.addEventListener("change", runAsync(async () => onChange(checkbox.checked)));
     return row;
   }
@@ -678,8 +643,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderPlatformDisplayGroup(container: HTMLElement, mobile: boolean): void {
-    const group = container.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-    group.createEl("legend", { text: mobile ? "移动端显示" : "桌面端显示" });
+    const group = settingsFieldset(container, mobile ? "移动端显示" : "桌面端显示");
     const settings = this.plugin.settings;
     const profile = mobile ? settings.mobileDisplay : settings;
     if (!mobile) {
@@ -857,21 +821,18 @@ export class SimpleSettingTab extends PluginSettingTab {
 
   private renderThemePanel(container: HTMLElement): void {
     this.renderThemeFormattingSettings(container, false);
-    const headingGroup = container.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-    headingGroup.createEl("legend", { text: "标题格式" });
+    const headingGroup = settingsFieldset(container, "标题格式");
     for (const level of Object.keys(QUICK_FORMAT_HEADING_LABELS) as QuickFormatHeadingLevel[]) {
       this.renderQuickFormatHeadingSetting(headingGroup, level, readRenderedFontSize());
     }
-    const calloutGroup = container.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-    calloutGroup.createEl("legend", { text: "Callout 格式" });
+    const calloutGroup = settingsFieldset(container, "Callout 格式");
     this.renderQuickFormatCalloutSettings(calloutGroup, false);
   }
 
   private renderDisplayPanel(container: HTMLElement): void {
     this.renderPlatformDisplayGroup(container, false);
     this.renderPlatformDisplayGroup(container, true);
-    const group = container.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-    group.createEl("legend", { text: "渲染预览" });
+    const group = settingsFieldset(container, "渲染预览");
     const options = [
       { key: "enableHtmlPreview", name: "HTML 代码渲染",
         desc: "将 HTML 代码块渲染为网页效果，不执行内嵌脚本；与文本仅显示替换独立。",
@@ -909,8 +870,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderNotionColumnsSettings(container: HTMLElement): void {
-    const card = container.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-    card.createEl("legend", { text: "双列显示" });
+    const card = settingsFieldset(container, "双列显示");
     {
       this.renderDisplayCheckbox(card, "启用双列视图", "", this.plugin.settings.enableNotionColumns, async value => {
           this.plugin.settings.enableNotionColumns = value;
@@ -1065,8 +1025,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   private renderAttachmentOrganizerSettings(container: HTMLElement): void {
     const location = readObsidianAttachmentLocation(this.plugin);
     const disabledReasons = attachmentOrganizerDisabledReasons(location.mode);
-    const card = container.createEl("fieldset", { cls: "simple-preview-checkbox-group simple-attachment-settings" });
-    card.createEl("legend", { text: "附件优化" });
+    const card = settingsFieldset(container, "附件优化", "simple-attachment-settings");
     const mode = card.createDiv({ cls: "simple-preview-checkbox-row simple-attachment-action-row" });
     mode.createSpan({ text: "当前附件存放模式" });
     const modeControls = mode.createDiv({ cls: "simple-attachment-mode-controls" });
@@ -1125,8 +1084,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   private renderThemeFormattingSettings(container: HTMLElement, standalone = true): void {
     if (standalone) this.renderPageHeader(container, "正文格式", () => this.openPage({ type: "display-preview" }));
     const formatting = this.plugin.settings.themeFormatting;
-    const group = container.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-    group.createEl("legend", { text: "正文格式" });
+    const group = settingsFieldset(container, "正文格式");
     const save = async (): Promise<void> => {
       await this.plugin.saveSettings();
       this.plugin.applyThemeFormattingStyles();
@@ -1264,8 +1222,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.openPage({ type: "overview" });
     });
 
-    const card = container.createEl("fieldset", { cls: "simple-html-preview-rules simple-preview-checkbox-group" });
-    card.createEl("legend", { text: "文本显示替换设置" });
+    const card = settingsFieldset(container, "文本显示替换设置", "simple-html-preview-rules");
     const header = card.createDiv({ cls: "simple-card-header" });
     const copy = header.createDiv();
     copy.createDiv({
@@ -1273,11 +1230,9 @@ export class SimpleSettingTab extends PluginSettingTab {
       text: "通过正则匹配内容，并在显示时替换为文本或 HTML，不修改原文。",
     });
     const headerActions = header.createDiv({ cls: "simple-template-manager-actions" });
-    const add = headerActions.createEl("button", { cls: "clickable-icon", attr: { type: "button", title: "添加规则", "aria-label": "添加规则" } });
-    setActionIcon(add, "plus", "plain");
+    const add = createActionButton(headerActions, "plus", "添加规则");
     add.addEventListener("click", () => this.openDisplayReplacementRule(makeHtmlPreviewRule(), true));
-    const importButton = headerActions.createEl("button", { cls: "clickable-icon", attr: { type: "button", title: "导入规则", "aria-label": "导入规则" } });
-    setActionIcon(importButton, "download", "plain");
+    const importButton = createActionButton(headerActions, "download", "导入规则");
     importButton.addEventListener("click", runAsync(async () => {
       const value = await importJsonFile(headerActions.ownerDocument);
       if (!value) return;
@@ -1294,8 +1249,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     }));
     importButton.title = "导入整组或单条替换规则";
     importButton.setAttribute("aria-label", importButton.title);
-    const exportAll = headerActions.createEl("button", { cls: "clickable-icon", attr: { type: "button", title: "导出整组替换规则", "aria-label": "导出整组替换规则" } });
-    setActionIcon(exportAll, "upload");
+    const exportAll = createActionButton(headerActions, "upload", "导出整组替换规则");
     exportAll.addEventListener("click", () => downloadJsonFile("simple-display-replacement-rules.json", {
       type: "simple-one.display-replacement-rules", version: 1, rules: this.plugin.settings.htmlPreviewRules.map(exportHtmlPreviewRule)
     }, headerActions.ownerDocument));
@@ -1319,11 +1273,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       });
     row.addClass("simple-display-replacement-rule");
     const actions = row.createDiv({ cls: "simple-display-replacement-actions" });
-    const inspect = actions.createEl("button", {
-      cls: "clickable-icon",
-      attr: { type: "button", title: "查看和编辑规则", "aria-label": `查看和编辑${rule.name || "规则"}` },
-    });
-    setActionIcon(inspect, "search");
+    const inspect = createActionButton(actions, "search", `查看和编辑${rule.name || "规则"}`);
     inspect.addEventListener("click", () => this.openDisplayReplacementRule(rule));
 
   }
@@ -1366,8 +1316,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderPasteLinkSettings(container: HTMLElement): void {
-    const card = container.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-    card.createEl("legend", { text: "粘贴处理" });
+    const card = settingsFieldset(container, "粘贴处理");
     {
       this.renderDisplayCheckbox(
         card,
@@ -1404,8 +1353,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderFilterRules(container: HTMLElement): void {
-    const card = container.createEl("fieldset", { cls: "simple-card simple-preview-checkbox-group" });
-    card.createEl("legend", { text: "提取规则" });
+    const card = settingsFieldset(container, "提取规则", "simple-card");
     const refresh = (): void => {
       const scrollTop = container.scrollTop;
       card.remove();
@@ -1478,7 +1426,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   private renderNewNoteDefaults(container: HTMLElement): void {
     this.renderPageHeader(container, "新建笔记时自动补全属性", () => this.openPage({ type: "basic-optimization" }));
 
-    this.renderSettingCard(container, (card) => {
+    settingsCard(container, (card) => {
       new Setting(card)
         .setName("启用属性补齐")
         .setDesc("Notebook Navigator 新建空白笔记时，参考每条规则选中的 .base 当前视图列补齐属性。")
@@ -1491,7 +1439,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     });
 
     const heading = container.createDiv({ cls: "simple-heading-row" });
-    this.renderSectionHeading(heading, "参考数据库规则");
+    settingsHeading(heading, "参考数据库规则");
     const addButton = heading.createEl("button", { cls: "mod-cta simple-soft-button" });
     addButton.setText("新增");
     addButton.addEventListener("click", runAsync(async () => {
@@ -1512,7 +1460,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderNewNoteDefaultRule(container: HTMLElement, rule: NewNoteDatabaseRule, index: number): void {
-    this.renderSettingCard(container, (card) => {
+    settingsCard(container, (card) => {
       if (!rule.folder) {
         new Setting(card)
           .setName("目录")
@@ -1628,11 +1576,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     const heading = container.createDiv({ cls: "simple-template-manager-heading" });
     new Setting(heading).setName(inline ? "快速新建笔记设置" : "笔记模板与生成规则").setHeading();
     const actions = heading.createDiv({ cls: "simple-template-manager-actions" });
-    const iconButton = (icon: string, label: string): HTMLButtonElement => {
-      const button = actions.createEl("button", { cls: "clickable-icon", attr: { type: "button", title: label, "aria-label": label } });
-      setActionIcon(button, icon);
-      return button;
-    };
+    const iconButton = (icon: string, label: string): HTMLButtonElement => createActionButton(actions, icon, label);
     iconButton("bot", "用 AI 创建网站规则").addEventListener("click", () => this.openTemplateRuleHelp());
     iconButton("plus", "新增模板").addEventListener("click", () => this.openTemplateCreator());
     const importButton = iconButton("download", "导入模板或网站规则 JSON");
@@ -1672,8 +1616,9 @@ export class SimpleSettingTab extends PluginSettingTab {
       const card = container.createEl("fieldset", { cls: "simple-preview-checkbox-group simple-template-source-card" });
       const legend = card.createEl("legend");
       legend.createSpan({ text: `模板 · ${cat.name || "未命名模板"}` });
-      const editTemplate = legend.createEl("button", { cls: "clickable-icon simple-template-edit", attr: { type: "button", "aria-label": `编辑模板：${cat.name}`, title: "模板设置" } });
-      setActionIcon(editTemplate, "pencil", "plain");
+      const editTemplate = createActionButton(legend, "pencil", `编辑模板：${cat.name}`);
+      editTemplate.addClass("simple-template-edit");
+      editTemplate.title = "模板设置";
       editTemplate.addEventListener("click", () => this.openTemplateCreator(cat));
       card.createDiv({ cls: "setting-item-description simple-template-source-output", text: `保存位置：${cat.outputFolder || "当前库根目录"}；基础属性：${templatePropertyNames(cat).join("、") || "未设置"}` });
       for (const site of cat.siteRules) {
@@ -1698,8 +1643,8 @@ export class SimpleSettingTab extends PluginSettingTab {
         });
       }
       if (!cat.siteRules.length) card.createEl("p", { cls: "simple-empty-text", text: "还没有网站来源，点击下方“添加网站”开始配置。" });
-      const addSite = card.createEl("button", { cls: "clickable-icon simple-template-source-add", attr: { type: "button", title: "添加网站", "aria-label": "添加网站" } });
-      setActionIcon(addSite, "plus", "bordered");
+      const addSite = createActionButton(card, "plus", "添加网站", "bordered");
+      addSite.addClass("simple-template-source-add");
       addSite.addEventListener("click", () => {
         this.openJsonModal(`添加网站：${cat.name}`, "", async value => {
           const counts = mergeSiteImports(cat.siteRules, normalizeSiteRuleImport(value));
@@ -1727,7 +1672,7 @@ export class SimpleSettingTab extends PluginSettingTab {
 
   private renderTemplateRuleHelp(container: HTMLElement): void {
     const cats = this.plugin.settings.templateCategories;
-    this.renderGroup(container, "用 AI 创建网站规则", (card) => {
+    settingsGroup(container, "用 AI 创建网站规则", (card) => {
       card.createEl("p", { cls: "setting-item-description", text: "选择要添加网站的笔记模板，复制完整提示词发给 AI，并提供具体内容页链接及希望获取的信息。需要搜索时，再提供搜索页链接和关键词。" });
       const controls = card.createDiv({ cls: "simple-template-ai-controls" });
       const select = controls.createEl("select", { attr: { "aria-label": "选择要添加网站的模板" } });
@@ -1778,7 +1723,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     this.renderPageHeader(container, "管理分类", () => this.openPage({ type: "template-rules" }));
 
     const heading = container.createDiv({ cls: "simple-heading-row" });
-    this.renderSectionHeading(heading, "当前分类");
+    settingsHeading(heading, "当前分类");
     const headingActions = heading.createDiv({ cls: "simple-heading-actions" });
     const addButton = headingActions.createEl("button", { cls: "mod-cta simple-soft-button" });
     addButton.setText("新增模板");
@@ -1882,7 +1827,7 @@ export class SimpleSettingTab extends PluginSettingTab {
 
     this.renderPageHeader(container, category.name || "网站填写与搜索规则", () => this.openPage({ type: "template-rules" }));
 
-    this.renderSettingCard(container, (card) => {
+    settingsCard(container, (card) => {
       new Setting(card)
         .setName("笔记输出目录")
         .setDesc("当前分类通过网址转笔记或书名搜索生成笔记时使用的输出位置。")
@@ -1898,7 +1843,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     });
 
     const heading = container.createDiv({ cls: "simple-heading-row" });
-    this.renderSectionHeading(heading, "网站填写与搜索规则");
+    settingsHeading(heading, "网站填写与搜索规则");
     const headingActions = heading.createDiv({ cls: "simple-heading-actions" });
     const addButton = headingActions.createEl("button", { cls: "mod-cta simple-soft-button" });
     addButton.setText("新增");
@@ -2008,22 +1953,6 @@ export class SimpleSettingTab extends PluginSettingTab {
         this.renderSettings();
       });
     }
-  }
-
-  private renderGroup(container: HTMLElement, title: string, render: (card: HTMLElement) => void): void {
-    this.renderSectionHeading(container, title);
-    this.renderSettingCard(container, render);
-  }
-
-  private renderSectionHeading(container: HTMLElement, title: string | DocumentFragment, extraClass?: string): Setting {
-    const heading = new Setting(container).setName(title).setHeading().setClass("simple-section-title");
-    if (extraClass) heading.setClass(extraClass);
-    return heading;
-  }
-
-  private renderSettingCard(container: HTMLElement, render: (card: HTMLElement) => void): void {
-    const card = container.createDiv({ cls: "simple-card" });
-    render(card);
   }
 
   private createScrollableTable(container: HTMLElement, label: string, tableClass: string): HTMLElement {
@@ -2143,8 +2072,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     const diary = this.plugin.settings.diary;
     const navigator = this.plugin.isMobile ? null : getNotebookNavigatorPlugin(this.app);
     const group = (title: string, render: (card: HTMLElement) => void): void => {
-      const card = container.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-      card.createEl("legend", { text: title });
+      const card = settingsFieldset(container, title);
       render(card);
     };
     if (section !== "files") group("日历外观", card => {
@@ -2327,7 +2255,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     const quickFormat = this.plugin.settings.enhancements.quickFormat;
     this.renderPageHeader(container, QUICK_FORMAT_NAME, () => this.openPage({ type: "feature-enhancements" }));
 
-    this.renderSettingCard(container, (card) => {
+    settingsCard(container, (card) => {
       new Setting(card)
         .setName("启用格式调整快捷键")
         .addToggle((toggle) =>
@@ -2372,8 +2300,8 @@ export class SimpleSettingTab extends PluginSettingTab {
     const dependent = container.createDiv({ cls: "simple-quick-format-dependent" });
     dependent.toggleClass("is-disabled", !quickFormat.enabled);
     dependent.toggleAttribute("inert", !quickFormat.enabled);
-    this.renderSectionHeading(dependent, "格式调整");
-    this.renderSettingCard(dependent, (card) => {
+    settingsHeading(dependent, "格式调整");
+    settingsCard(dependent, (card) => {
       card.createDiv({
         cls: "setting-item-description",
         text: "管理格式的启用与新增，调整字号、颜色等样式，并应用到笔记显示中。",
@@ -2401,7 +2329,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   private renderQuickFormatHeadingSettings(container: HTMLElement): void {
     this.renderPageHeader(container, "标题", () => this.openPage({ type: "quick-format" }));
     const bodyFontSize = readRenderedFontSize();
-    this.renderSettingCard(container, (card) => {
+    settingsCard(container, (card) => {
       const header = card.createDiv({ cls: "simple-card-header" });
       const copy = header.createDiv();
       copy.createDiv({ cls: "simple-card-title", text: "标题功能与样式" });
@@ -2676,8 +2604,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     const diary = this.plugin.settings.diary;
     const config = diary.dateManagement;
 
-    const card = container.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-    card.createEl("legend", { text: "假期安排导入" });
+    const card = settingsFieldset(container, "假期安排导入");
     const source = (name: string, target: typeof config.nationalHolidays | typeof config.companyHolidays): void => {
       const row = this.renderDisplayCheckbox(card, name, "", target.enabled, async value => {
         target.enabled = target.showInCalendar = value;
@@ -2740,8 +2667,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   private renderAnniversaryList(container: HTMLElement, anniversaries: Anniversary[]): void {
 
     if (!anniversaries.length) {
-      const card = container.createEl("fieldset", { cls: "simple-preview-checkbox-group simple-date-list-card" });
-    card.createEl("legend", { text: "纪念日" });
+      const card = settingsFieldset(container, "纪念日", "simple-date-list-card");
       card.createDiv({ cls: "simple-empty-text", text: "还没有纪念日。" });
       return;
     }
@@ -2752,8 +2678,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.anniversaryTagFilter
     );
 
-    const card = container.createEl("fieldset", { cls: "simple-preview-checkbox-group simple-date-list-card" });
-    card.createEl("legend", { text: "纪念日" });
+    const card = settingsFieldset(container, "纪念日", "simple-date-list-card");
     const tags = anniversaryTags(anniversaries);
     const tagWrap = card.createDiv({ cls: "simple-anniversary-tags" });
     for (const tag of tags) {
@@ -2905,7 +2830,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     emptyText: string
   ): void {
     const heading = container.createDiv({ cls: "simple-heading-row" });
-    this.renderSectionHeading(heading, title);
+    settingsHeading(heading, title);
     const headerActions = heading.createDiv({ cls: "simple-json-actions" });
     const importButton = headerActions.createEl("button", { cls: "mod-cta simple-soft-button" });
     importButton.setText("导入");
@@ -3075,8 +3000,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderRecurringRules(container: HTMLElement): void {
-    const card = container.createEl("fieldset", { cls: "simple-preview-checkbox-group simple-recurring-card simple-reformat-settings-group" });
-    card.createEl("legend", { text: "待提醒事件" });
+    const card = settingsFieldset(container, "待提醒事件", "simple-recurring-card simple-reformat-settings-group");
     const addButton = card.createEl("button", { cls: "clickable-icon simple-template-source-add", attr: { type: "button", title: "新增待提醒事件", "aria-label": "新增待提醒事件" } });
     setActionIcon(addButton, "plus", "bordered");
     addButton.addEventListener("click", () => {
@@ -3199,8 +3123,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     if (standalone) this.renderPageHeader(container, "日程");
     const diary = this.plugin.settings.diary;
     const body = container.createDiv({ cls: "simple-calendar-settings" });
-    const main = body.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-    main.createEl("legend", { text: "基础日记" });
+    const main = settingsFieldset(body, "基础日记");
     this.renderDisplayCheckbox(main, "点击日期新建日记", "点击日历日期时创建日记；已有日记则直接打开。关闭后只打开已有日记。", diary.createDiaryOnDateClick !== false, async value => {
       diary.createDiaryOnDateClick = value; await this.plugin.saveSettings(); this.plugin.refreshDiaryViews();
     });

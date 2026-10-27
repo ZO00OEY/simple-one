@@ -140,6 +140,12 @@ main .simple-mermaid-frame .mermaid { margin:0; padding:0; background:transparen
 .simple-mermaid-frame svg { display:block; width:100%; max-width:none; height:auto; margin:auto }
 .simple-mermaid-frame.is-fullscreen { position:fixed; inset:16px; z-index:1000; margin:0; display:flex; flex-direction:column }
 .simple-mermaid-frame.is-fullscreen .simple-mermaid-viewport { flex:1; max-height:none }
+.simple-mermaid-canvas { width:100%; transform-origin:0 0 }
+.simple-mermaid-frame[data-mode="fit"] .simple-mermaid-canvas { transform:none }
+.simple-mermaid-frame[data-mode="canvas"] .simple-mermaid-viewport { overflow:hidden; cursor:grab; touch-action:none; user-select:none; min-height:240px }
+.simple-mermaid-frame[data-mode="canvas"] .simple-mermaid-viewport.is-dragging { cursor:grabbing }
+.simple-mermaid-frame[data-mode="canvas"] .simple-mermaid-canvas { will-change:transform }
+.simple-mermaid-toolbar button.is-active { color:var(--share-accent); border-color:var(--share-accent) }
 @media(prefers-color-scheme:dark){.share-tag{background:#1d694b;color:#fff}main h3{color:#80b4ff}}
 @media(max-width:740px){.layout{grid-template-columns:1fr}.sidebar-resizer{display:none}main{padding-inline:28px 18px}.heading-toggle{left:-28px;width:26px}.simple-mermaid-frame.is-fullscreen{inset:8px}}
 
@@ -164,6 +170,7 @@ import mark from "markdown-it-mark";
 import DOMPurify from "dompurify";
 import katex from "katex";
 import mermaid from "mermaid";
+import { enhanceMermaid } from "../../../shared/mermaidViewer";
 import { parseColumns } from "../../../shared/columns";
 import "katex/dist/katex.min.css";
 
@@ -419,37 +426,10 @@ function foldHeadings(root) {
     }
   }
 }
+const diagramViewers = new Set();
 function enhanceDiagram(node) {
-  if (!node.querySelector("svg") || node.closest(".simple-mermaid-frame")) return;
-  const frame = document.createElement("section");
-  frame.className = "simple-mermaid-frame";
-  const toolbar = document.createElement("div");
-  toolbar.className = "simple-mermaid-toolbar";
-  const label = document.createElement("strong");
-  label.textContent = "流程图";
-  toolbar.append(label);
-  const viewport = document.createElement("div");
-  viewport.className = "simple-mermaid-viewport";
-  let scale = 1;
-  const resize = value => { scale = Math.max(.5, Math.min(4, value)); node.style.width = `${scale * 100}%`; };
-  const button = (text, action) => {
-    const control = document.createElement("button");
-    control.type = "button"; control.textContent = text;
-    control.addEventListener("click", action); toolbar.append(control); return control;
-  };
-  button("适应宽度", () => resize(1));
-  button("缩小", () => resize(scale - .25));
-  button("放大", () => resize(scale + .25));
-  const fullscreen = button("全屏", () => {
-    const open = frame.classList.toggle("is-fullscreen");
-    fullscreen.textContent = open ? "退出全屏" : "全屏";
-    fullscreen.setAttribute("aria-expanded", String(open));
-    if (open) fullscreen.focus();
-  });
-  frame.addEventListener("keydown", event => {
-    if (event.key === "Escape" && frame.classList.contains("is-fullscreen")) fullscreen.click();
-  });
-  node.before(frame); viewport.append(node); frame.append(toolbar, viewport);
+  const dispose = enhanceMermaid(node);
+  if (dispose) diagramViewers.add(dispose);
 }
 function renderTags(root) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -605,6 +585,8 @@ function renderList() {
 }
 async function route() {
   const current = ++request;
+  diagramViewers.forEach(dispose => dispose());
+  diagramViewers.clear();
   const match = /^#\/notes\/([a-z0-9]{12})(?:\/(.*))?$/.exec(location.hash);
   content.replaceChildren();
   content.closest("main")?.classList.remove("has-columns");

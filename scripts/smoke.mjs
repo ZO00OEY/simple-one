@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import "./test-action-buttons.mjs";
+import "./test-attachment-actions.mjs";
+import "./test-mermaid-viewer.mjs";
 import { build } from "esbuild";
 
 async function load(file, stub = "") {
@@ -149,6 +151,7 @@ export class Modal {
   close() { this.onClose?.(); }
 }
 export class Notice { constructor(message) { globalThis.__attachmentTest.notices.push(message); } }
+export function setIcon() {}
 export class Setting {}
 export const normalizePath = path => path.replace(/\\/g, '/').replace(/\/{2,}/g, '/').replace(/^\/+|\/+$/g, '');
 globalThis.__attachmentTest = { TFile, TFolder, notices: [] };

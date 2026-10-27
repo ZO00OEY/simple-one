@@ -1,5 +1,5 @@
 import { App, Modal, Notice, Platform, Setting, setIcon } from "obsidian";
-import { settingsSection } from "../../shared/settingsLayout";
+import { settingsSection, compactSettingsSection } from "../../shared/settingsLayout";
 import { MobileOptions, sameContent, pluginSelected, selectPlugin } from "./linkDiff";
 import { ConflictChoice, MobileConflict, MobileGithub, MobilePlan } from "./mobileGithub";
 import { LiveReview, PreviewFile, ZoeySyncConflictPreviewModal } from "./conflictPreview";
@@ -183,12 +183,6 @@ export function renderMobileSyncRules(root: HTMLElement, options: MobileOptions,
     options.trackPaths, async (value) => { options.trackPaths = value; await save(); });
 }
 
-function compactSection(root: HTMLElement, title: string): HTMLElement {
-  const section = root.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-  section.createEl("legend", { text: title });
-  return section;
-}
-
 function renderCompactSyncRules(root: HTMLElement, options: MobileOptions, save: () => Promise<void> | void, loadPlugins: () => Promise<string[]>, host: MobileHost): void {
   root = root.createDiv({ cls: "simple-one-sync-sync-rules" });
   const image = mobileCheckbox(root, "同步图片", "关闭后，所有图片都不参与同步。", options.syncImages, async value => { options.syncImages = value; await save(); });
@@ -249,7 +243,7 @@ function renderCompactSyncRules(root: HTMLElement, options: MobileOptions, save:
 export function renderMobileSettings(root: HTMLElement, host: MobileHost, guide = false): void {
   const options = host.options;
   if (!guide) root.addClass("simple-lightweight-sync-settings");
-  const section = (title: string): HTMLElement => guide ? settingsSection(root, title) : compactSection(root, title);
+  const section = (title: string): HTMLElement => guide ? settingsSection(root, title) : compactSettingsSection(root, title);
   if (guide) root.createEl("h3", { text: "配置 GitHub 轻量同步" });
   if (guide && !Platform.isMobile) root.createEl("p", { text: "电脑可启用轻量同步运行相同流程；此模式会实际读写仓库，确认预览后才执行同步。" });
   if (guide) {
@@ -277,7 +271,7 @@ export function renderMobileSettings(root: HTMLElement, host: MobileHost, guide 
     if (!quota.settingEl.isConnected) { unsubscribe(); quotaObserver.disconnect(); }
   });
   quotaObserver.observe(root.ownerDocument.body, { childList: true, subtree: true });
-  new Setting(account).setName("GitHub token").setDesc("只保存在本机插件数据中，不写入共享配置。")
+  new Setting(account).setName("GitHub token").setDesc("Obsidian 1.11.4+ 保存到本机密钥存储；旧版保存在本机 JSON。不会写入共享配置。")
     .addText((text) => { text.inputEl.type = "password"; text.setValue(options.token).onChange(async (value) => { options.token = value.trim(); engine.resetRemaining(); await host.save(); }); }).settingEl.addClass("simple-one-sync-lightweight-account-input");
   new Setting(account).setName("仓库地址").addText((text) => text.setPlaceholder("https://github.com/用户名/仓库.git")
     .setValue(options.repoUrl).onChange(async (value) => { options.repoUrl = value.trim(); options.bound = false; await host.save(); })).settingEl.addClass("simple-one-sync-lightweight-account-input");

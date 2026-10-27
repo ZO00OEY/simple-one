@@ -37,10 +37,10 @@ The base plugin requires **Obsidian 1.7.2**. Token-based sharing and EdgeOne aut
 Open **Settings → Simple One**:
 
 - **Display / Theme**: reading and editing appearance.
-- **Shortcuts and editing**: actions, editing options, paste handling and columns. Row-end gears open formatting and quick-note settings.
-- **Feature optimization**: search and attachment tools, plus switches that show the sync/sharing and calendar/daily-note entries.
-- **Calendar and daily notes**: separate daily-note and calendar tabs, with event, anniversary and yearly holiday management.
-- **Sync and sharing**: select a sync method or configure public sharing separately. State buttons enable or disable a method; arrows open its settings.
+- **Editing (编辑)**: header actions, editing options, paste handling and columns. Row-end gears open formatting, quick-note and display-replacement settings.
+- **Extensions (拓展)**: enable the Sync, Sharing and Schedule tabs; configure search-folder filters and attachment tools.
+- **Schedule (日程)**: daily notes, calendars, recurring events, anniversaries and yearly holidays.
+- **Sync (同步) / Sharing (分享)**: separate tabs for private vault sync and public note publishing.
 
 Start with the features you need. Many concise settings expose extra explanations on hover.
 
@@ -62,13 +62,15 @@ Choose one vault sync method per device. Avoid multiple tools writing to the sam
 - **Local tools need file access.** Sync, diary and attachment tools read or write vault files; copy actions use the clipboard; desktop Git runs local commands.
 - **Source and vault repositories differ.** This standalone plugin repository excludes personal settings, credentials, logs, runtime state, share records and custom templates. A private vault's settings-sync policy is separate; do not copy source-repository exclusions blindly into vault sync rules.
 
-See the [user guide](USAGE.md) and [technical review notes](docs/automated-review-notes.md).
+See the [user guide](USAGE.md), [personal files and credentials](docs/private-files.md) and [technical review notes](docs/automated-review-notes.md).
 
-## In 1.0.23
+## In 1.0.24
 
-This release reorganizes settings, diary/calendar tools, sync rules and share management. It adds regression coverage for template rule checks, property ordering and import merging. Review fixes protect edits made while diary automation or HTML clipboard operations are waiting, and remove unused settings code and obsolete styles.
+This release consolidates settings groups, checkbox icons, buttons and attachment actions, merges attachment move workflows, and removes obsolete settings and styles. The plugin and default sharing reader share diagram controls: canvas mode, drag-to-pan, mouse-anchored wheel zoom, fit and fullscreen. Published columns retain saved proportions and stack on narrow screens; editing gestures remain in Obsidian.
 
-See the [release notes](RELEASE_NOTES.md) and [review record](docs/release-review-1.0.23.md) for scope and limitations. Not every website rule, device or third-party theme combination has been validated.
+The settings interface remains primarily Chinese; English and Chinese documentation are maintained together. Existing websites need another publish using the updated default reader to receive the new controls. Keep personal settings and custom templates when upgrading.
+
+See the [release notes](RELEASE_NOTES.md) and [review record](docs/release-review-1.0.24.md) for scope and limitations. Not every website rule, device or third-party theme combination has been validated.
 
 ## Development and feedback
 

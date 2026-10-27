@@ -984,7 +984,7 @@ try {
     assert.equal(moves[1].directory, '公开/旧/新建文件夹');
     delete globalThis.shareModalElements; popup.remove();
     ui.manifest.enabled = false; ui.renderSettings(rootEl, false, false);
-    assert.deepEqual([...rootEl.querySelectorAll("fieldset > legend")].map(title => title.textContent), ["分享管理", "分享库管理"]);
+    assert.deepEqual([...rootEl.querySelectorAll("fieldset > legend")].map(title => title.textContent), ["分享设置", "分享库管理"]);
     assert.equal(rootEl.querySelectorAll('button[title^="管理分享库："]').length, 1);
     assert(rootEl.querySelector('button[title="管理分享模板"]'), 'template manager remains accessible while disabled');
     assert.equal(rootEl.querySelectorAll('.simple-share-library-add button[data-icon="plus"]').length, 1);

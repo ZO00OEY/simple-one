@@ -16,7 +16,7 @@ For manual installation, download `main.js`, `manifest.json`, and `styles.css` f
 
 The desktop assistant completes repository setup without uploading. Run the first sync from the sync panel. If uploading fails, retry there; the completed connection does not need to be configured again.
 
-Open **功能拓展 → 同步与分享** in Simple One settings. Choose a setup assistant:
+Open the **同步** tab (enable it under **拓展 → 功能拓展** if hidden) in Simple One settings. Choose a setup assistant:
 
 | Option | Choose it when… | Start here |
 | --- | --- | --- |
@@ -25,7 +25,7 @@ Open **功能拓展 → 同步与分享** in Simple One settings. Choose a setup
 
 Follow the assistant to sign in, create or connect a repository, and review which files to sync. Desktop Git setup guides you through the required tools. After setup, use **同步设置** to adjust automatic backups, remote updates, or the lightweight mode's file and plugin choices.
 
-Full Git mode has separate startup switches for fetching updates and backing up to the cloud. Fetching is enabled by default; startup backup is disabled. With both enabled, fetch and merge first, then commit local edits and upload. A deferred or failed merge stops that startup backup. Disabling startup backup leaves the timed backup rules active: 30 idle minutes or at most 60 minutes of continuous editing by default.
+Full Git mode has mutually exclusive startup choices: fetch only (the default), or fetch and back up. The latter fetches and merges first, then commits local edits and uploads. A deferred or failed merge stops that startup backup. Disabling startup backup leaves the timed backup rules active: 30 idle minutes or at most 60 minutes of continuous editing by default.
 
 The **当前应用** badge shows the mode you are actually using. Mobile background sync depends on your operating system. If you previously used Simple Link, disable its sync before enabling Simple One sync.
 
@@ -43,7 +43,7 @@ Keep editing in your current vault and publish only the notes you choose. Deskto
 
 Publishing does not clone or synchronize a local share repository. Each run generates all enabled notes, referenced attachments, directories, and the HTML template from `share-manifest.json`, then compares Git blob hashes with the live remote tree. Unchanged files are not uploaded, and an unchanged target creates no commit. Deletions are limited to previously managed files explicitly withdrawn or replaced; other repository files are preserved. Missing source notes or attachments stop publication. Retrying regenerates the target and checks the actual remote result without synchronizing baselines or recovery state. Local `share-local.json` holds deployment commits, an unconfirmed commit, and published metadata for the sidebar.
 
-1. Open **功能拓展 → 同步与分享 → 笔记分享引导**.
+1. Open **分享 → 笔记分享引导**.
 2. Complete authorization, create or connect a separate public GitHub repository, and initialize the website.
 3. Open a note and click its share icon, or run **分享此笔记** from the command palette.
 4. Send the copied note name and website link to the reader.
@@ -58,7 +58,7 @@ Directory mappings use the existing vault file `.obsidian/plugins/simple-one/sha
 
 The sidebar always shows public directories. Previously saved flat or vault-folder layouts automatically use public directories. Its settings control paths, original-note location buttons, and batch-directory buttons. In **笔记分享设置**, use **检查网站部署** if the website has not caught up with your latest push.
 
-The reader supports collapsible headings, Callouts, formulas, Mermaid, and Simple One columns. Under **笔记分享设置 → 分享管理 → 当前分享模板右侧齿轮**, you can import or export an HTML template, or restore the default. Push again to apply a template change. Custom templates must retain the reader's required elements and script references.
+The reader supports collapsible headings, Callouts, formulas, Mermaid, and Simple One columns. It shares diagram controls with the plugin: canvas mode, drag-to-pan, mouse-anchored wheel zoom, fit and fullscreen. Columns retain saved proportions and stack on narrow screens; column editing stays in Obsidian. Under **分享 → 分享设置 → 当前分享模板右侧齿轮**, you can import or export an HTML template, or restore the default. Push again to apply a template change. Custom templates must retain the reader's required elements and script references.
 
 Shared notes and their included attachments are public, with no password protection. Deleting a share removes it from the current website but does not erase repository history or copies others have saved. Themes and plugin content may look different online.
 
@@ -88,3 +88,10 @@ Simple One has no analytics. Web capture visits the sites you request; sync and 
 The share website reads its selected HTML template from the plugin directory on each publish. The built-in template is `default.html`; a compressed copy in `main.js` restores it if missing, so community-plugin installation works without extra files or downloads. Existing HTML is preserved. Replacing it takes effect on the next publish without rebuilding the plugin. Development builds regenerate this file from `src/features/share/reader/default.html`.
 
 Imported templates are saved as `custom-name.html` (with a suffix for duplicate names) and can be selected from the HTML template dropdown. Restoring the default preserves custom files. Legacy `share-template.html` remains a custom template; select the default after upgrading to use the new default reader. Preserve edited HTML and custom templates when copying the plugin; missing defaults are restored automatically. Publishing fills only the appearance slot and preserves the selected template's own script and styles.
+
+
+## Personal settings and Tokens
+
+To refresh an existing default reader after upgrading, back up `default.html` as `custom-old-default.html` and remove the original only after that backup succeeds. Opening the default template then recreates it from the bundled version. Select the default template and publish again. Restoring the default selection alone does not overwrite an existing HTML file.
+
+See [personal files and credentials](docs/private-files.md). On Obsidian 1.11.4 or later, lightweight GitHub sync migrates its Token to Secret Storage before scrubbing the current JSON and recovery copy, preserving baselines and caches. Older Obsidian versions retain legacy local storage; upgrade to use Secret Storage. Sharing GitHub and EdgeOne Makers authorization uses Secret Storage or an existing CLI login. Historical backups and old plugin files are not automatically scrubbed.

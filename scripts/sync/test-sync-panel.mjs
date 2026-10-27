@@ -144,12 +144,12 @@ let shareTitleChanged;
 Object.assign(settingsTab, { settingsHost: shareContainer, desktopPage: 'share-root',
   plugin: { host: { share: { detachSettings() {}, renderSettings(root, guide, title, callback) {
     assert.equal(guide, false); assert.equal(title, false);
-    root.createDiv({ text: '分享管理与分享库管理' }); shareTitleChanged = callback;
+    root.createDiv({ text: '分享设置与分享库管理' }); shareTitleChanged = callback;
     callback('笔记分享设置');
   } } } }, settingsTitleChanged: () => {} });
 settingsTab.renderSettings();
 assert.equal(guides.at(-1).page, 'beginner-server');
-assert.match(shareContainer.textContent, /分享设置.*分享管理与分享库管理/);
+assert.equal(shareContainer.textContent, '分享设置与分享库管理', 'sharing groups render without an extra standalone heading');
 shareTitleChanged('分享库管理');
 assert.equal(shareContainer.querySelector('.simple-one-sync-beginner-links').style.display, 'none');
 shareTitleChanged('笔记分享设置');

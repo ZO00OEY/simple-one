@@ -1,4 +1,5 @@
 import { setActionIcon } from "../../shared/actionButton";
+import { compactSettingsSection } from "../../shared/settingsLayout";
 import { addIcon, Component, FuzzySuggestModal, ItemView, MarkdownView, Menu, Modal, Notice, Platform, Setting, setIcon, setTooltip, parseYaml, requireApiVersion, TFile, TFolder, WorkspaceLeaf, type ViewStateResult } from "obsidian";
 import type SimplePlugin from "../../main";
 import { runAsync } from "../../shared/async";
@@ -1952,12 +1953,7 @@ export default class ShareFeature extends Component {
     }
     if (!guide) {
       page.addClass("simple-share-compact-settings");
-      const group = (title: string): HTMLElement => {
-        const fieldset = page.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-        fieldset.createEl("legend", { text: title });
-        return fieldset;
-      };
-      const management = group("分享设置");
+      const management = compactSettingsSection(page, "分享设置");
       this.renderLibrarySelector(management, true, false, false);
       const selector = management.querySelector<HTMLElement>(".simple-share-library-selector")!;
       selector.title = "切换当前查看的分享库；发布目标可在笔记分享按钮的右键菜单中选择。";
@@ -1974,7 +1970,7 @@ export default class ShareFeature extends Component {
           .onChange(value => {
             if (value === "root" || value === "source") void this.change(manifest => { manifest.defaultPath = value; }).catch(error => this.fail(error));
           }));
-      const librariesGroup = group("分享库管理");
+      const librariesGroup = compactSettingsSection(page, "分享库管理");
       const libraries = ensureLibraries(this.manifest);
       for (const [id, stored] of Object.entries(libraries.entries)) {
         const library = id === libraries.active ? this.manifest : stored;

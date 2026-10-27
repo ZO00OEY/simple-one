@@ -1,3 +1,31 @@
+# Simple One 1.0.24
+
+## 设置与维护
+
+- 按同步、分享、日程、拓展、编辑、显示、主题整理使用说明，统一普通分组、按钮、复选框图标和行间距。
+- 附件清理、归位与内嵌图片转换共用操作栏；图片与非图片附件共用归位流程，保留确认与失败提示。
+- 清除失效设置字段、旧展开控件样式和多余包装；补充附件操作栏与流程图交互回归测试。
+
+## 流程图与分享阅读器
+
+- 插件和默认分享阅读器共用画布模式、拖动平移、鼠标位置缩放、适应宽度及全屏交互。
+- 修复全屏可能被编辑区裁切、切换笔记或卸载后残留界面的问题。
+- 保留离线阅读器、数学字体、图表类型和第三方许可证，不依赖额外 CDN。
+- 已有网站需要使用更新后的默认阅读器并重新推送；自定义模板不会被自动替换。
+
+## 凭据与升级
+
+- Obsidian 1.11.4+ 将轻量同步 GitHub Token 保存到 Secret Storage；已有 Token 先保存并读回验证，再从当前 JSON 和恢复副本移除，保留基线与缓存。
+- 补充迁移失败、部分文件写入失败、Token 清除和恢复测试。旧版 Obsidian 保留原本的本机 JSON 保存方式；建议升级以启用 Secret Storage。
+- 分享 GitHub 与 EdgeOne Makers 授权继续使用 Secret Storage 或本机 GitHub CLI。旧插件文件、历史备份和 Git 历史不会自动擦除。
+- 下载本 Release 的 `main.js`、`manifest.json`、`styles.css`，保留个人配置与自定义模板。公开源码与发布附件不包含个人配置、Token、日志或分享清单。
+
+English: shared settings and attachment components; shared pan/zoom/fullscreen diagram controls in Obsidian and the default reader; lightweight GitHub Token migration to Secret Storage on Obsidian 1.11.4+; updated bilingual guides and privacy documentation. Settings remain primarily Chinese. Preserve configuration and custom templates when upgrading.
+
+详见[个人配置与凭据](docs/private-files.md)和[本版验证记录](docs/release-review-1.0.24.md)。
+
+---
+
 # Simple One 1.0.23
 
 ## 更清晰的设置与日常工作流

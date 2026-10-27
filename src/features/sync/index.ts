@@ -1,4 +1,5 @@
 import { setActionIcon } from "../../shared/actionButton";
+import { compactSettingsSection } from "../../shared/settingsLayout";
 import { desktopProcess, type NodeFs, type NodePath, type NodeCommands } from "../../shared/desktopNode";
 import {
   addIcon,
@@ -12,6 +13,7 @@ import {
   Platform,
   PluginSettingTab,
   requestUrl,
+  requireApiVersion,
   setIcon,
   setTooltip,
   Setting,
@@ -289,8 +291,9 @@ export default class SyncFeature extends Component {
   get app(): App { return this.host.app; }
   get manifest() { return this.host.manifest; }
   openSettings?: (share?: boolean) => void;
-  private loadData(): Promise<unknown> { return readLocalSyncSettings(this.app.vault.adapter, this.app.vault.configDir, this.manifest.id); }
-  private saveData(value: unknown): Promise<void> { return writeLocalSyncSettings(this.app.vault.adapter, this.app.vault.configDir, this.manifest.id, value); }
+  private syncSecrets() { return requireApiVersion("1.11.4") ? this.app.secretStorage : undefined; }
+  private loadData(): Promise<unknown> { return readLocalSyncSettings(this.app.vault.adapter, this.app.vault.configDir, this.manifest.id, this.syncSecrets()); }
+  private saveData(value: unknown): Promise<void> { return writeLocalSyncSettings(this.app.vault.adapter, this.app.vault.configDir, this.manifest.id, value, this.syncSecrets()); }
 
   settings: PluginSettings = { ...DEFAULT_SETTINGS };
   private syncing = false;
@@ -4681,8 +4684,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     containerEl.addClass("simple-desktop-git-settings");
     const preview = this.currentDevice() !== "git";
     const section = (title: string): HTMLElement => {
-      const card = containerEl.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-      card.createEl("legend", { text: title });
+      const card = compactSettingsSection(containerEl, title);
       card.addClass("simple-one-sync-advanced__body");
       return card;
     };

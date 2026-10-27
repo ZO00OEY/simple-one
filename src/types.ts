@@ -124,8 +124,6 @@ export interface SimplePluginSettings {
   autoProcessPastedTextLinks: boolean;
   extractLinkTitle: boolean;
   enableTemplateFill: boolean;
-  enableTemplateFillAction: boolean;
-  showEmptySearchGroups: boolean;
   enableColorPreview: boolean;
   readableLineWidth: string;
   popupWindowScale: string;
@@ -714,8 +712,6 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   autoProcessPastedTextLinks: false,
   extractLinkTitle: true,
   enableTemplateFill: true,
-  enableTemplateFillAction: true,
-  showEmptySearchGroups: false,
   enableColorPreview: true,
   readableLineWidth: "900",
   popupWindowScale: "70",

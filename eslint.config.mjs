@@ -18,4 +18,9 @@ export default [
       }],
     },
   },
+  {
+    // Shared with the standalone browser reader, which has no Obsidian DOM helpers.
+    files: ["src/shared/mermaidViewer.ts"],
+    rules: { "obsidianmd/prefer-create-el": "off" },
+  },
 ];

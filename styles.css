@@ -3241,10 +3241,8 @@ body.simple-one-active .simple-anniversary-tag:hover,body.simple-one-active
   margin-top: 6px;
 }
 .simple-date-list-card.simple-reformat-settings-group .simple-anniversary-tags { padding-right: 36px; }
-.simple-recurring-modal .simple-json-modal-footer button { display: inline-flex; align-items: center; justify-content: center; height: 32px; min-height: 32px; padding: 5px 10px; border: 1px solid var(--background-modifier-border); border-radius: 5px; }
 .simple-recurring-modal .simple-json-modal-footer button.mod-cta { border-color: var(--interactive-accent); }
 .simple-recurring-modal button.simple-event-delete { margin-right: auto; background: var(--background-modifier-error); border-color: var(--background-modifier-error); color: var(--text-on-accent); }
-.simple-recurring-modal .simple-json-modal-footer svg { width: 17px; height: 17px; }
 
 .simple-recurring-row:first-child {
   border-top: none;
@@ -3863,65 +3861,25 @@ body.simple-one-active .simple-mermaid-frame[data-mode="fit"] .simple-mermaid-ca
   will-change: transform;
 }
 
-.simple-mermaid-overlay {
+.simple-mermaid-frame.is-fullscreen {
   position: fixed;
-  inset: 0;
+  inset: 16px;
   z-index: 1000;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  padding: 16px;
-  background: color-mix(in srgb, var(--background-primary) 94%, transparent);
-  backdrop-filter: blur(14px);
-}
-
-.simple-mermaid-overlay-header {
+  margin: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 0 4px 12px;
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
-  font-weight: var(--font-semibold);
-}
-
-.simple-mermaid-overlay-stage {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-l);
+  flex-direction: column;
   background: var(--background-primary);
-  box-shadow: 0 18px 60px rgb(0 0 0 / 18%);
 }
-
-.simple-mermaid-overlay-diagram {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  padding: 24px;
-}
-
-body.simple-one-active .simple-mermaid-overlay-diagram svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-  max-width: 100%;
-  max-height: 100%;
-}
+.simple-mermaid-frame.is-fullscreen .simple-mermaid-viewport { flex: 1; min-height: 0; }
+.simple-mermaid-frame[data-mode="canvas"] .simple-mermaid-viewport { min-height: 240px; }
 
 @media (max-width: 700px) {
   .simple-mermaid-frame {
     padding-inline: 8px;
   }
 
-  .simple-mermaid-overlay {
-    padding: 8px;
+  .simple-mermaid-frame.is-fullscreen {
+    inset: 8px;
   }
 }
 
@@ -4718,16 +4676,6 @@ body.simple-one-active.is-mobile.simple-mobile-native-header .view-header :is(.v
 .simple-one-sync-device-badges button.simple-one-sync-state-toggle:not(.is-applied) { background: var(--background-primary); color: var(--text-muted); }
 .simple-one-sync-entry-arrow { flex-shrink: 0; }
 .simple-one-sync-entry-arrow svg { width: 20px; height: 20px; }
-.simple-lightweight-sync-settings fieldset.simple-preview-checkbox-group { min-width: 0; padding: 8px 14px 12px; margin: 16px 0; border: 1px solid color-mix(in srgb, var(--background-modifier-border), var(--text-muted) 20%); border-radius: 6px; background: var(--background-primary); }
-.simple-lightweight-sync-settings legend { padding: 0 6px; font-size: var(--font-ui-small); color: var(--text-muted); font-weight: 600; }
-.simple-settings .simple-one-sync-settings .simple-lightweight-sync-settings fieldset.simple-preview-checkbox-group > .setting-item {
-  padding: 8px 0;
-  margin: 0;
-  border: 0;
-  box-shadow: none;
-  gap: 8px;
-  min-height: 44px;
-}
 .simple-settings .simple-one-sync-settings .simple-lightweight-sync-settings .setting-item-info { margin: 0; }
 .simple-settings .simple-one-sync-settings .simple-lightweight-sync-settings .setting-item-name { line-height: 1.5; }
 .simple-lightweight-sync-settings .setting-item-description { display: none; }
@@ -4737,30 +4685,15 @@ body.simple-one-active.is-mobile.simple-mobile-native-header .view-header :is(.v
 .simple-lightweight-sync-settings .simple-one-sync-checkbox-row .setting-item-control { flex: 0 0 auto; }
 .simple-lightweight-sync-settings .simple-one-sync-checkbox-row .setting-item-info { flex: 1; }
 .simple-lightweight-image-warning { color: var(--text-error); margin-left: 4px; font-size: var(--font-ui-smaller); }
-.simple-lightweight-sync-settings button.simple-lightweight-action,
-.simple-lightweight-sync-settings .setting-item-control button { width: 26px; height: 26px; padding: 4px; border: 1px solid var(--background-modifier-border); border-radius: 5px; background: var(--background-secondary); }
-.simple-lightweight-sync-settings button svg { width: 16px; height: 16px; }
 .simple-lightweight-plugin-modal textarea { width: 100%; min-height: 150px; resize: vertical; }
 .simple-lightweight-plugin-modal button { border: 1px solid var(--background-modifier-border); border-radius: 5px; }
 .simple-lightweight-plugin-modal .setting-item-description:empty { display: none; }
-.simple-desktop-git-settings fieldset.simple-preview-checkbox-group { min-width: 0; margin: 16px 0; padding: 8px 14px 12px; border: 1px solid color-mix(in srgb, var(--background-modifier-border), var(--text-muted) 20%); border-radius: 6px; background: var(--background-primary); }
-.simple-desktop-git-settings legend { padding: 0 6px; color: var(--text-muted); font-size: var(--font-ui-small); font-weight: 600; }
-.simple-settings .simple-one-sync-settings.simple-desktop-git-settings .simple-one-sync-advanced__body > .setting-item {
-  min-height: 44px;
-  padding: 6px 0;
-  margin: 0;
-  gap: 12px;
-  border: 0;
-  box-shadow: none;
-}
 .simple-desktop-git-settings .setting-item-description { display: none; }
 .simple-desktop-git-settings .setting-item-name { font-size: var(--font-ui-small); font-weight: var(--font-normal); }
 .simple-desktop-git-settings .setting-item-control { flex: 0 1 42%; }
 .simple-desktop-git-settings .setting-item-control input { width: 100%; height: 30px; }
 .simple-desktop-git-settings .simple-sync-checkbox-row > input[type="checkbox"] { width: 17px; height: 17px; margin: 0; flex-shrink: 0; accent-color: var(--interactive-accent); }
 .simple-desktop-git-settings .simple-sync-checkbox-row .setting-item-control { display: none; }
-.simple-desktop-git-settings .setting-item-control button { width: 26px; height: 26px; padding: 4px; border: 1px solid var(--background-modifier-border); border-radius: 5px; background: var(--background-secondary); }
-.simple-desktop-git-settings .setting-item-control button svg { width: 16px; height: 16px; }
 
 
 
@@ -8605,37 +8538,13 @@ body.simple-desktop-typography .workspace-leaf-content[data-type="markdown"] :is
     grid-template-columns: minmax(0, 1fr);
   }
 }
-.simple-reformat-collapsible[hidden] { display: none; }
 .simple-reformat-expanded-settings {
   margin: 0 0 8px 36px;
   padding: 0;
   min-width: 0;
 }
-.simple-display-option-row.simple-automatic-option {
-  display: flex;
-  justify-content: flex-start;
-  gap: 6px;
-}
-.simple-automatic-option > button.simple-automatic-expand {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 24px;
-  width: 24px;
-  height: 24px;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  color: var(--text-muted);
-}
-.simple-automatic-expand svg { width: 16px; height: 16px; }
-.simple-automatic-option > button.simple-automatic-expand:hover { background: var(--background-modifier-hover); }
 /* Compact share settings, matching diary and formatting panels. */
-.simple-settings .simple-one-sync-settings.simple-desktop-git-settings .simple-one-sync-advanced__body > .setting-item,
-.simple-settings .simple-one-sync-settings .simple-lightweight-sync-settings fieldset.simple-preview-checkbox-group > .setting-item,
-.simple-settings :is(.simple-desktop-git-settings, .simple-lightweight-sync-settings, .simple-share-compact-settings) fieldset.simple-preview-checkbox-group > .setting-item {
+.simple-settings .simple-compact-settings-section > .setting-item {
   border: 0;
   box-shadow: none;
   margin: 0;
@@ -8663,27 +8572,28 @@ body.simple-desktop-typography .workspace-leaf-content[data-type="markdown"] :is
   height: 28px;
   box-sizing: border-box;
 }
-.simple-share-compact-settings fieldset.simple-preview-checkbox-group {
+.simple-settings fieldset.simple-compact-settings-section {
   min-width: 0; margin: 16px 0; padding: 8px 14px 12px;
   border: 1px solid color-mix(in srgb, var(--background-modifier-border), var(--text-muted) 20%);
   border-radius: 6px; background: var(--background-primary);
 }
-.simple-share-compact-settings fieldset > .setting-item,
 .simple-share-template-modal .setting-item { border: 0; padding: 7px 8px; min-height: 42px; }
-.simple-settings :is(.simple-share-compact-settings, .simple-desktop-git-settings, .simple-lightweight-sync-settings) fieldset .setting-item::before,
-.simple-settings :is(.simple-share-compact-settings, .simple-desktop-git-settings, .simple-lightweight-sync-settings) fieldset .setting-item::after {
+.simple-settings .simple-compact-settings-section .setting-item::before,
+.simple-settings .simple-compact-settings-section .setting-item::after {
   content: none;
   display: none;
 }
 .simple-share-compact-settings .setting-item-info { min-width: 0; }
 .simple-share-compact-settings .setting-item-name { overflow-wrap: anywhere; }
-.simple-share-compact-settings .setting-item-control button,
+.simple-compact-settings-section .setting-item-control button,
+.simple-compact-settings-section button.simple-lightweight-action,
 .simple-share-template-modal .setting-item-control button {
-  width: 26px; height: 26px; min-width: 26px; padding: 4px; border-radius: 6px;
+  width: var(--simple-action-square); height: var(--simple-action-height); min-width: var(--simple-action-square); padding: 3px; border-radius: var(--simple-action-radius);
   border: 1px solid var(--background-modifier-border); background: var(--background-secondary); box-shadow: none;
 }
-.simple-share-compact-settings .setting-item-control button svg,
-.simple-share-template-modal .setting-item-control button svg { width: 16px; height: 16px; }
+.simple-compact-settings-section .setting-item-control button svg,
+.simple-compact-settings-section button.simple-lightweight-action svg,
+.simple-share-template-modal .setting-item-control button svg { width: var(--simple-action-icon); height: var(--simple-action-icon); }
 .simple-share-compact-settings .simple-share-library-add { min-height: 32px; padding-top: 0; }
 .simple-share-library-add .setting-item-info { display: none; }
 .simple-share-library-add .setting-item-control { width: 100%; justify-content: flex-end; }
@@ -8711,10 +8621,10 @@ body.simple-desktop-typography .workspace-leaf-content[data-type="markdown"] :is
   font: inherit; color: inherit;
 }
 .simple-one-sync-settings .simple-lightweight-sync-settings .simple-one-sync-checkbox-row > button.simple-lightweight-action {
-  flex: 0 0 26px; margin-left: auto; align-self: center;
+  flex: 0 0 var(--simple-action-square); margin-left: auto; align-self: center;
 }
-.simple-display-checkbox-label .simple-extension-option-icon { display: inline-flex; align-items: center; color: var(--text-muted); }
-.simple-extension-option-icon svg { width: 16px; height: 16px; }
+.simple-display-checkbox-label .simple-checkbox-icon { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--text-muted); }
+.simple-checkbox-icon svg { width: 16px; height: 16px; }
 
 /* Shared action sizes. Scoped utilities override older feature-specific sizes. */
 body {

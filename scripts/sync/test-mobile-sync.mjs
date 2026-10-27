@@ -864,6 +864,7 @@ try {
         export class TAbstractFile {} export class TFile {} export class FileSystemAdapter {}
         export class App {} export class Menu {} export class Notice {} export class Setting { constructor(parent) { if (globalThis.guideSetting) return globalThis.guideSetting(parent); } } export class WorkspaceLeaf {}
         export const Platform = { isMobile: false }; export const addIcon = () => {};
+        export const requireApiVersion = () => false;
         export const requestUrl = () => {}; export const setIcon = () => {}; export const setTooltip = () => {};
       ` }));
     } }] });
