@@ -259,7 +259,6 @@ export class SimpleSettingTab extends PluginSettingTab {
     if (this.page.type !== "sync-sharing") this.syncTab.hide();
     containerEl.empty();
     containerEl.addClass("simple-settings");
-    if (this.page.type === "sync-sharing") this.renderPlatformHint(containerEl);
 
     if (this.page.type === "sync-sharing") {
       const titleEl = this.renderPageHeader(containerEl, "同步", () => {
@@ -324,15 +323,6 @@ export class SimpleSettingTab extends PluginSettingTab {
     } else if (this.page.type === "category-sites") {
       this.renderCategorySites(containerEl, this.page.categoryId);
     }
-  }
-
-  private renderPlatformHint(container: HTMLElement): HTMLDivElement {
-    return container.createDiv({
-      cls: "simple-platform-hint",
-      text: this.plugin.isMobile
-        ? "已使用手机平台，已切换为手机端专属配置"
-        : `检测到当前平台为 ${this.plugin.platformName}，当前使用桌面显示设置。`,
-    });
   }
 
   private renderOverview(container: HTMLElement): void {

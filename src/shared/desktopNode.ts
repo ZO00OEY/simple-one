@@ -21,8 +21,17 @@ interface NodeHash { update(value: string | Uint8Array): NodeHash; digest(encodi
 export interface NodeCrypto { createHash(algorithm: string): NodeHash }
 interface OutputStream { on(event: "data", callback: (chunk: unknown) => void): void }
 interface InputStream { on(event: "error", callback: () => void): void; end(value: string): void }
+export interface NodeChildProcess {
+  pid?: number;
+  exitCode: number | null;
+  signalCode: string | null;
+  kill(signal?: string): boolean;
+  stdout?: OutputStream | null;
+  stderr?: OutputStream | null;
+  stdin?: InputStream | null;
+}
 export interface NodeCommands {
-  execFile(program: string, args: string[], options: { cwd: string; env: Record<string, string | undefined>; windowsHide: boolean; timeout: number; maxBuffer: number; signal?: AbortSignal }, callback: (error: Error | null, stdout: string, stderr: string) => void): { stdout?: OutputStream | null; stderr?: OutputStream | null; stdin?: InputStream | null };
+  execFile(program: string, args: string[], options: { cwd: string; env: Record<string, string | undefined>; windowsHide: boolean; timeout: number; maxBuffer: number; signal?: AbortSignal }, callback: (error: Error | null, stdout: string, stderr: string) => void): NodeChildProcess;
 }
 export const desktopProcess = typeof process === "undefined" ? undefined : process as unknown as { versions?: { node?: string }; platform: string; env: Record<string, string | undefined> };
 export function base64Bytes(value: string): Uint8Array { return Uint8Array.from(atob(value), char => char.charCodeAt(0)); }

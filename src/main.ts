@@ -79,14 +79,6 @@ export default class SimplePlugin extends Plugin {
   share!: ShareFeature;
   readonly isMobile = Platform.isMobile;
 
-  get platformName(): string {
-    if (Platform.isAndroidApp) return "Android";
-    if (Platform.isIosApp) return "iOS / iPadOS";
-    if (Platform.isWin) return "Windows";
-    if (Platform.isMacOS) return "macOS";
-    return this.isMobile ? "移动平台" : "桌面平台";
-  }
-
   get displaySettings() {
     return activeDisplayProfile(this.settings, this.isMobile);
   }

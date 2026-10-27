@@ -9,6 +9,7 @@ const obsidian = new Proxy({}, { get: () => function () {} });
 const context = vm.createContext({ module: { exports: {} }, require: () => obsidian, console,
   process: { platform: "win32", env: {} } });
 context.window = context;
+context.setTimeout = setTimeout; context.clearTimeout = clearTimeout;
 vm.runInContext(output.outputFiles[0].text, context);
 const Sync = context.module.exports.default;
 function fixture() {
@@ -23,31 +24,63 @@ function fixture() {
 let f = fixture();
 assert.equal(await f.sync.cleanIndexLock(), true);
 assert.equal(f.removed(), true);
-for (const processName of ["git", "git.exe", "git-remote-https", "scalar"]) {
-  f = fixture(); f.sync.exec = async () => processName;
-  await assert.rejects(() => f.sync.cleanIndexLock(), /Git 进程/);
-  assert.equal(f.removed(), false);
-}
-for (const props of [{ size: 10 }, { mtimeMs: Date.now() }, { isFile: () => false }]) {
+// Explicit confirmation allows recent/nonempty locks without inspecting processes.
+for (const props of [{ size: 10 }, { mtimeMs: Date.now() }]) {
   f = fixture(); Object.assign(f.stat, props);
-  await assert.rejects(() => f.sync.cleanIndexLock(), /已保留/);
-  assert.equal(f.removed(), false);
+  f.sync.exec = async () => { throw new Error("must not inspect processes"); };
+  assert.equal(await f.sync.cleanIndexLock(), true);
+  assert.equal(f.removed(), true);
 }
-f = fixture(); f.sync.exec = async () => { throw new Error("process inspection failed"); };
-await assert.rejects(() => f.sync.cleanIndexLock(), /无法确认/);
+f = fixture(); f.stat.isFile = () => false;
+await assert.rejects(() => f.sync.cleanIndexLock(), /不是普通文件/);
 assert.equal(f.removed(), false);
 f = fixture();
 const original = await f.sync.indexLock();
-original.fs.lstat = async () => ({ ...f.stat, mtimeMs: f.stat.mtimeMs + 1 });
+original.fs.unlink = async () => { throw new Error("access denied"); };
 f.sync.indexLock = async () => original;
-await assert.rejects(() => f.sync.cleanIndexLock(), /发生变化/);
-assert.equal(f.removed(), false);
+await assert.rejects(() => f.sync.cleanIndexLock(), /access denied/);
 f = fixture(); f.sync.indexLock = async () => null;
 assert.equal(await f.sync.cleanIndexLock(), false);
 
 f = fixture();
 Object.assign(f.sync, { enqueueDesktopGit: async task => task(), ensureDesktopGit: async () => {},
   getInterruptedGitOperation: async () => null, refreshSyncView: async () => {},
+  getActiveSyncError: () => null, clearDesktopTimeouts: () => {},
+  interruptGitProcesses: async () => {},
   desktopCommitOnly: async () => { throw new Error("must not commit for lock-only repair"); } });
 assert.equal((await f.sync.repairInterruptedGitOperation()).lockOnly, true);
+for (const [message, expected] of [["fatal: Unable to create '.git/index.lock': File exists", true], ["authentication failed", false]]) {
+  let resolved = false;
+  f.sync.getActiveSyncError = () => ({ message });
+  f.sync.recordSuccess = async (context) => { assert.equal(context, "同步修复"); resolved = true; };
+  await f.sync.repairInterruptedGitOperation();
+  assert.equal(resolved, expected);
+}
+const order = [];
+f.sync.clearDesktopTimeouts = () => order.push("pause");
+f.sync.interruptGitProcesses = async () => { order.push("interrupt"); };
+f.sync.enqueueDesktopGit = async task => { order.push("queue"); await task(); };
+await f.sync.repairInterruptedGitOperation();
+assert.deepEqual(order, ["pause", "interrupt", "queue"]);
+f.sync.interruptGitProcesses = async () => { throw new Error("cannot stop Git"); };
+order.length = 0;
+await assert.rejects(() => f.sync.repairInterruptedGitOperation(), /cannot stop Git/);
+assert.deepEqual(order, ["pause"]);
+// Interrupt only the exact current-instance child PID; no global process lookup.
+f = fixture();
+let finish;
+const finished = new Promise(resolve => { finish = resolve; });
+const child = { pid: 12345, exitCode: null, signalCode: null };
+f.sync.desktopGitProcesses = new Map([[child, finished]]);
+const calls = [];
+f.sync.exec = async (program, args) => {
+  calls.push([program, [...args]]);
+  f.sync.desktopGitProcesses.delete(child);
+  finish();
+};
+await f.sync.interruptGitProcesses();
+assert.deepEqual(calls, [["taskkill.exe", ["/PID", "12345", "/T", "/F"]]]);
+calls.length = 0;
+await f.sync.interruptGitProcesses();
+assert.deepEqual(calls, []);
 console.log("index lock repair checks passed");

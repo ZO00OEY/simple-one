@@ -370,12 +370,7 @@ body.simple-one-active .notice-container .notice {
   box-sizing: border-box;
 }
 
-.simple-platform-hint {
-  margin: 0 0 12px;
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-  line-height: 1.5;
-}
+
 
 /* Obsidian 1.13 renders each setting as a separate card. Keep plugin settings
    as rows inside their shared section, including nested settings pages. */
@@ -8679,3 +8674,17 @@ body :is(button, [role="button"]).simple-action-button--text[class]:not(.mod-cta
 body :is(button, [role="button"]).simple-action-button[class][hidden] { display: none; }
 body :is(button, [role="button"]).simple-action-button[class]:hover:not(:disabled) { background: var(--background-modifier-hover); }
 body :is(button, [role="button"]).simple-action-button--danger[class]:hover:not(:disabled) { background: var(--background-modifier-error-hover); }
+
+/* Sync repair uses the same typography as settings rows. */
+.simple-one-sync-repair-modal { width: 480px; max-width: calc(100vw - 32px); }
+.simple-one-sync-repair-modal .modal-content,
+.simple-one-sync-repair-modal .modal-title,
+.simple-one-sync-repair-modal button {
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-small);
+  line-height: 1.6;
+}
+.simple-one-sync-repair-modal .modal-title { font-weight: var(--font-semibold); }
+.simple-one-sync-repair-modal .modal-content > p { margin: 0 0 12px; }
+.simple-one-sync-repair-modal .simple-one-sync-repair-warning { color: var(--text-error); }
+.simple-one-sync-repair-modal .modal-button-container { margin-top: 20px; }

@@ -1,6 +1,6 @@
 import { setActionIcon } from "../../shared/actionButton";
 import { compactSettingsSection } from "../../shared/settingsLayout";
-import { desktopProcess, type NodeFs, type NodePath, type NodeCommands } from "../../shared/desktopNode";
+import { desktopProcess, type NodeFs, type NodePath, type NodeCommands, type NodeChildProcess } from "../../shared/desktopNode";
 import {
   addIcon,
   App,
@@ -33,7 +33,7 @@ import {
   parseGitStatus
 } from "./gitStatus";
 import { applyConflictResolutions, ConflictBlock, parseConflictBlocks } from "./conflict";
-import { describeGitError, isMissingRemoteRefError, isTransientGitNetworkError, isUncertainGitAuthError } from "./gitError";
+import { describeGitIndexLockError, describeGitError, isMissingRemoteRefError, isTransientGitNetworkError, isUncertainGitAuthError } from "./gitError";
 import { LiveReview, ZoeySyncConflictPreviewModal } from "./conflictPreview";
 import { SetupDifferencesModal } from "./setupDifferences";
 import { GitSetup, OverlapChoice, SetupOverlapContent, SetupPreview, VerifiedRepo, setupGitIgnore, missingSetupIgnoreRules, pathBatches, explainSetupError, parseGithubRepoUrl } from "./onboarding";
@@ -314,6 +314,7 @@ export default class SyncFeature extends Component {
   private desktopStartupTimer?: number;
   private desktopStartupGeneration = 0;
   private desktopGitQueue: Promise<void> = Promise.resolve();
+  private desktopGitProcesses = new Map<NodeChildProcess, Promise<void>>();
   private setupGitPaused = false;
   private desktopGitTrace: string[] = [];
   private sharedSettingsWritable = true;
@@ -1200,31 +1201,34 @@ export default class SyncFeature extends Component {
     }
   }
 
+  private async interruptGitProcesses(): Promise<void> {
+    // Only handles launched by this instance for this vault; never scan system Git processes.
+    for (const [child, finished] of [...this.desktopGitProcesses]) {
+      if (child.exitCode !== null || child.signalCode !== null) continue;
+      if (desktopProcess?.platform === "win32" && child.pid) {
+        try { await this.exec("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"]); }
+        catch (error) { if (this.desktopGitProcesses.has(child)) throw error; }
+      } else if (!child.kill("SIGTERM") && this.desktopGitProcesses.has(child)) {
+        throw new Error("无法中断当前库的 Git 操作，已停止清理");
+      }
+      let timer: number | undefined;
+      try {
+        await Promise.race([finished, new Promise<never>((_, reject) => {
+          timer = window.setTimeout(() => reject(new Error("当前库的 Git 操作尚未退出，已停止清理")), 10000);
+        })]);
+      } finally { if (timer !== undefined) window.clearTimeout(timer); }
+    }
+  }
+
   private async cleanIndexLock(): Promise<boolean> {
     const lock = await this.indexLock();
     if (!lock) return false;
     const { fs, path, stat } = lock;
-    if (!stat.isFile() || stat.size !== 0 || Date.now() - stat.mtimeMs < 300000) {
-      throw new Error("索引锁较新、包含数据或不是普通文件，已保留；请等待 Git 操作结束后重试");
+    if (!stat.isFile()) throw new Error("索引锁路径不是普通文件，无法清理");
+    try { await fs.unlink(path); }
+    catch (error) {
+      if ((error as { code?: string }).code !== "ENOENT") throw error;
     }
-    const checkProcesses = async () => {
-      let output: string;
-      try {
-        output = desktopProcess?.platform === "win32"
-          ? await this.exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference='Stop'; Get-Process | Where-Object { $_.ProcessName -match '^(git|git-.+|scalar)$' } | ForEach-Object { $_.ProcessName }"], false, true, 15000)
-          : await this.exec("ps", ["-A", "-o", "comm="], false, true, 15000);
-      } catch { throw new Error("无法确认 Git 进程状态，已保留索引锁，请手动检查"); }
-      if (output.split(/\r?\n/).some(line => /^(?:.*[/\\])?(?:git(?:-.*)?|scalar)(?:\.exe)?$/i.test(line.trim()))) {
-        throw new Error("检测到 Git 进程正在运行，已保留索引锁；请等待操作结束后重试");
-      }
-    };
-    await checkProcesses();
-    await checkProcesses();
-    const current = await fs.lstat(path);
-    if (!current.isFile() || current.size !== stat.size || current.mtimeMs !== stat.mtimeMs) {
-      throw new Error("检查期间索引锁发生变化，已停止清理，请稍后重试");
-    }
-    await fs.unlink(path);
     return true;
   }
 
@@ -1258,10 +1262,17 @@ export default class SyncFeature extends Component {
   }
 
   async repairInterruptedGitOperation(): Promise<GitRepairResult> {
+    // Interrupt before waiting for the queue, which may contain the blocked Git operation.
+    this.clearDesktopTimeouts();
+    await this.interruptGitProcesses();
     let result: GitRepairResult | undefined;
     await this.enqueueDesktopGit(async () => {
       await this.ensureDesktopGit();
       const cleanedLock = await this.cleanIndexLock();
+      const activeError = this.getActiveSyncError();
+      if (cleanedLock && activeError && describeGitIndexLockError(activeError.message)) {
+        await this.recordSuccess("同步修复", "索引锁已清理，请重新同步");
+      }
       const operation = await this.getInterruptedGitOperation();
       if (!operation) {
         if (!cleanedLock) throw new Error("没有检测到残留索引锁或可自动修复的未完成 Git 操作");
@@ -2173,11 +2184,15 @@ export default class SyncFeature extends Component {
       env.GIT_CONFIG_VALUE_1 = "!gh auth git-credential";
     }
     return await new Promise((resolve, reject) => {
+      let markFinished: () => void;
+      const finished = new Promise<void>(done => { markFinished = done; });
       const child = childProcess.execFile(
         program,
         args,
         { cwd: this.vaultBasePath(), env, windowsHide: true, timeout: timeoutMs, maxBuffer: 20 * 1024 * 1024, signal },
         (error, stdout, stderr) => {
+          this.desktopGitProcesses.delete(child);
+          markFinished();
           if (error) {
             const diagnostic = (stderr || stdout || error.message).trim();
             const secret = stdinText?.trim();
@@ -2186,6 +2201,10 @@ export default class SyncFeature extends Component {
           else resolve(trim ? stdout.trim() : stdout);
         }
       );
+      // Commands redirecting Git to another repository are not current-vault tasks.
+      if (program === "git" && !args.some(arg => /^-C|^--(?:git-dir|work-tree)(?:=|$)/.test(arg))) {
+        this.desktopGitProcesses.set(child, finished);
+      }
       if (onOutput) {
         child.stdout?.on("data", (chunk: unknown) => onOutput(String(chunk)));
         child.stderr?.on("data", (chunk: unknown) => onOutput(String(chunk)));
@@ -2586,30 +2605,28 @@ class GitRepairModal extends Modal {
   onOpen(): void {
     const container = this.contentEl;
     container.empty();
-    container.createEl("h2", { text: "恢复正常同步" });
+    this.modalEl.addClass("simple-one-sync-repair-modal");
+    const lockOnly = this.operation === "Git 索引锁";
+    this.titleEl.setText(lockOnly ? "清理同步锁" : "修复同步");
     container.createEl("p", {
-      text: `检测到 ${this.operation}。修复前会重新检查当前状态。`
+      text: lockOnly
+        ? "中断 Git 操作并清理索引锁后，请重新同步。"
+        : `检测到 ${this.operation}。将备份本机修改、退出异常操作，并检查云端更新。`
     });
-    const list = container.createEl("ul");
-    list.createEl("li", { text: "检查残留索引锁：仅清理超过 5 分钟的空锁文件；检测到 Git 进程或无法确认时保留锁。仅有锁文件时，清理后请重新同步。" });
-    list.createEl("li", { text: "保护当前本机内容，并退出未完成的异常操作。" });
-    list.createEl("li", { text: "以恢复后的本机内容建立一个新的 commit。" });
-    list.createEl("li", { text: "Fetch 云端版本并在本机 merge；如有冲突，在右侧面板逐项选择。" });
-    list.createEl("li", { text: "修复完成后等待正常 push 计时，不会立即上传。" });
     container.createEl("p", {
-      text: "操作前会建立临时安全备份；恢复成功后自动清理，通常不需要你处理。",
-      cls: "simple-one-sync-conflict__warning"
+      text: "将中断本插件为当前笔记库启动的 Git 操作，再清理锁。其他仓库及外部工具启动的 Git 操作不会被中断。",
+      cls: "simple-one-sync-repair-warning"
     });
 
     const actions = container.createDiv({ cls: "modal-button-container" });
-    const cancel = actions.createEl("button", { text: "暂不修复" });
+    const cancel = actions.createEl("button", { text: "取消" });
     cancel.addEventListener("click", () => this.close());
-    const repair = actions.createEl("button", { text: "确认恢复", cls: "mod-cta" });
+    const repair = actions.createEl("button", { text: lockOnly ? "确认清理" : "确认修复", cls: "mod-warning" });
     repair.addEventListener("click", () => {
       if (this.repairing) return;
       this.repairing = true;
       this.close();
-      new Notice("同步：正在恢复本机版本并检查云端更新…", 8000);
+      new Notice(lockOnly ? "同步：正在清理索引锁…" : "同步：正在修复…", 8000);
       void this.plugin
         .repairInterruptedGitOperation()
         .then((result) => {
@@ -4775,7 +4792,7 @@ export class SyncSettingsTab extends PluginSettingTab {
       }));
     new Setting(advancedBody)
       .setName("检查并修复未完成的 Git 操作")
-      .setDesc("检查并清理残留索引锁，或恢复未完成的 rebase、merge 等操作；检测到 Git 进程时保留锁。恢复操作会重新 commit、fetch 并 merge，不会立即 push。")
+      .setDesc("清理索引锁或修复中断的 Git 操作。操作前会弹窗确认。")
       .addButton((button) =>
         button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("play").setTooltip("检查并修复未完成的 Git 操作").setDisabled(preview).onClick(async () => {
           button.setDisabled(true);

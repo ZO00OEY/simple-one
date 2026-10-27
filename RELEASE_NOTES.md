@@ -1,3 +1,17 @@
+# Simple One 1.0.26
+
+- 精简同步修复弹窗，统一设置页字体与间距，使用红色确认按钮提示清理风险。
+- 清理索引锁前，仅中断当前插件实例为当前笔记库启动的 Git 操作；不扫描或终止其他仓库及外部工具的 Git 进程。
+- 取消索引锁的时间与大小限制；中断失败时停止清理，并保留错误提示。
+- 清锁成功后更新活动错误状态，保留历史日志；清理后仍需重新同步。
+- 移除多余的平台检测说明及专用代码，保留按平台应用显示设置的逻辑。
+
+English: clearer sync repair confirmation, scoped interruption of Git tasks started by this plugin for the current vault, corrected post-repair status, and removal of redundant platform hints.
+
+升级仅替换 `main.js`、`manifest.json`、`styles.css`，保留个人配置。源码与发布附件不包含个人设置、凭据、日志或分享清单。
+
+---
+
 # Simple One 1.0.25
 
 本版作为对外介绍的复核版本，沿用 1.0.24 的功能和界面，不新增功能或改变配置格式。
