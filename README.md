@@ -64,13 +64,13 @@ Choose one vault sync method per device. Avoid multiple tools writing to the sam
 
 See the [user guide](USAGE.md), [personal files and credentials](docs/private-files.md) and [technical review notes](docs/automated-review-notes.md).
 
-## In 1.0.24
+## In 1.0.25
 
-This release consolidates settings groups, checkbox icons, buttons and attachment actions, merges attachment move workflows, and removes obsolete settings and styles. The plugin and default sharing reader share diagram controls: canvas mode, drag-to-pan, mouse-anchored wheel zoom, fit and fullscreen. Published columns retain saved proportions and stack on narrow screens; editing gestures remain in Obsidian.
+This release is the verified release baseline for the settings, attachment and reader improvements introduced in 1.0.24. Shared settings groups, checkbox icons and buttons keep the interface consistent. Attachment operations share selection and move workflows. The plugin and default sharing reader share canvas mode, drag-to-pan, mouse-anchored wheel zoom, fit and fullscreen. Published columns retain saved proportions and stack on narrow screens; editing gestures remain in Obsidian.
 
 The settings interface remains primarily Chinese; English and Chinese documentation are maintained together. Existing websites need another publish using the updated default reader to receive the new controls. Keep personal settings and custom templates when upgrading.
 
-See the [release notes](RELEASE_NOTES.md) and [review record](docs/release-review-1.0.24.md) for scope and limitations. Not every website rule, device or third-party theme combination has been validated.
+See the [release notes](RELEASE_NOTES.md) and [review record](docs/release-review-1.0.25.md) for scope and limitations. Not every website rule, device or third-party theme combination has been validated.
 
 ## Development and feedback
 

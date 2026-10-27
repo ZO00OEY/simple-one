@@ -28,6 +28,14 @@
 - 源码仓库的忽略规则比私人笔记库严格，不要把对 `data.json*` 的排除规则照搬到私人笔记库。公开分享使用独立分享库。
 - 不要发送整个插件目录排查问题；提供脱敏错误、复现步骤和截图。
 
+## Secret Storage 的保护边界
+
+Secret Storage 将密钥放在 Obsidian 管理、与笔记库关联的本机存储中，插件配置只保留引用。成功迁移后的当前 JSON 不再包含被迁移的 Token，降低误上传普通配置时泄露密钥的风险。
+
+它不是所有私人文件都可公开的保证，也不隔离拥有相应访问能力的插件或已被控制的电脑。历史备份、旧版配置、手动记录密钥的笔记，以及完整应用数据备份仍可能包含凭据。已经公开过的 Token 需要在服务端撤销并更换，迁移不会使旧 Token 失效。
+
+官方参考：[Store secrets](https://docs.obsidian.md/plugins/guides/secret-storage)。
+
 ## English summary
 
 Personal preferences, device state and credentials are different categories. `data.json` stores personal settings and rules. `sync-settings.json` stores cross-device settings, including repository and author information. Both stay out of public plugin releases.
@@ -37,3 +45,5 @@ Personal preferences, device state and credentials are different categories. `da
 Sharing GitHub Tokens and EdgeOne Tokens use Obsidian Secret Storage or a local GitHub CLI login. The plugin does not transfer those secrets through its shared JSON files. `share-manifest.json` contains private source paths; the website receives generated public notes and assets, not that private manifest.
 
 Release assets contain only `main.js`, `manifest.json` and `styles.css`. Preserve settings and custom templates when upgrading, and authorize each device separately when needed.
+
+Secret Storage separates secrets from ordinary plugin JSON. It reduces accidental disclosure after migration, but does not make backups, old configurations, other plugins or compromised devices safe. A previously exposed Token must be revoked at its provider; migration does not invalidate old copies. See the official [Secret Storage guide](https://docs.obsidian.md/plugins/guides/secret-storage).

@@ -1,3 +1,17 @@
+# Simple One 1.0.25
+
+本版作为对外介绍的复核版本，沿用 1.0.24 的功能和界面，不新增功能或改变配置格式。
+
+- 重新核查同步与分享凭据的读写、迁移失败保护、恢复副本及公开发布边界。
+- 完善 Secret Storage 说明，区分当前配置、旧备份、其他设备与本机 GitHub CLI 授权。
+- 更新中英文介绍、版本映射与发布核对记录。安装仍只需要三个标准程序文件，升级保留个人配置与自定义模板。
+
+English: a verified release baseline for the 1.0.24 feature set. This release refreshes release metadata and documentation, and rechecks credentials, recovery and public-export boundaries. No new features or configuration-format changes are introduced.
+
+详见[本版验证记录](docs/release-review-1.0.25.md)及[个人配置与凭据说明](docs/private-files.md)。
+
+---
+
 # Simple One 1.0.24
 
 ## 设置与维护
