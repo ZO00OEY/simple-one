@@ -20,13 +20,30 @@ try {
   globalThis.window = globalThis;
   const onboarding = require(bundle);
   const { parseGithubRepoUrl, explainSetupError } = onboarding;
-  class GitSetup extends onboarding.GitSetup { constructor(path, run, configDir = ".obsidian") { super(path, run, configDir); } }
+  class GitSetup extends onboarding.GitSetup {
+    constructor(path, run, configDir = ".obsidian") { super(path, run, configDir); }
+    async finish(repo, ...args) {
+      const command = this.run;
+      this.run = async (program, commandArgs, ...rest) => {
+        assert.notEqual(commandArgs[0], 'push', 'onboarding must not attempt a push, even when uploading is unavailable');
+        return command(program, commandArgs, ...rest);
+      };
+      let result;
+      try { result = await super.finish(repo, ...args); }
+      finally { this.run = command; }
+      const remoteHead = run(this.vaultPath, ['ls-remote', 'origin', 'refs/heads/' + repo.branch]).split(/\s/)[0];
+      assert.equal(remoteHead, repo.remoteSha, 'completing onboarding leaves the remote unchanged');
+      // Existing fixture scenarios continue with a separate manual sync.
+      await command('git', ['push', '-u', 'origin', 'HEAD:' + repo.branch]);
+      return result;
+    }
+  }
   const missingSetupIgnoreRules = (existing) => onboarding.missingSetupIgnoreRules(existing, ".obsidian");
   const applySetupIgnoreBase = preview => onboarding.applySetupIgnoreBase(preview, ".obsidian");
   assert.equal(parseGithubRepoUrl("https://github.com/example/vault.git").name, "vault");
   assert.throws(() => parseGithubRepoUrl("https://gitee.com/example/vault"));
   assert.match(explainSetupError(new Error("repository not found")), /地址错误|无权访问/);
-  assert.match(explainSetupError(new Error("fatal: Unable to create 'P:/Obsidian/.git/index.lock': File exists")), /手动删除该锁文件.*完成接入/);
+  assert.match(explainSetupError(new Error("fatal: Unable to create 'C:/ExampleVault/.git/index.lock': File exists")), /手动删除该锁文件.*完成接入/);
   const existingIgnore = ".obsidian/cache/\n.smart-env\n.obsidian/plugins/simple-one/data.json # old inline note\n";
   const missingIgnore = missingSetupIgnoreRules(existingIgnore);
   assert(!missingIgnore.includes(".obsidian/cache/"));
@@ -137,7 +154,8 @@ try {
   assert(finishProgress.some(message => message.includes("Fetch：解析差异 100%")));
   assert(finishProgress.some(message => message.includes("Merge：")));
   assert(finishProgress.some(message => message.includes("创建本地提交")));
-  assert.equal(finishProgress.at(-1), "Push：首次推送：发送对象 65%…");
+  assert.equal(finishProgress.at(-1), "本地接入准备完成");
+  assert(!finishProgress.some(message => /Push|推送/.test(message)), "connection progress does not claim an upload");
   assert.equal((await readFile(join(vault, "shared.md"), "utf8")).trim(), "remote version");
   assert.equal((await readFile(join(vault, "local.md"), "utf8")).trim(), "local only");
   assert.equal((await readFile(join(vault, "remote.md"), "utf8")).trim(), "remote only");
@@ -457,7 +475,7 @@ try {
   assert.equal(await readFile(join(existingVault, ".obsidian", "plugins", "simple-one", "data.json"), "utf8"), "keep this local\n");
   assert.equal(run(existingVault, ["ls-files", ".obsidian/plugins/simple-one/data.json"]), ".obsidian/plugins/simple-one/data.json");
   assert.match(run(folder, ["--git-dir", bare, "ls-tree", "-r", "refs/heads/main", "--", ".obsidian/plugins/simple-one/data.json"]), /data.json/);
-  console.log("Onboarding isolated merge and push: passed");
+  console.log("Onboarding connection without push, then separate manual sync: passed");
 } finally {
   const target = resolve(folder);
   if (!target.startsWith(resolve(tmpdir()) + sep)) throw new Error("Unexpected test cleanup path");

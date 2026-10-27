@@ -1,3 +1,4 @@
+import { setActionIcon } from "../../shared/actionButton";
 import { addIcon, Component, FuzzySuggestModal, ItemView, MarkdownView, Menu, Modal, Notice, Platform, Setting, setIcon, setTooltip, parseYaml, requireApiVersion, TFile, TFolder, WorkspaceLeaf, type ViewStateResult } from "obsidian";
 import type SimplePlugin from "../../main";
 import { runAsync } from "../../shared/async";
@@ -185,6 +186,7 @@ export default class ShareFeature extends Component {
   error = "";
   publishingTitle = "";
   private publishStartedAt = 0;
+  private checkedNoteStates = new Map<string, string>();
   private publishingWebsite = false;
   private deploymentTimer?: number;
   private domainCheckTimer?: number;
@@ -505,6 +507,7 @@ export default class ShareFeature extends Component {
   async switchLibrary(id: string, duringShare = false): Promise<void> {
     if (this.busy || (this.sharing || this.batchSharing) && !duringShare || this.setupBusy || this.edgeone.busy || this.checkingDeployment) throw new Error("请等待当前任务完成后切换分享库。");
     await this.change(manifest => selectLibrary(manifest, id), false);
+    this.checkedNoteStates.clear();
     this.guideNewLibrarySelected = false;
     await this.edgeone.load(); this.published = { version: 1, notes: {}, files: [] };
     this.error = ""; this.status = "";
@@ -1298,7 +1301,6 @@ export default class ShareFeature extends Component {
     const key = `${this.manifest.site.owner}/${this.manifest.site.repo}`;
     this.published = local.site === key && local.published ? local.published : { version: 1, notes: {}, files: [] };
     const index = this.index(true), rows: Row[] = [], moved: Record<string, string> = {};
-    const assetCache: ShareAssetCache = new Map();
     for (const [id, entry] of Object.entries(this.manifest.notes)) {
       if (request !== this.scanRequest || this.isPublishing) return;
       const files = index.get(id) || [], old = this.published.notes[id];
@@ -1309,12 +1311,9 @@ export default class ShareFeature extends Component {
       else if (files.length > 1) row.state = "ID 冲突";
       else if (!row.file) row.state = "源文件缺失或 ID 丢失";
       else if (!old) row.state = "待发布";
-      else {
-        try {
-          const exported = await exportNote(this.host, row.file, entry.category, this.manifest, index, entry.publicName, assetCache);
-          row.state = old.hash !== exported.hash || (old.path ?? `notes/${id}.md`) !== shareNotePath(id, entry) ? "待更新" : "推送成功";
-        } catch (error) { row.state = `导出异常：${error instanceof Error ? error.message : String(error)}`; }
-      }
+      else row.state = old.title !== (entry.publicName || row.file.basename) || old.category !== entry.category
+        || (old.path ?? `notes/${id}.md`) !== shareNotePath(id, entry)
+        ? "待更新" : this.checkedNoteStates.get(id) ?? "推送成功";
       rows.push(row);
     }
     for (const [id, note] of Object.entries(this.published.notes)) if (!this.manifest.notes[id]) {
@@ -1358,6 +1357,7 @@ export default class ShareFeature extends Component {
     for (const id of selected) if (!this.manifest.notes[id]) throw new Error("当前笔记未关联分享清单。");
     if (!this.sharing) this.publishingTitle = typeof onlyId === "string" ? this.manifest.notes[onlyId]?.sourcePath.split("/").pop()?.replace(/\.md$/, "") || "" : "";
     this.busy = true; this.publishStartedAt = Date.now(); this.error = ""; this.status = "正在读取云端文件清单…"; this.renderViews();
+    this.checkedNoteStates.clear();
     const heartbeat = window.setInterval(() => this.publishProgress(this.status), 1000);
     try {
       const snapshot = serializeManifest(this.manifest), template = await this.readTemplate();
@@ -1392,9 +1392,17 @@ export default class ShareFeature extends Component {
         try {
           const result = await exportNote(this.host, matches[0], entry.category, this.manifest, index, entry.publicName, assetCache);
           const path = shareNotePath(id, entry); files.set(path, result.source);
+          const checkedState = !old.notes[id] ? "待发布"
+            : old.notes[id].hash !== result.hash || (old.notes[id].path ?? `notes/${id}.md`) !== path ? "待更新" : "推送成功";
+          this.checkedNoteStates.set(id, checkedState);
+          const row = this.rows.find(row => row.id === id);
+          if (row) row.state = checkedState;
           for (const [asset, data] of result.assets) files.set(asset, data);
           state.notes[id] = { title: result.title, category: result.category, hash: result.hash, assets: [...result.assets.keys()].sort(), ...(entry.directoryCode ? { path } : {}) };
-        } catch (error) { failures.push(matches[0].basename + "：" + String(error)); }
+        } catch (error) {
+          this.checkedNoteStates.set(id, `导出异常：${error instanceof Error ? error.message : String(error)}`);
+          failures.push(matches[0].basename + "：" + String(error));
+        }
         this.publishProgress(`正在检查正文与附件：${++prepared}/${total}`);
       }
       // An absent local entry is not an explicit withdrawal. Retain remote references, not content.
@@ -1415,6 +1423,7 @@ export default class ShareFeature extends Component {
       const commit = await repository.push(job, pending => this.saveLocal({ ...(previous.site === key ? previous : {}), version: 1, site: key, pendingCommit: pending.commit }), message => this.publishProgress(message));
       this.publishProgress("推送成功 · 正在保存发布记录并检查网站构建…");
       await this.saveLocal({ version: 1, site: key, commit, published: state }); this.published = state;
+      this.checkedNoteStates.clear();
       for (const row of this.rows) if (this.manifest.notes[row.id]?.enabled && state.notes[row.id]) row.state = "推送成功";
       this.publishProgress("推送成功 · 正在检查网站是否开始构建新版本…");
       await this.edgeone.invalidateDeployment(commit).catch(error => { this.edgeone.error = error instanceof Error ? error.message : String(error); });
@@ -1663,10 +1672,10 @@ export default class ShareFeature extends Component {
         .addDropdown(dropdown => dropdown.addOptions(this.templateFiles).setValue(this.templateFile)
           .setDisabled(disabled).onChange(value => { void this.selectTemplate(value).catch(error => this.fail(error)); }));
       new Setting(modal.contentEl).setName("模板操作")
-        .addButton(button => button.setIcon("upload").setTooltip("导入 HTML 模板").setDisabled(disabled).onClick(() => this.importTemplate()))
-        .addButton(button => button.setIcon("download").setTooltip("导出当前模板").setDisabled(disabled)
+        .addButton(button => button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("download").setTooltip("导入 HTML 模板").setDisabled(disabled).onClick(() => this.importTemplate()))
+        .addButton(button => button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("upload").setTooltip("导出当前模板").setDisabled(disabled)
           .onClick(() => { void this.exportTemplate().catch(error => this.fail(error)); }))
-        .addButton(button => button.setIcon("rotate-ccw").setTooltip("恢复默认模板").setDisabled(disabled)
+        .addButton(button => button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("rotate-ccw").setTooltip("恢复默认模板").setDisabled(disabled)
           .onClick(() => { void this.restoreDefaultTemplate().catch(error => this.fail(error)); }));
       modal.contentEl.createEl("p", { text: this.templateMessage || "模板变更后，推送新分享即可更新网站。", attr: { role: "status", "aria-live": "polite" } });
     };
@@ -1864,7 +1873,7 @@ export default class ShareFeature extends Component {
         setting.nameEl.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); locate(); } });
       }
       setting.nameEl.setAttribute("title", `${row.title} · ${row.state}${selection && row.file ? " · 双击打开原笔记" : ""}`);
-      setting.infoEl.createSpan({ text: row.state, cls: `simple-share-note-state${row.state === "推送成功" ? " is-published" : ""}`, attr: { title: row.state } });
+      setting.infoEl.createSpan({ text: row.state, cls: `simple-share-note-state${row.state === "推送成功" ? " is-published" : ""}`, attr: { title: row.state === "推送成功" ? "上次推送成功；正文与附件仅在点击「推送新分享」时重新检查。" : row.state } });
       if (entry) setting.settingEl.addEventListener("contextmenu", event => {
         event.preventDefault();
         new Menu().addItem(item => item.setTitle("修改公开目录与文件名").setIcon("pencil").setDisabled(this.isPublishing)
@@ -1878,15 +1887,15 @@ export default class ShareFeature extends Component {
         const tooltip = "按设置复制分享内容";
         button.buttonEl.addClass("simple-share-copy");
         button.buttonEl.setAttribute("aria-label", tooltip);
-        button.setIcon("copy").setTooltip(tooltip).onClick(runAsync(async event => {
+        button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("copy").setTooltip(tooltip).onClick(runAsync(async event => {
           event.stopPropagation();
           if (button.buttonEl.disabled) return;
           if (resetTimer !== undefined) window.clearTimeout(resetTimer);
           button.buttonEl.classList.remove("is-copied");
-          button.setIcon("copy").setDisabled(true).setTooltip("正在复制…");
+          button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("copy").setDisabled(true).setTooltip("正在复制…");
           try {
             await this.copySharedNote(row.id);
-            button.setIcon("check").setTooltip("已复制到剪贴板");
+            button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("check").setTooltip("已复制到剪贴板");
             button.buttonEl.setAttribute("aria-label", "已复制到剪贴板");
             button.buttonEl.addClass("is-copied");
             new Notice("已按设置复制分享内容，可直接粘贴。");
@@ -1894,15 +1903,15 @@ export default class ShareFeature extends Component {
             button.setDisabled(false);
             resetTimer = window.setTimeout(() => {
               button.buttonEl.classList.remove("is-copied");
-              button.setIcon("copy").setTooltip(tooltip);
+              button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("copy").setTooltip(tooltip);
               button.buttonEl.setAttribute("aria-label", tooltip);
             }, 1200);
           }
         }));
       });
       if (entry) {
-        if (row.state === "ID 冲突") setting.addButton(button => button.setIcon("git-compare").setTooltip("解决重复 ID").setDisabled(this.busy).onClick(() => new IdModal(this, row.id, this.index().get(row.id) || []).open()));
-        if (row.state === "源文件缺失或 ID 丢失") setting.addButton(button => button.setIcon("link").setTooltip("重新关联笔记").setDisabled(this.busy).onClick(() => new RelinkModal(this, row.id).open()));
+        if (row.state === "ID 冲突") setting.addButton(button => button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("git-compare").setTooltip("解决重复 ID").setDisabled(this.busy).onClick(() => new IdModal(this, row.id, this.index().get(row.id) || []).open()));
+        if (row.state === "源文件缺失或 ID 丢失") setting.addButton(button => button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("link").setTooltip("重新关联笔记").setDisabled(this.busy).onClick(() => new RelinkModal(this, row.id).open()));
       }
     }
     if (layout === "public" && selection?.onDrop) this.panelDragCleanups.set(container,
@@ -1948,7 +1957,7 @@ export default class ShareFeature extends Component {
         fieldset.createEl("legend", { text: title });
         return fieldset;
       };
-      const management = group("分享管理");
+      const management = group("分享设置");
       this.renderLibrarySelector(management, true, false, false);
       const selector = management.querySelector<HTMLElement>(".simple-share-library-selector")!;
       selector.title = "切换当前查看的分享库；发布目标可在笔记分享按钮的右键菜单中选择。";
@@ -1957,7 +1966,7 @@ export default class ShareFeature extends Component {
         .addDropdown(dropdown => dropdown.addOptions(this.templateFiles).setValue(this.templateFile)
           .setDisabled(!this.manifest.enabled || this.isPublishing || this.templateBusy)
           .onChange(value => { void this.selectTemplate(value).catch(error => this.fail(error)); }))
-        .addButton(button => button.setIcon("settings").setTooltip("管理分享模板")
+        .addButton(button => button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("settings").setTooltip("管理分享模板")
           .onClick(() => this.openTemplateManagement()));
       new Setting(management).setName("默认分享路径")
         .addDropdown(dropdown => dropdown.addOptions({ root: "分享库根目录", source: "跟随原笔记路径" })
@@ -1970,15 +1979,13 @@ export default class ShareFeature extends Component {
       for (const [id, stored] of Object.entries(libraries.entries)) {
         const library = id === libraries.active ? this.manifest : stored;
         const name = library.site.repo ? library.site.owner + "/" + library.site.repo : "未完成接入 · " + id.slice(0, 8);
-        const labels = [id === libraries.active ? "当前查看" : "", selectedLibraryIds(this.manifest).includes(id) ? "分享目标" : ""].filter(Boolean).join(" · ");
         const row = new Setting(librariesGroup).setName(name);
-        row.controlEl.createSpan({ text: labels, cls: "simple-share-library-labels" });
-        row.addButton(button => button.setIcon("settings").setTooltip("管理分享库：" + name)
+        row.addButton(button => button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("settings").setTooltip("管理分享库：" + name)
           .setDisabled(this.isPublishing || this.setupBusy || this.edgeone.busy)
           .onClick(() => { try { this.openShareLibraryDetails(id); } catch (error) { this.fail(error); } }));
       }
       new Setting(librariesGroup).setClass("simple-share-library-add")
-        .addButton(button => button.setIcon("plus").setTooltip("新增分享库")
+        .addButton(button => button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("plus").setTooltip("新增分享库")
           .setDisabled(this.isPublishing || this.setupBusy || this.edgeone.busy)
           .onClick(() => { void this.newLibrary().catch(error => this.fail(error)); }));
       return;
@@ -2102,10 +2109,10 @@ export default class ShareFeature extends Component {
         const deviceAction = authChoice.createDiv({ cls: "simple-one-sync-setup-device-action" });
         deviceAction.createEl("code", { text: this.deviceCode || (this.setupBusy ? "正在获取…" : ""), cls: `simple-one-sync-setup-device-slot${this.deviceCode ? " simple-one-sync-setup-device-code" : ""}`, attr: { "aria-live": "polite" } });
         const copy = deviceAction.createEl("button", { cls: "simple-one-sync-setup-device-icon-button", attr: { type: "button", "aria-label": "复制设备码", title: "复制设备码" } });
-        setIcon(copy, "copy"); copy.disabled = !this.deviceCode;
+        setActionIcon(copy, "copy", "plain"); copy.disabled = !this.deviceCode;
         copy.addEventListener("click", runAsync(async () => { await navigator.clipboard.writeText(this.deviceCode); }));
         const refresh = deviceAction.createEl("button", { cls: "simple-one-sync-setup-device-icon-button", attr: { type: "button", "aria-label": "刷新设备码", title: "刷新设备码" } });
-        setIcon(refresh, "refresh-cw"); refresh.disabled = this.setupBusy || this.busy;
+        setActionIcon(refresh, "refresh-cw", "plain"); refresh.disabled = this.setupBusy || this.busy;
         refresh.addEventListener("click", () => run(browserLogin));
         if (this.setupBusy) new Setting(authChoice).addButton(button => {
           button.buttonEl.addClass("simple-share-guide-cancel-auth");
@@ -2489,7 +2496,7 @@ export class ShareView extends ItemView {
     this.feature.renderLibrarySelector(this.contentEl);
     const header = new Setting(this.contentEl)
       .addButton(button => {
-        button.setIcon("square-pen").setTooltip(this.editing ? "退出编辑" : "编辑分享")
+        button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("square-pen").setTooltip(this.editing ? "退出编辑" : "编辑分享")
           .setDisabled(this.feature.isPublishing || !this.feature.manifest.enabled).onClick(() => {
             this.editing = !this.editing; this.selected.clear(); this.activeDirectory = undefined; this.creatingDirectory = undefined;
             if (this.editing) this.feature.updateDisplay({ layout: "public" });
@@ -2500,7 +2507,7 @@ export class ShareView extends ItemView {
         button.buttonEl.setAttribute("aria-pressed", String(this.editing));
       })
       .addButton(button => {
-        button.setIcon("globe").setTooltip("选择分享网站").onClick(runAsync(async event => {
+        button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("globe").setTooltip("选择分享网站").onClick(runAsync(async event => {
           button.setDisabled(true);
           try {
             const websites = await this.feature.shareWebsites();
@@ -2524,13 +2531,13 @@ export class ShareView extends ItemView {
         button.buttonEl.addClass("simple-share-header-icon", "clickable-icon", "nav-action-button");
       });
     header.addButton(button => {
-      button.setIcon(this.descending ? "simple-share-sort-desc" : "simple-share-sort-asc")
+      button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon(this.descending ? "simple-share-sort-desc" : "simple-share-sort-asc")
         .setTooltip(this.descending ? "名称倒序 Z→A；点击切换正序" : "名称正序 A→Z；点击切换倒序")
         .onClick(() => this.feature.updateDisplay({ descending: !this.descending }));
       button.buttonEl.addClass("simple-share-header-icon", "simple-share-sort-button", "clickable-icon", "nav-action-button");
     });
     header.addButton(button => {
-      button.setIcon(this.showPaths ? "simple-share-paths-visible" : "simple-share-paths-hidden").setTooltip("是否显示路径").onClick(() => {
+      button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon(this.showPaths ? "simple-share-paths-visible" : "simple-share-paths-hidden").setTooltip("是否显示路径").onClick(() => {
         this.feature.updateDisplay({ showPaths: !this.showPaths });
       });
       button.buttonEl.addClass("simple-share-header-icon", "simple-share-paths-toggle", "clickable-icon", "nav-action-button");
@@ -2538,7 +2545,7 @@ export class ShareView extends ItemView {
       button.buttonEl.setAttribute("aria-pressed", String(this.showPaths));
     });
     header.addButton(button => {
-      button.setIcon("simple-share-copy-settings").setTooltip("复制设置").onClick(runAsync(async event => {
+      button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("simple-share-copy-settings").setTooltip("复制设置").onClick(runAsync(async event => {
         const menu = new Menu();
         await this.feature.addCopyContentMenu(menu);
         menu.showAtMouseEvent(event);
@@ -2547,7 +2554,7 @@ export class ShareView extends ItemView {
       button.buttonEl.setAttribute("aria-label", "复制设置");
     });
     header.addButton(button => {
-      button.setIcon("settings").setTooltip("打开分享设置").onClick(() => this.feature.host.sync.openPluginSettings(true));
+      button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("settings").setTooltip("打开分享设置").onClick(() => this.feature.host.sync.openPluginSettings(true));
       button.buttonEl.addClass("simple-share-header-icon", "clickable-icon", "nav-action-button");
       button.buttonEl.setAttribute("aria-label", "打开分享设置");
     });

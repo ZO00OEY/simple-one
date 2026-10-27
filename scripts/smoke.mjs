@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./test-action-buttons.mjs";
 import { build } from "esbuild";
 
 async function load(file, stub = "") {

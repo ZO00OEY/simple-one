@@ -286,7 +286,7 @@ try {
     setting.addSearch = setting.addText;
     setting.addButton = configure => {
       const buttonEl = setting.controlEl.createEl("button");
-      const control = { buttonEl, setButtonText(text) { buttonEl.textContent = text; return this; }, setIcon(value) { buttonEl.dataset.icon = value; return this; }, setTooltip(value) { buttonEl.title = value; return this; }, setDisabled(value) { buttonEl.disabled = value; return this; }, setCta() { return this; }, onClick(callback) { buttonEl.addEventListener("click", callback); return this; } };
+      const control = { buttonEl, setClass(value) { buttonEl.classList.add(value); return this; }, setButtonText(text) { buttonEl.textContent = text; return this; }, setIcon(value) { buttonEl.dataset.icon = value; return this; }, setTooltip(value) { buttonEl.title = value; return this; }, setDisabled(value) { buttonEl.disabled = value; return this; }, setCta() { return this; }, onClick(callback) { buttonEl.addEventListener("click", callback); return this; } };
       configure(control); return setting;
     };
     return setting;
@@ -998,7 +998,7 @@ try {
     const templatePopup = dom.window.document.body.createDiv();
     globalThis.shareModalElements = () => ({ titleEl: templatePopup.createDiv(), contentEl: templatePopup.createDiv() });
     rootEl.querySelector('button[title="管理分享模板"]').click();
-    assert.deepEqual([...templatePopup.querySelectorAll('button')].map(button => button.dataset.icon), ['upload', 'download', 'rotate-ccw']);
+    assert.deepEqual([...templatePopup.querySelectorAll('button')].map(button => button.dataset.icon), ['download', 'upload', 'rotate-ccw']);
     assert([...templatePopup.querySelectorAll('button')].every(button => button.disabled), 'template mutations stay disabled while sharing is off');
     ui.templateMessage = '模板已导入'; ui.renderViews();
     assert(templatePopup.textContent.includes('模板已导入'), 'open template modal refreshes operation feedback');
@@ -1612,6 +1612,23 @@ try {
   const commitCount = () => cloud.calls.filter(call => call.path.endsWith('/git/commits') && call.method === 'POST').length;
   const firstCount = commitCount();
   await feature.publish(); assert.equal(commitCount(), firstCount, 'unchanged publish creates no commit');
+  const scanBaselineSource = contents.get(sourceFiles[0].path);
+  const originalRead = repoHost.app.vault.read;
+  let backgroundReads = 0;
+  repoHost.app.vault.read = async file => { backgroundReads++; return originalRead(file); };
+  contents.set(sourceFiles[0].path, scanBaselineSource + '\nchanged after publication');
+  const requestsBeforeScan = cloud.calls.length;
+  await feature.scan();
+  assert.equal(backgroundReads, 0, 'background listing does not export or hash note bodies');
+  assert.equal(cloud.calls.length, requestsBeforeScan, 'background listing does not inspect the cloud');
+  assert.equal(feature.rows.find(row => row.id === id).state, '推送成功', 'listing retains last push result until explicit inspection');
+  repoHost.app.vault.read = originalRead;
+  await feature.publish();
+  assert(cloud.files.get('notes/' + id + '.md').toString().includes('changed after publication'), 'explicit push detects and publishes changed content');
+  assert.equal(feature.rows.find(row => row.id === id).state, '推送成功');
+  contents.set(sourceFiles[0].path, scanBaselineSource);
+  await feature.publish();
+
   const originalSourcePath = sourceFiles[0].path;
   const originalCategory = feature.manifest.notes[id].category;
   contents.set('移动后的目录/改名后的笔记.md', contents.get(originalSourcePath));

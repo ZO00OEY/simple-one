@@ -1,6 +1,13 @@
 import type { SiteRule, TemplateCategory } from "../types";
 
 export type ImportCounts = { added: number; updated: number; skipped: number };
+
+export function importTemplateGroup(current: TemplateCategory, incoming: TemplateCategory[]): TemplateCategory {
+  if (incoming.length !== 1) throw new Error("此处仅支持单个模板组；多个模板请在外层导入");
+  const siteRules = [...current.siteRules];
+  mergeSiteImports(siteRules, incoming[0].siteRules);
+  return { ...incoming[0], id: current.id, siteRules };
+}
 const siteContent = (site: SiteRule): unknown => ({ ...site, id: undefined, fields: site.fields.map(field => ({ ...field, id: undefined })) });
 const signature = (value: unknown): string => JSON.stringify(value, (_key, item: unknown) => {
   if (!item || typeof item !== "object" || Array.isArray(item)) return item;

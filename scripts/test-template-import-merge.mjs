@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { build } from "esbuild";
 
 const output = await build({ entryPoints: ["src/features/templateImportMerge.ts"], bundle: true, format: "esm", write: false });
-const { mergeSiteImports, mergeTemplateImports } = await import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString("base64")}`);
+const { importTemplateGroup, mergeSiteImports, mergeTemplateImports } = await import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString("base64")}`);
 const site = { id: "one", name: "Site", urlPattern: "example.com", fields: [{ id: "field-one", fieldName: "Title", source: "title", regex: "", replaceWith: "" }] };
 const sites = structuredClone([site]);
 const duplicate = { ...structuredClone(site), id: "other", fields: [{ ...site.fields[0], id: "other-field" }] };
@@ -21,4 +21,10 @@ assert.deepEqual(mergeTemplateImports(templates, [imported]), { added: 0, update
 const empty = [];
 assert.deepEqual(mergeTemplateImports(empty, [template, template]), { added: 1, updated: 0, skipped: 1 });
 assert.equal(template.siteRules.length, 1, "Incoming objects are not mutated");
+const draft = importTemplateGroup(template, [imported]);
+assert.equal(draft.id, template.id, "Group import targets the current group even if the imported ID differs");
+assert.equal(draft.siteRules.length, 2, "Group import preserves existing site rules");
+assert.equal(template.outputFolder, "Notes", "Import remains a draft until saved");
+assert.throws(() => importTemplateGroup(template, [template, imported]), /单个模板组/);
+assert.throws(() => importTemplateGroup(template, []), /单个模板组/);
 console.log("Template import merge: semantic deduplication, updates, repeated imports and local-rule preservation passed.");

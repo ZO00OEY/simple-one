@@ -3,6 +3,7 @@
 export interface NodeEntry { name: string; isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean }
 export interface NodeStat { size: number; mode: number; mtimeMs: number; isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean }
 export interface NodeFiles {
+  unlink(path: string): Promise<void>;
   mkdir(path: string, options: { recursive: true }): Promise<unknown>;
   readFile(path: string, encoding: "utf8"): Promise<string>;
   readFile(path: string): Promise<Uint8Array>;

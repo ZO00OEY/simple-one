@@ -8,7 +8,7 @@ export interface MobileOptions {
   token: string;
   syncImages: boolean;
   syncPlugins: boolean;
-  plugins: string[];
+  plugins: string[]; // "*" includes future plugins; "!id" excludes an individual plugin.
   cacheEnabled: boolean;
   trackPaths: boolean;
   ignorePatterns: string[];
@@ -18,7 +18,7 @@ export interface MobileOptions {
 
 export const DEFAULT_MOBILE_OPTIONS: MobileOptions = {
   mode: "github", repoUrl: "", branch: "", token: "", syncImages: true,
-  syncPlugins: false, plugins: [], cacheEnabled: true,
+  syncPlugins: true, plugins: ["*"], cacheEnabled: true,
   trackPaths: true, ignorePatterns: [], autoSyncMinutes: 0, bound: false
 };
 
@@ -117,11 +117,21 @@ export function included(path: string, options: MobileOptions, configDir: string
   }
   if (path.startsWith(`${configDir}/plugins/`)) {
     const id = path.slice(`${configDir}/plugins/`.length).split("/")[0];
-    if (!options.syncPlugins || (id !== "__link_scan__" && !options.plugins.includes(id))) return false;
+    if (!options.syncPlugins || (id !== "__link_scan__" && !pluginSelected(options.plugins, id))) return false;
   }
   else if (path === configDir || path.startsWith(`${configDir}/`)) return false;
   if (!options.syncImages && IMAGE_EXTENSIONS.includes(path.split(".").pop()!.toLowerCase())) return false;
   return !shouldIgnore(path, [...defaultSyncIgnorePatterns(configDir), ...options.ignorePatterns], configDir);
+}
+
+export function pluginSelected(selection: string[], id: string): boolean {
+  return selection.includes("*") ? !selection.includes(`!${id}`) : selection.includes(id);
+}
+
+export function selectPlugin(selection: string[], id: string, checked: boolean): string[] {
+  const key = selection.includes("*") ? `!${id}` : id;
+  const include = selection.includes("*") ? !checked : checked;
+  return include ? [...new Set([...selection, key])] : selection.filter(item => item !== key);
 }
 
 export async function blobSha(bytes: Uint8Array): Promise<string> {

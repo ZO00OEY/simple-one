@@ -1,4 +1,5 @@
-import { AbstractInputSuggest, App, Modal, Notice, Setting, TFolder, normalizePath, setIcon } from "obsidian";
+import { setDeleteIcon, setActionIcon, styleActionFooter } from "../shared/actionButton";
+import { AbstractInputSuggest, App, Modal, Notice, Setting, TFolder, normalizePath } from "obsidian";
 import { nextId, type TemplateCategory } from "../types";
 import { runAsync } from "../shared/async";
 import { registerTemplatePropertyDrag } from "./templatePropertyDrag";
@@ -29,14 +30,16 @@ class TemplateFolderSuggest extends AbstractInputSuggest<string> {
 export class TemplateCreateModal extends Modal {
   private folderSuggest?: TemplateFolderSuggest;
   private cleanupPropertyDrag?: () => void;
-  constructor(app: App, private readonly onSave: (template: TemplateCategory) => Promise<void>, private readonly template?: TemplateCategory, private readonly onDelete?: () => Promise<boolean>, private readonly onExport?: () => void) {
+  constructor(app: App, private readonly onSave: (template: TemplateCategory) => Promise<void>, private template?: TemplateCategory, private readonly onDelete?: () => Promise<boolean>, private readonly onExport?: () => void,
+    private readonly onImport?: (current: TemplateCategory, ownerDocument: Document) => Promise<TemplateCategory | null>) {
     super(app);
   }
 
   onOpen(): void {
     const root = this.contentEl;
+    root.empty();
     root.addClass("simple-template-create-modal");
-    root.createEl("h2", { text: this.template ? "模板设置" : "新增模板" });
+    this.titleEl.setText(this.template ? "模板设置" : "新增模板");
     let name = this.template?.name ?? "", folder = this.template?.outputFolder ?? "", filenameField = this.template?.filenameField ?? "";
     const noteFormat = this.template?.noteFormat ?? "";
     const properties = this.template ? templatePropertyNames(this.template) : [];
@@ -70,8 +73,10 @@ export class TemplateCreateModal extends Modal {
     editor.hidden = true;
     const input = editor.createEl("input", { type: "text", attr: { placeholder: "属性名称", "aria-label": "新增属性名称" } });
     const confirm = editor.createEl("button", { text: "✓", attr: { type: "button", "aria-label": "确认添加属性" } });
-    const add = tags.createEl("button", { text: "＋ 添加属性", cls: "simple-template-property-add", attr: { type: "button", "aria-label": "添加属性" } });
+    const add = tags.createEl("button", { cls: "clickable-icon simple-template-property-add", attr: { type: "button", title: "添加属性", "aria-label": "添加属性" } });
+    setActionIcon(add, "plus", "bordered");
     const renderTags = () => {
+      propertySection.toggleClass("is-empty", properties.length === 0);
       if (!properties.includes(filenameField)) filenameField = "";
       filenameSelect.empty();
       filenameSelect.createEl("option", { text: properties.length ? "请选择笔记属性" : "请先添加笔记属性", value: "" });
@@ -101,7 +106,7 @@ export class TemplateCreateModal extends Modal {
           (tagList.children[to]?.firstElementChild as HTMLElement)?.focus();
         });
         const removeProperty = tag.createEl("button", { cls: "simple-template-property-remove", attr: { type: "button", "aria-label": `移除属性 ${property}`, title: "删除属性" } });
-        setIcon(removeProperty, "trash-2");
+        setDeleteIcon(removeProperty, "plain");
         removeProperty.addEventListener("click", () => { properties.splice(properties.indexOf(property), 1); renderTags(); });
       }
     };
@@ -136,7 +141,7 @@ export class TemplateCreateModal extends Modal {
     };
     if (this.template && this.onDelete) {
       const remove = footer.createEl("button", { cls: "simple-template-delete", attr: { type: "button", "aria-label": "删除模板", title: "删除模板" } });
-      setIcon(remove, "trash-2");
+      setDeleteIcon(remove, "danger");
       remove.addEventListener("click", runAsync(async () => {
         setBusy(true);
         try {
@@ -147,8 +152,26 @@ export class TemplateCreateModal extends Modal {
     if (this.onExport) {
       footer.addClass("simple-template-export-footer");
       const download = footer.createEl("button", { cls: "clickable-icon simple-template-export", attr: { type: "button", title: "导出已保存模板", "aria-label": "导出已保存模板" } });
-      setIcon(download, "download");
+      setActionIcon(download, "upload", "bordered");
       download.addEventListener("click", this.onExport);
+    }
+    if (this.onImport) {
+      const upload = footer.createEl("button", { cls: "clickable-icon simple-template-import", attr: { type: "button", title: "导入当前模板组", "aria-label": "导入当前模板组" } });
+      setActionIcon(upload, "download", "bordered");
+      upload.addEventListener("click", runAsync(async () => {
+        setBusy(true);
+        try {
+          const imported = await this.onImport!({ ...(this.template ?? { id: nextId(), siteRules: [] }), name, outputFolder: folder,
+            filenameField, propertyFields: [...properties], noteFormat }, root.ownerDocument);
+          if (!imported) return;
+          this.cleanupPropertyDrag?.();
+          this.folderSuggest?.close();
+          this.template = imported;
+          this.onOpen();
+          new Notice("已导入当前模板组，点击保存后生效");
+        } finally { setBusy(false); }
+      }));
+      footer.addClass("simple-template-import-footer");
     }
     footer.createEl("button", { text: "取消" }).addEventListener("click", () => this.close());
     const save = footer.createEl("button", { text: "保存", cls: "mod-cta" });
@@ -179,6 +202,7 @@ export class TemplateCreateModal extends Modal {
         this.close();
       } finally { setBusy(false); }
     }));
+    styleActionFooter(footer);
   }
 
   onClose(): void {

@@ -20,6 +20,22 @@ const legacy = { settings: { diary: { recurringRules: [], dateManagement: { remi
 assert.deepEqual(methods.insertRecurringPlansIntoContent(legacy, date, content), { content, added: 0 });
 assert.deepEqual(methods.insertDateRemindersIntoContent(legacy, date, content), { content, added: 0 });
 console.log("Diary reminder switch: recurring, anniversary and holiday writing disabled without changing rules; legacy settings remain supported.");
+
+const holidayNames = ["holidaySetupReminderLinesForDate", "hasHolidaySchedule", "addDays", "startOfDay"];
+const holidayFunctions = parsed.statements.filter(node => ts.isFunctionDeclaration(node) && holidayNames.includes(node.name?.text)).map(node => node.getText(parsed));
+assert.equal(holidayFunctions.length, holidayNames.length);
+const holidayOutput = await transform(holidayFunctions.join("\n"), { loader: "ts" });
+const holidayReminder = new Function(`${holidayOutput.code}\nreturn holidaySetupReminderLinesForDate;`)();
+const holidaySettings = {
+  dateManagement: {
+    holidaySetupReminder: { enabled: true, month: 12, daysBefore: 7 },
+    nationalHolidays: { enabled: true }, companyHolidays: { enabled: false },
+  },
+  holidaySchedules: [{ enabled: true, source: "national", year: 2026, days: [{}] }],
+};
+assert.deepEqual(holidayReminder(holidaySettings, new Date(2026, 10, 23)), [], "eight natural days before December should not remind");
+assert.equal(holidayReminder(holidaySettings, new Date(2026, 10, 24)).length, 1, "seven natural days before December should remind, including weekends");
+console.log("Holiday import reminder uses natural days at the seven-day boundary.");
 const openFunction = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "openOrCreateDiaryNote");
 const openOutput = await transform(openFunction.getText(parsed), { loader: "ts" });
 let existing = null;

@@ -1,6 +1,6 @@
 import { App, Modal, Notice, Platform, Setting, setIcon } from "obsidian";
 import { settingsSection } from "../../shared/settingsLayout";
-import { MobileOptions, sameContent } from "./linkDiff";
+import { MobileOptions, sameContent, pluginSelected, selectPlugin } from "./linkDiff";
 import { ConflictChoice, MobileConflict, MobileGithub, MobilePlan } from "./mobileGithub";
 import { LiveReview, PreviewFile, ZoeySyncConflictPreviewModal } from "./conflictPreview";
 import { mirrorPlan, strategyChoices, type SyncStrategy } from "./syncPlan";
@@ -132,7 +132,7 @@ export function renderMobileSyncRules(root: HTMLElement, options: MobileOptions,
     options.syncImages, async (value) => { options.syncImages = value; await save(); });
   image.descEl.addClass("simple-one-sync-mobile-warning");
   const pluginRule = root.createDiv({ cls: "simple-one-sync-plugin-rule" });
-  mobileCheckbox(pluginRule, "同步插件及配置", "勾选后读取云端插件列表，再逐个选择需要同步的插件；本机凭据与运行状态不参与同步。",
+  mobileCheckbox(pluginRule, "同步插件及配置", "默认同步全部插件，新增插件自动参与；可取消勾选个别插件，本机凭据与运行状态不参与同步。",
     options.syncPlugins, async (value) => {
       const previous = options.syncPlugins;
       options.syncPlugins = value;
@@ -160,11 +160,11 @@ export function renderMobileSyncRules(root: HTMLElement, options: MobileOptions,
       const plugins = [...new Set(await loadPlugins())].sort();
       if (!panel.isConnected || current !== request || sourceKey !== key()) return;
       loadedKey = sourceKey;
-      status.setText(plugins.length ? `云端检测到 ${plugins.length} 个插件，请逐个勾选。` : "当前云端仓库没有可同步的插件。");
+      status.setText(plugins.length ? `云端检测到 ${plugins.length} 个插件；默认全选，可取消不需要的插件。` : "当前云端仓库没有可同步的插件。");
       for (const id of plugins) {
-        mobileCheckbox(list, id, id === currentPluginId ? "可同步程序和共享设置；凭据、本机配置与状态自动屏蔽，程序更新后需重载插件。" : "", options.plugins.includes(id), async (checked) => {
+        mobileCheckbox(list, id, id === currentPluginId ? "可同步程序和共享设置；凭据、本机配置与状态自动屏蔽，程序更新后需重载插件。" : "", pluginSelected(options.plugins, id), async (checked) => {
           const previous = options.plugins;
-          options.plugins = checked ? [...new Set([...options.plugins, id])] : options.plugins.filter((item) => item !== id);
+          options.plugins = selectPlugin(options.plugins, id, checked);
           try { await save(); } catch (error) { options.plugins = previous; throw error; }
         }, true);
       }
@@ -193,12 +193,12 @@ function renderCompactSyncRules(root: HTMLElement, options: MobileOptions, save:
   root = root.createDiv({ cls: "simple-one-sync-sync-rules" });
   const image = mobileCheckbox(root, "同步图片", "关闭后，所有图片都不参与同步。", options.syncImages, async value => { options.syncImages = value; await save(); });
   image.nameEl.createSpan({ text: "（慎关：关闭后所有图片不参与同步）", cls: "simple-lightweight-image-warning" });
-  const plugins = mobileCheckbox(root, "同步插件及配置", "同步选中的插件程序与共享配置；本机凭据和运行状态不参与同步。", options.syncPlugins, async value => { options.syncPlugins = value; await save(); });
+  const plugins = mobileCheckbox(root, "同步插件及配置", "默认同步全部插件及新增插件；本机凭据和运行状态不参与同步。", options.syncPlugins, async value => { options.syncPlugins = value; await save(); });
   const manage = plugins.settingEl.createEl("button", { cls: "clickable-icon simple-lightweight-action", attr: { type: "button", title: "选择同步插件", "aria-label": "选择同步插件" } });
   setIcon(manage, "settings");
   manage.addEventListener("click", () => {
     const modal = new Modal(host.app);
-    const selected = new Set(options.plugins);
+    let selected = [...options.plugins];
     const source = JSON.stringify([options.repoUrl, options.branch, options.token]);
     let closed = false;
     let loading = false;
@@ -220,10 +220,10 @@ function renderCompactSyncRules(root: HTMLElement, options: MobileOptions, save:
           const remote = await loadPlugins();
           if (closed) return;
           list.empty();
-          for (const id of [...new Set([...remote, ...selected])].sort()) {
-            mobileCheckbox(list, id, remote.includes(id) ? "" : "已选插件，当前云端列表中未找到。", selected.has(id), value => { if (value) selected.add(id); else selected.delete(id); });
+          for (const id of [...new Set([...remote, ...selected.filter(id => id !== "*").map(id => id.replace(/^!/, ""))])].sort()) {
+            mobileCheckbox(list, id, remote.includes(id) ? "" : "已选插件，当前云端列表中未找到。", pluginSelected(selected, id), value => { selected = selectPlugin(selected, id, value); });
           }
-          status.setText(`云端 ${remote.length} 个插件；勾选后点击确认保存。`);
+          status.setText(`云端 ${remote.length} 个插件；默认全选，新增插件自动参与，可取消个别插件。`);
         } catch (error) { if (!closed) status.setText(`获取失败：${error instanceof Error ? error.message : String(error)}`); }
         finally { loading = false; refresh.disabled = confirm.disabled = false; }
       };

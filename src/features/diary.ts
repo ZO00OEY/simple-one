@@ -1,3 +1,4 @@
+import { setActionIcon } from "../shared/actionButton";
 import { runAsync } from "../shared/async";
 import {
   App,
@@ -331,7 +332,7 @@ export class DiaryView extends ItemView {
       cls: "simple-diary-icon-button",
       attr: { title: "待办追踪", "aria-label": "待办追踪" },
     });
-    setIcon(refresh, "refresh-cw");
+    setActionIcon(refresh, "refresh-cw", "plain");
     refresh.addEventListener("click", runAsync(async () => {
       await carryUnfinishedToActiveDiary(this.plugin);
     }));
@@ -354,7 +355,7 @@ export class DiaryView extends ItemView {
         "aria-expanded": String(this.showSettingsPanel),
       },
     });
-    setIcon(settings, "settings");
+    setActionIcon(settings, "settings", "plain");
     settings.addEventListener("click", () => {
       this.showSettingsPanel = !this.showSettingsPanel;
       this.render();
@@ -590,7 +591,7 @@ export class DiaryView extends ItemView {
 
       const actions = row.createDiv({ cls: "simple-diary-recurring-actions" });
       const edit = actions.createEl("button", { attr: { title: "编辑", "aria-label": "编辑" } });
-      setIcon(edit, "pencil");
+      setActionIcon(edit, "pencil", "plain");
       edit.addEventListener("click", () => {
         new DiaryRecurringRuleModal(this.app, "周期计划编辑", rule, async (updatedRule) => {
           rules[index] = updatedRule;
@@ -1106,7 +1107,7 @@ function holidaySetupReminderLinesForDate(settings: DiarySettings, date: Date): 
   const setupMonth = Math.min(12, Math.max(1, setup.month || 12));
   const setupStartDate = new Date(currentYear, setupMonth - 1, 1);
   const daysBefore = Math.max(1, setup.daysBefore || 7);
-  const shouldCheckNextYear = addWorkdays(date, daysBefore, settings) >= startOfDay(setupStartDate);
+  const shouldCheckNextYear = addDays(date, daysBefore) >= startOfDay(setupStartDate);
   const years = shouldCheckNextYear ? [currentYear, currentYear + 1] : [currentYear];
   if (hasNationalSource) {
     for (const year of years) {

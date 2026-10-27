@@ -112,6 +112,7 @@ export interface TypographySettings {
 
 export interface SimplePluginSettings {
   showSyncSharingEntry: boolean;
+  showSharingEntry: boolean;
   showCalendarDiaryEntry: boolean;
   displayParameterSwitches: {
     desktop: Partial<Record<DisplayParameter, boolean>>;
@@ -704,6 +705,7 @@ function makeSolarTermAnniversary(
 
 export const DEFAULT_SETTINGS: SimplePluginSettings = {
   showSyncSharingEntry: true,
+  showSharingEntry: true,
   showCalendarDiaryEntry: true,
   displayParameterSwitches: { desktop: {}, mobile: {} },
   desktopTypography: { enabled: true, fontSize: 15, lineHeight: 1.7, letterSpacing: 0, paragraphSpacing: 0.8, paragraphStyle: "spaced" },

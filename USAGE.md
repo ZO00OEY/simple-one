@@ -14,6 +14,8 @@ For manual installation, download `main.js`, `manifest.json`, and `styles.css` f
 
 ## Sync your vault
 
+The desktop assistant completes repository setup without uploading. Run the first sync from the sync panel. If uploading fails, retry there; the completed connection does not need to be configured again.
+
 Open **功能拓展 → 同步与分享** in Simple One settings. Choose a setup assistant:
 
 | Option | Choose it when… | Start here |
@@ -34,6 +36,8 @@ Initial setup, rejoining, and everyday sync all download the confirmed files ind
 Lightweight settings offer a troubleshooting action to clear every common baseline and restart a full-vault difference review. It clears baselines, caches, and unfinished progress while preserving actual files, repository binding, and sync rules. The next sync still downloads files individually.
 
 ## Share a note online
+
+The list retains the last push result. Note bodies and attachments are compared with the remote only when you click **推送新分享**; opening or reading a note does not trigger a full content comparison. Explicit changes to a public title or folder can still be shown as pending updates.
 
 Keep editing in your current vault and publish only the notes you choose. Desktop prefers GitHub CLI; mobile and desktops without CLI use a locally saved GitHub Token through the API. Saving API authorization requires Obsidian 1.11.4 or later.
 

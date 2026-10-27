@@ -1,4 +1,5 @@
 import { App, Modal, Setting } from "obsidian";
+import { setActionIcon, setDeleteIcon, styleActionFooter } from "../shared/actionButton";
 import type { TextReformatRule } from "../types";
 import { applyTextReformatRules, parseReformatExpression } from "./noteReformatRules";
 
@@ -12,6 +13,8 @@ export class ReformatRuleModal extends Modal {
       source?: string;
       preview?: (source: string, rule: TextReformatRule) => string;
       onDelete?: () => Promise<void>;
+      onImport?: (ownerDocument: Document) => Promise<{ rule: TextReformatRule; source?: string } | null>;
+      onExport?: (rule: TextReformatRule, source: string, ownerDocument: Document) => void;
     } = {},
   ) {
     super(app);
@@ -46,12 +49,18 @@ export class ReformatRuleModal extends Modal {
     const resultLabel = preview.createEl("label", { text: "替换后文本" });
     const result = resultLabel.createEl("textarea", { attr: { "aria-label": "替换后文本", readonly: "true" } });
     const actions = new Setting(this.contentEl);
+    actions.settingEl.removeClass("setting-item");
     actions.settingEl.addClass("simple-reformat-editor-actions");
     let saveButton: HTMLButtonElement;
+    const left = actions.settingEl.createDiv({ cls: "simple-reformat-editor-left-actions" });
+    actions.settingEl.prepend(left);
     if (this.options.onDelete) {
       actions.addButton(button => {
-        button.buttonEl.addClass("mod-warning");
-        return button.setButtonText("删除").onClick(async () => {
+        left.appendChild(button.buttonEl);
+        setDeleteIcon(button.buttonEl);
+        button.setTooltip("删除规则");
+        button.buttonEl.setAttribute("aria-label", "删除规则");
+        return button.onClick(async () => {
           button.setDisabled(true);
           try {
             await this.options.onDelete!();
@@ -61,6 +70,32 @@ export class ReformatRuleModal extends Modal {
             button.setDisabled(false);
           }
         });
+      });
+    }
+    if (this.options.onImport) {
+      const button = left.createEl("button", { cls: "clickable-icon", attr: { type: "button", title: "导入单条规则", "aria-label": "导入单条规则" } });
+      setActionIcon(button, "download", "bordered");
+      button.addEventListener("click", () => {
+        void this.options.onImport!(this.contentEl.ownerDocument).then(imported => {
+          if (!imported) return;
+          Object.assign(draft, imported.rule, { id: this.rule.id });
+          name.value = draft.name;
+          expression = `/${draft.pattern}/${draft.flags || "g"}`;
+          pattern.value = expression;
+          replacement.value = draft.replaceWith;
+          source.value = imported.source ?? "";
+          update();
+        }).catch(reason => error.setText(reason instanceof Error ? reason.message : String(reason)));
+      });
+    }
+    if (this.options.onExport) {
+      const button = left.createEl("button", { cls: "clickable-icon", attr: { type: "button", title: "导出单条规则", "aria-label": "导出单条规则" } });
+      setActionIcon(button, "upload", "bordered");
+      button.addEventListener("click", () => {
+        try {
+          Object.assign(draft, parseReformatExpression(expression));
+          this.options.onExport!(draft, source.value, this.contentEl.ownerDocument);
+        } catch (reason) { error.setText(reason instanceof Error ? reason.message : String(reason)); }
       });
     }
     actions.addButton(button => button.setButtonText("取消").onClick(() => this.close()));
@@ -94,6 +129,7 @@ export class ReformatRuleModal extends Modal {
     replacement.addEventListener("input", () => { draft.replaceWith = replacement.value; update(); });
     source.addEventListener("input", update);
     update();
+    styleActionFooter(actions.settingEl);
   }
 
   onClose(): void {

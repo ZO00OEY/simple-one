@@ -287,6 +287,25 @@ try {
       assert(f.engine.state.baseCommitSha);
     }
   }
+  // All-plugin selection includes plugins installed after the first sync.
+  {
+    const f = await fixture({ 'keep.md': 'keep' }, { 'keep.md': 'keep' });
+    f.options.syncPlugins = true;
+    f.options.plugins = ['*'];
+    await align(f);
+    const localPlugin = '.obsidian/plugins/new-local/main.js';
+    await f.adapter.write(localPlugin, 'new local program');
+    const localPlan = await f.engine.preview();
+    assert(localPlan.uploads.includes(localPlugin), 'new local plugin is discovered after baseline');
+    await f.engine.execute(localPlan);
+    const cloudPlugin = '.obsidian/plugins/new-cloud/main.js';
+    f.cloudEdit(cloudPlugin, 'new cloud program');
+    const cloudPlan = await f.engine.preview();
+    assert(cloudPlan.downloads.includes(cloudPlugin), 'new cloud plugin is discovered after baseline');
+    f.options.plugins = ['*', '!new-cloud'];
+    const excludedPlan = await f.engine.preview();
+    assert(!excludedPlan.downloads.includes(cloudPlugin), 'explicitly excluded plugin remains excluded');
+  }
   // Self-program sync keeps device state out of manifests and transactions.
   {
     const prefix = '.obsidian/plugins/simple-link/';

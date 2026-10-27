@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { build } from "esbuild";
+import "./test-index-lock.mjs";
 
 const output = await build({ entryPoints: ["src/features/sync/index.ts"], bundle: true,
   platform: "browser", format: "cjs", external: ["obsidian"], write: false,
@@ -194,3 +195,28 @@ for (const saved of [{}, { pullOnStartup: true, backupOnStartup: true }]) {
   assert.equal(await setup.enqueueSetupGit(async () => 'retry'), 'retry');
 }
 console.log('Desktop setup queue: first connection, background pause, serialization and retry passed');
+// Connection completion must not depend on a first upload or panel refresh.
+{
+  context.setInterval = () => 1;
+  context.clearInterval = () => {};
+  const setup = Object.create(Sync.prototype);
+  const saved = [];
+  const refreshErrors = [];
+  const settings = { setupVerified: { url: 'https://github.com/example/vault.git', branch: 'main' }, setupComplete: false };
+  Object.assign(setup, {
+    settings, setupPreview: { trackedExcludedLocal: [], trackedExcludedRemote: [] }, setupChoices: {},
+    setSetupActivity: () => {}, enqueueSetupGit: work => work(), setup: () => ({ finish: async () => [] }),
+    saveSettings: async () => saved.push(settings.setupComplete), setDesktopSyncMode: async () => {}, nativeGitEnabled: () => true,
+    setStatus: () => {}, refreshSyncView: async () => { throw new Error('panel unavailable'); },
+    recordError: (stage, error) => refreshErrors.push([stage, error.message]),
+    syncNow: async () => { throw new Error('upload unavailable'); }
+  });
+  await setup.finishSetup(); await flush();
+  assert.equal(settings.setupComplete, true);
+  assert(saved.includes(true), 'connection completion is persisted before any later sync');
+  assert.equal(settings.gitBranch, 'main');
+  assert.equal(refreshErrors[0][0], '刷新同步面板');
+  await assert.rejects(setup.syncNow(), /upload unavailable/);
+  assert.equal(settings.setupComplete, true, 'failed manual sync must not reopen onboarding');
+}
+console.log('Desktop onboarding: completion persists independently of upload and panel refresh failures');

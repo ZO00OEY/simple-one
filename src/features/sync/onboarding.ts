@@ -749,8 +749,7 @@ export class GitSetup {
         }
       }
     }
-    onProgress?.("首次推送到 GitHub");
-    await this.run("git", ["push", "--progress", "-u", "origin", `HEAD:${repo.branch}`], undefined, gitTransferProgress("Push：首次推送", onProgress));
+    onProgress?.("本地接入准备完成");
     return [...skipped].sort();
   }
 }
