@@ -90,3 +90,8 @@ Installation in a standalone Git checkout creates missing local ignore rules and
 Include reproduction steps, platform and Obsidian version in [Issues](https://github.com/ZO00OEY/simple-one/issues). Use sanitized examples rather than private notes or credentials.
 
 [MIT License](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+
+
+## Floating editing toolbar
+
+Select text to format it, choose custom colors, search your vault or the web, and customize toolbar controls. Optional Simple AI 0.0.2 integration translates numbered paragraphs using your existing model catalogue; preview preserves the original text and inserts each translation below its paragraph. API credentials remain in Simple AI. Configure the model, language pair and prompt under Editing → Floating toolbar. Neither plugin is required for the other to run.

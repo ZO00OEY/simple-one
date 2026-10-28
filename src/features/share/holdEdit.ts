@@ -8,12 +8,13 @@ export function installShareHoldEdit(container: HTMLElement, enabled: (row: HTML
   let active = false, id: string | undefined, directory: string | undefined, target: HTMLElement | undefined;
   let suppressUntil = 0;
   let preview: HTMLElement | undefined;
+  let start: (() => void) | undefined, mouse = false;
   const finish = () => {
     if (timer !== undefined) win.clearTimeout(timer);
     timer = undefined; pointer = undefined;
     target?.classList.remove("is-drop-target"); target = undefined;
     if (active) suppressUntil = Date.now() + 350;
-    active = false;
+    active = false; start = undefined; container.classList.remove("is-dragging-shares");
     preview?.remove(); preview = undefined;
     doc.removeEventListener("pointermove", move, true);
     doc.removeEventListener("pointerup", up, true);
@@ -23,7 +24,12 @@ export function installShareHoldEdit(container: HTMLElement, enabled: (row: HTML
   };
   const move = (event: PointerEvent) => {
     if (event.pointerId !== pointer) return;
-    if (!active) { if (Math.hypot(event.clientX - x, event.clientY - y) > 6) finish(); return; }
+    if (!active) {
+      if (Math.hypot(event.clientX - x, event.clientY - y) <= 6) return;
+      if (!mouse) { finish(); return; }
+      start?.();
+      if (!active) return;
+    }
     event.preventDefault();
     if (preview) { preview.style.left = `${event.clientX + 14}px`; preview.style.top = `${event.clientY + 14}px`; }
     target?.classList.remove("is-drop-target");
@@ -54,15 +60,17 @@ export function installShareHoldEdit(container: HTMLElement, enabled: (row: HTML
     doc.addEventListener("pointermove", move, { capture: true, passive: false });
     doc.addEventListener("pointerup", up, true); doc.addEventListener("pointercancel", finish, true);
     doc.addEventListener("keydown", key, true); win.addEventListener("blur", finish);
-    timer = win.setTimeout(() => {
+    mouse = event.pointerType !== "touch";
+    start = () => {
       timer = undefined;
       if (!row.isConnected || !enabled(row)) { finish(); return; }
       const label = row.querySelector(".setting-item-name, .simple-share-folder-name")?.textContent || directory || "分享笔记";
-      active = true; enter(id, directory);
+      active = true; enter(id, directory); container.classList.add("is-dragging-shares");
       preview = doc.body.createDiv({ cls: "simple-share-drag-preview" });
       preview.textContent = label; preview.setAttribute("aria-hidden", "true");
       preview.style.left = `${x + 14}px`; preview.style.top = `${y + 14}px`; doc.body.append(preview);
-    }, 600);
+    };
+    if (!mouse) timer = win.setTimeout(start, 600);
   };
   const suppress = (event: Event) => {
     if (active || Date.now() < suppressUntil) { event.preventDefault(); event.stopImmediatePropagation(); }

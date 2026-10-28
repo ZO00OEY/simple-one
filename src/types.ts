@@ -120,6 +120,9 @@ export interface SimplePluginSettings {
     mobile: Partial<Record<DisplayParameter, boolean>>;
   };
   desktopTypography: TypographySettings;
+  themeBackgroundColor: string;
+  themeRecentColors: string[];
+  themeFavoriteColors: string[];
   autoProcessPaste: boolean;
   autoProcessObsidian: boolean;
   autoProcessPastedTextLinks: boolean;
@@ -265,6 +268,8 @@ export interface EnhancementSettings {
 }
 
 export interface ThemeFormattingSettings {
+  textColor: string;
+  underlineColor: string;
   boldColor: string;
   boldWeight: string;
   italicColor: string;
@@ -279,6 +284,12 @@ export interface QuickCopyLinkSettings {
 }
 
 export interface QuickFormatSettings {
+  translation?: { sourceId: string; modelId: string; preset: string; prompt: string; languageA?: string; languageB?: string };
+  selectionToolbar: boolean;
+  highlightPairing: boolean;
+  toolbarOrder: string[];
+  toolbarHidden: string[];
+  toolbarLastStyles: Record<string, string>;
   enabled: boolean;
   showDesktopEntry: boolean;
   showMobileEntry: boolean;
@@ -708,6 +719,9 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   showCalendarDiaryEntry: true,
   displayParameterSwitches: { desktop: {}, mobile: {} },
   desktopTypography: { enabled: true, fontSize: 15, lineHeight: 1.7, letterSpacing: 0, paragraphSpacing: 0.8, paragraphStyle: "spaced" },
+  themeBackgroundColor: "#f6f7f9",
+  themeRecentColors: [],
+  themeFavoriteColors: ["#824ce6", "#e60f61", "#ed393b", "#168c54", "#2f80ed"],
   autoProcessPaste: true,
   autoProcessObsidian: true,
   autoProcessPastedTextLinks: false,
@@ -727,6 +741,8 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   enableTextDisplayReplacement: true,
   enableReadableCustomTags: true,
   themeFormatting: {
+    textColor: "",
+    underlineColor: "",
     boldColor: "",
     boldWeight: "",
     italicColor: "",
@@ -746,6 +762,11 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
       lastMode: "absolute-path",
     },
     quickFormat: {
+      selectionToolbar: true,
+      highlightPairing: true,
+      toolbarOrder: ["textColor", "bold", "italic", "underline", "strike", "highlight", "heading", "quote"],
+      toolbarHidden: [],
+      toolbarLastStyles: {},
       enabled: true,
       showDesktopEntry: true,
       showMobileEntry: true,

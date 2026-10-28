@@ -1,15 +1,16 @@
 {
   "name": "simple-one",
-  "version": "1.0.27",
+  "version": "1.0.28",
   "description": "A collection of practical Obsidian tools",
   "main": "main.js",
   "scripts": {
+    "test:selection": "node scripts/test-selection-toolbar.mjs && node scripts/test-translation-paragraphs.mjs && node scripts/test-translation-modal.mjs && node scripts/test-theme-color-picker.mjs",
     "dev": "node esbuild.config.mjs",
     "postinstall": "node scripts/setup-local-ignore.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "lint": "eslint src --max-warnings 0 && node scripts/check-css.mjs",
     "check": "npm audit --omit=dev && npm run lint && npm run test && npm run build",
-    "test": "node scripts/smoke.mjs && node scripts/test-note-reformat.mjs && node scripts/test-diary-reminder-switch.mjs && node scripts/test-display-replacement.mjs && node scripts/test-template-import-merge.mjs && node scripts/test-template-rule-check.mjs && node scripts/test-template-property-drag.mjs && node scripts/test-typography.mjs && node scripts/test-note-filename.mjs && node scripts/test-template-search.mjs && node scripts/sync/test-remote-filename-repair.mjs && npm run test:sync && npm run test:share",
+    "test": "node scripts/smoke.mjs && node scripts/test-note-reformat.mjs && node scripts/test-diary-reminder-switch.mjs && node scripts/test-display-replacement.mjs && node scripts/test-template-import-merge.mjs && node scripts/test-template-rule-check.mjs && node scripts/test-template-property-drag.mjs && node scripts/test-typography.mjs && node scripts/test-note-filename.mjs && node scripts/test-template-search.mjs && node scripts/sync/test-remote-filename-repair.mjs && npm run test:sync && npm run test:share && npm run test:selection",
     "test:share": "node scripts/test-share-inline-name.mjs && node scripts/test-share-hold.mjs && node scripts/test-share.mjs && node scripts/test-share-api.mjs && node scripts/test-share-edgeone.mjs && node scripts/test-share-reader.mjs",
     "test:display": "node scripts/test-display-replacement.mjs",
     "test:sync": "node scripts/sync/test-transfer-progress.mjs && node scripts/sync/test-hash-cache.mjs && node scripts/sync/test-download-cache.mjs && node scripts/sync/test-dirty.mjs && node scripts/sync/test-plugin-data-tracking.mjs && node scripts/sync/test-onboarding.mjs && node scripts/sync/test-lightweight-guide.mjs && node scripts/sync/test-mobile-sync.mjs && node scripts/sync/test-mobile-runtime.mjs && node scripts/sync/test-migration.mjs && node scripts/sync/test-desktop-backup.mjs && node scripts/sync/test-sync-panel.mjs"

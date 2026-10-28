@@ -1774,13 +1774,6 @@ export default class ShareFeature extends Component {
           event.preventDefault(); event.stopPropagation(); selection.onDrop!(ids, path);
         });
       };
-      if (layout === "public" && selection) {
-        const heading = container.createDiv({ cls: "simple-share-folder-heading simple-share-root-folder", attr: { role: "button", tabindex: "0" } });
-        setIcon(heading.createSpan({ cls: "simple-share-folder-icon" }), "folder");
-        heading.createSpan({ cls: "simple-share-folder-name", text: "分享库根目录" });
-        heading.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); heading.click(); } });
-        directoryTarget(heading, "");
-      }
       for (const row of rows) {
         const entry = this.manifest.notes[row.id];
         const path = layout === "public" ? entry?.category ?? this.published.notes[row.id]?.category ?? "" : row.file?.parent?.path ?? entry?.sourcePath.split("/").slice(0, -1).join("/") ?? "";
@@ -1983,7 +1976,7 @@ export default class ShareFeature extends Component {
           .onChange(value => {
             if (value === "root" || value === "source") void this.change(manifest => { manifest.defaultPath = value; }).catch(error => this.fail(error));
           }));
-      const holdEdit = checkboxRow(management, "长按笔记进入批量编辑模式", "长按 0.6 秒进入，可多选拖动或撤下分享。", this.manifest.holdToEdit !== false);
+      const holdEdit = checkboxRow(management, "拖动笔记进入批量编辑模式", "鼠标按住左键拖动进入，可多选移动或撤下；触屏长按 0.6 秒。", this.manifest.holdToEdit !== false);
       holdEdit.input.addEventListener("change", () => {
         void this.change(manifest => { manifest.holdToEdit = holdEdit.input.checked; }).catch(error => this.fail(error));
       });
@@ -2554,13 +2547,15 @@ export class ShareView extends ItemView {
     status.toggleClass("is-deploying", deploying);
     if (deploying) status.textContent = "部署中 · " + status.textContent;
     status.hidden = !this.feature.progressText;
+    status.toggleClass("simple-share-success", !this.feature.error && !this.feature.isPublishing && !deploying);
+    status.toggleClass("is-working", this.feature.isPublishing || deploying);
+    this.contentEl.querySelector(".simple-share-library-status")?.toggleClass("has-status", !status.hidden);
   }
   render(): void {
     if (this.activeLibrary !== this.feature.libraryId) {
       this.activeLibrary = this.feature.libraryId; this.selected.clear(); this.activeDirectory = undefined;
     }
     this.contentEl.empty(); this.contentEl.addClass("simple-share-panel");
-    this.feature.renderLibrarySelector(this.contentEl);
     const header = new Setting(this.contentEl)
       .addButton(button => {
         button.setClass("simple-action-button").setClass("simple-action-button--plain").setIcon("globe").setTooltip("选择分享网站").onClick(runAsync(async event => {
@@ -2607,6 +2602,20 @@ export class ShareView extends ItemView {
       button.buttonEl.setAttribute("aria-label", "打开分享设置");
     });
     header.settingEl.addClass("simple-share-header");
+    const libraryStatus = this.contentEl.createDiv({ cls: "simple-share-library-status" });
+    const libraryButton = libraryStatus.createEl("button", { cls: "simple-share-library-button", attr: { type: "button", "aria-label": "切换当前分享库", "aria-haspopup": "menu" } });
+    const libraryLabel = libraryButton.createSpan({ cls: "simple-share-library-label" });
+    libraryLabel.createSpan({ text: "当前分享库" });
+    setIcon(libraryLabel.createSpan({ cls: "simple-share-library-chevron", attr: { "aria-hidden": "true" } }), "chevron-down");
+    libraryLabel.createSpan({ cls: "simple-share-library-name", text: this.feature.libraries[this.feature.libraryId] || "尚未接入分享库" });
+    libraryButton.addEventListener("click", event => {
+      const menu = new Menu();
+      for (const [id, name] of Object.entries(this.feature.libraries)) menu.addItem(item => item.setTitle(name)
+        .setChecked(id === this.feature.libraryId).setDisabled(this.feature.isPublishing)
+        .onClick(() => { void this.feature.switchLibrary(id).catch(error => new Notice(String(error))); }));
+      menu.showAtMouseEvent(event);
+    });
+    libraryButton.createSpan({ cls: "simple-share-progress", attr: { role: "status", "aria-live": "polite" } });
     const publish = this.feature.addPublishButton(new Setting(this.contentEl));
     publish.settingEl.addClass("simple-share-publish-row");
     publish.settingEl.toggleClass("is-editing", this.editing);
@@ -2614,7 +2623,6 @@ export class ShareView extends ItemView {
     primary.addClass("simple-share-new", "mod-cta");
     const uploadIcon = primary.createSpan({ cls: "simple-share-new-icon", attr: { "aria-hidden": "true" } });
     setIcon(uploadIcon, "upload-cloud"); primary.prepend(uploadIcon);
-    publish.controlEl.createEl("p", { cls: "simple-share-progress", attr: { role: "status", "aria-live": "polite" } });
     this.updateStatus();
     for (const id of this.selected) if (!this.feature.rows.some(row => row.id === id)) this.selected.delete(id);
     const renderList = () => this.feature.renderPanel(body, this.query, this.layout, this.collapsed, () => this.app.workspace.requestSaveLayout(), this.descending,

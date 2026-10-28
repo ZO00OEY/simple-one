@@ -5,10 +5,12 @@ import { DiaryPathSuggest } from "./features/diaryPathSuggest";
 import { SyncSettingsTab } from "./features/sync";
 import { runAsync } from "./shared/async";
 import { confirmAction } from "./shared/confirm";
+import { ThemeColorPicker } from "./shared/themeColorPicker";
+import { TranslationSettingsModal } from "./features/selectionTranslation";
 // ============================================================
 // Settings tab UI
 // ============================================================
-import { App, ColorComponent, Menu, Modal, Notice, PluginSettingTab, Setting, TFile, TFolder, normalizePath, requireApiVersion, setIcon, type SettingDefinitionItem } from "obsidian";
+import { App, Menu, Modal, Notice, PluginSettingTab, Setting, TFile, TFolder, normalizePath, requireApiVersion, setIcon, type SettingDefinitionItem } from "obsidian";
 import type SimplePlugin from "./main";
 import { TYPOGRAPHY_DEFAULTS, TYPOGRAPHY_RANGES } from "./shared/typography";
 import {
@@ -29,7 +31,8 @@ import { checkTemplateSiteRule } from "./features/templateRuleCheck";
 import { testTemplateSiteRule } from "./features/templateFill";
 import { importTemplateGroup, mergeSiteImports, mergeTemplateImports, type ImportCounts } from "./features/templateImportMerge";
 import { getNotebookNavigatorPlugin } from "./features/diary";
-import { applyQuickFormatStyles, QUICK_FORMAT_ICON, QUICK_FORMAT_NAME } from "./features/quickFormat";
+import { applyQuickFormatStyles, quickFormatIconColor, QUICK_FORMAT_ICON, QUICK_FORMAT_NAME } from "./features/quickFormat";
+import { setFormatIcon } from "./shared/formatIcon";
 import { openSearchFolderPicker } from "./features/searchFolderFilter";
 import { POPUP_SCALE_MAX } from "./shared/popupSizing";
 import { displayParameterEnabled } from "./shared/displayProfile";
@@ -161,7 +164,7 @@ const QUICK_FORMAT_HEADING_LABELS: Record<QuickFormatHeadingLevel, string> = {
 };
 
 function readRenderedFormatColor(
-  tag: "strong" | "em" | "mark" | "del",
+  tag: "strong" | "em" | "mark" | "del" | "span" | "u",
   property: "color" | "backgroundColor"
 ): string {
   const sample = document.body.createDiv({
@@ -179,6 +182,25 @@ function readRenderedFormatColor(
 }
 
 export class SimpleSettingTab extends PluginSettingTab {
+  private refreshingThemeColor = false;
+
+  private setThemeColor(picker: ThemeColorPicker, value: string): void {
+    this.refreshingThemeColor = true;
+    try { picker.setValue(value); } finally { this.refreshingThemeColor = false; }
+  }
+  private themeControlRefreshers: { element: HTMLElement; refresh: () => void }[] = [];
+
+  private watchThemeControl(element: HTMLElement, refresh: () => void): void {
+    this.themeControlRefreshers = this.themeControlRefreshers.filter(control => control.element.isConnected);
+    this.themeControlRefreshers.push({ element, refresh });
+    refresh();
+  }
+
+  private updateThemeReset(reset: HTMLButtonElement, customized: boolean): void {
+    reset.disabled = !customized;
+    reset.title = customized ? "已自定义，点击恢复当前主题" : "跟随当前主题";
+    reset.setAttribute("aria-label", reset.title);
+  }
   plugin: SimplePlugin;
   private syncTab: SyncSettingsTab;
   private page: SettingsPage = { type: "overview" };
@@ -197,6 +219,10 @@ export class SimpleSettingTab extends PluginSettingTab {
   constructor(app: App, plugin: SimplePlugin) {
     super(app, plugin);
     this.plugin = plugin;
+    plugin.registerEvent(app.workspace.on("css-change", () => {
+      this.themeControlRefreshers = this.themeControlRefreshers.filter(control => control.element.isConnected);
+      for (const control of this.themeControlRefreshers) control.refresh();
+    }));
     this.displayPreviewTab = plugin.settings.lastSettingsTab ?? "";
     this.syncTab = new SyncSettingsTab(app, plugin.sync);
     plugin.openReformatSettings = () => {
@@ -355,15 +381,19 @@ export class SimpleSettingTab extends PluginSettingTab {
   private renderOverviewInlineSettings(
     container: HTMLElement,
   ): void {
-    const shortcuts = settingsFieldset(container, "快捷键");
-    const formatRow = this.renderDisplayCheckbox(shortcuts, "格式调整", "启用格式调整快捷操作。",
-      this.plugin.settings.enhancements.quickFormat.enabled, async value => {
+    const shortcuts = settingsFieldset(container, "快捷功能");
+    const formatRow = this.renderDisplayCheckbox(shortcuts, "浮动工具栏", "启用快捷功能，并在编辑区顶部显示 H 入口。",
+      this.plugin.settings.enhancements.quickFormat.enabled && (this.plugin.isMobile ? this.plugin.settings.enhancements.quickFormat.showMobileEntry : this.plugin.settings.enhancements.quickFormat.showDesktopEntry), async value => {
         this.plugin.settings.enhancements.quickFormat.enabled = value;
+        this.plugin.settings.enhancements.quickFormat.showDesktopEntry = value;
+        this.plugin.settings.enhancements.quickFormat.showMobileEntry = value;
         await this.plugin.saveSettings();
         this.plugin.refreshQuickFormatActions();
       });
     formatRow.addClass("simple-shortcut-option");
     checkboxRowIcon(formatRow, QUICK_FORMAT_ICON);
+    const formatIcon = formatRow.querySelector<HTMLElement>(".simple-checkbox-icon");
+    if (formatIcon) formatIcon.style.color = quickFormatIconColor(this.plugin);
     const automaticRow = this.renderDisplayCheckbox(shortcuts, "自动排版", "启用自动排版及其快捷操作。",
       this.plugin.settings.enhancements.currentNoteLinkConverter.enabled, async value => {
         this.plugin.settings.enhancements.currentNoteLinkConverter.enabled = value;
@@ -461,6 +491,15 @@ export class SimpleSettingTab extends PluginSettingTab {
 
   private renderEditingOptimizationSettings(container: HTMLElement): void {
     const basic = settingsFieldset(container, "编辑优化");
+    const floatingRow = this.renderDisplayCheckbox(basic, "禁用浮动编辑栏", "勾选后，选中文字不自动弹出编辑栏；顶部 H 入口保留，可点击恢复。",
+      !this.plugin.settings.enhancements.quickFormat.selectionToolbar, async disabled => {
+        this.plugin.settings.enhancements.quickFormat.selectionToolbar = !disabled;
+        await this.plugin.saveSettings(); this.plugin.refreshQuickFormatActions();
+      });
+    floatingRow.addClass("simple-reformat-option");
+    const floatingManage = floatingRow.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", "aria-label": "浮动编辑栏设置" } });
+    setActionIcon(floatingManage, "settings", "bordered");
+    floatingManage.addEventListener("click", () => this.openPage({ type: "quick-format" }));
     this.renderDisplayCheckbox(basic, "新建笔记自动补全属性", "沿用现有规则，按当前目录关联的 Obsidian 数据库视图自动补全属性。",
       this.plugin.settings.newNoteDefaults.enabled, async value => {
         this.plugin.settings.newNoteDefaults.enabled = value;
@@ -819,6 +858,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderThemePanel(container: HTMLElement): void {
+    this.renderThemeAppearanceSettings(container);
     this.renderThemeFormattingSettings(container, false);
     const headingGroup = settingsFieldset(container, "标题格式");
     for (const level of Object.keys(QUICK_FORMAT_HEADING_LABELS) as QuickFormatHeadingLevel[]) {
@@ -1080,6 +1120,42 @@ export class SimpleSettingTab extends PluginSettingTab {
       );
   }
 
+  private renderThemeAppearanceSettings(container: HTMLElement): void {
+    const group = settingsFieldset(container, "主题");
+    const app = this.app as App & { getAccentColor(): string; setAccentColor(color: string): void };
+    const vault = this.app.vault as App["vault"] & { getConfig(key: string): unknown; setConfig(key: string, value: string): void | Promise<void> };
+    const colorRow = (name: string, description: string, value: string, customized: boolean,
+      save: (color: string) => Promise<void>, read: () => string, isCustomized: () => boolean): void => {
+      const row = group.createDiv({ cls: "simple-preview-checkbox-row simple-display-option-row simple-theme-format-row", attr: { title: description } });
+      row.createSpan({ text: name });
+      const controls = row.createDiv({ cls: "simple-theme-format-controls" });
+      const picker = new ThemeColorPicker(controls, this.plugin).setValue(value).onChange(async color => {
+        if (this.refreshingThemeColor) return;
+        await save(color); this.updateThemeReset(reset, true);
+      });
+      picker.buttonEl.setAttribute("aria-label", name);
+      const reset = controls.createEl("button", { cls: "clickable-icon simple-format-reset", attr: {
+        type: "button", title: "恢复当前主题", "aria-label": `${name}：恢复当前主题`,
+      } });
+      setActionIcon(reset, "rotate-ccw"); this.updateThemeReset(reset, customized);
+      reset.addEventListener("click", runAsync(async () => {
+        await save(""); this.setThemeColor(picker, read()); this.updateThemeReset(reset, false);
+      }));
+      this.watchThemeControl(row, () => {
+        this.updateThemeReset(reset, isCustomized());
+        this.setThemeColor(picker, read());
+      });
+    };
+    colorRow("强调色", "与 Obsidian 外观设置联动；恢复后跟随当前主题。", app.getAccentColor(), !!vault.getConfig("accentColor"), async color => {
+      await vault.setConfig("accentColor", color); app.setAccentColor(color);
+    }, () => app.getAccentColor(), () => !!vault.getConfig("accentColor"));
+    const background = (): string => getComputedStyle(container.ownerDocument.body).getPropertyValue("--background-secondary").trim();
+    colorRow("侧边栏背景色", "调整浅色模式的侧边栏和使用侧栏底色的工具面板，推荐柔和灰 #f6f7f9；正文背景和深色模式跟随主题。", this.plugin.settings.themeBackgroundColor || background(), !!this.plugin.settings.themeBackgroundColor, async color => {
+      this.plugin.settings.themeBackgroundColor = color;
+      await this.plugin.saveSettings(); this.plugin.refreshThemeAppearance();
+    }, () => this.plugin.settings.themeBackgroundColor || background(), () => !!this.plugin.settings.themeBackgroundColor);
+  }
+
   private renderThemeFormattingSettings(container: HTMLElement, standalone = true): void {
     if (standalone) this.renderPageHeader(container, "正文格式", () => this.openPage({ type: "display-preview" }));
     const formatting = this.plugin.settings.themeFormatting;
@@ -1093,42 +1169,60 @@ export class SimpleSettingTab extends PluginSettingTab {
         name: string,
         description: string,
         key: keyof typeof formatting,
-        tag: "strong" | "em" | "mark" | "del",
+        tag: "strong" | "em" | "mark" | "del" | "span" | "u",
         property: "color" | "backgroundColor"
       ): void => {
         const value = formatting[key];
         const row = group.createDiv({ cls: "simple-preview-checkbox-row simple-display-option-row simple-theme-format-row", attr: { title: description } });
-        row.createSpan({ text: name });
+        const label = row.createDiv({ cls: "simple-theme-format-label" });
+        const symbol = label.createSpan({ cls: "simple-theme-format-symbol", attr: { "aria-hidden": "true" } });
+        setFormatIcon(symbol, { strong: "bold", em: "italic", del: "strikethrough", u: "underline", span: "baseline", mark: property === "backgroundColor" ? "highlighter" : "baseline" }[tag]);
+        label.createSpan({ text: name });
+        const refreshIcon = () => {
+          const color = formatting[key] || readRenderedFormatColor(tag, property);
+          symbol.style.color = property === "color" ? color : readRenderedFormatColor(tag, "color");
+          symbol.style.backgroundColor = property === "backgroundColor" ? color : "";
+        };
         const controls = row.createDiv({ cls: "simple-theme-format-controls" });
         const preview = controls.createSpan({
           cls: "markdown-rendered simple-theme-format-preview",
         });
         preview.createEl(tag, {
-          text: { strong: "加粗", em: "斜体", mark: "高亮", del: "删除线" }[tag],
+          text: { strong: "加粗", em: "斜体", mark: "高亮", del: "删除线", span: "正文", u: "下划线" }[tag],
         });
-        const picker = new ColorComponent(controls)
+        const picker = new ThemeColorPicker(controls, this.plugin)
             .setValue(value || readRenderedFormatColor(tag, property))
             .onChange(async (color) => {
+              if (this.refreshingThemeColor) return;
               formatting[key] = color;
-              reset.disabled = false;
+              this.updateThemeReset(reset, true);
               await save();
+              refreshIcon();
             });
-        controls.querySelector("input")?.setAttribute("aria-label", name);
+        picker.buttonEl.setAttribute("aria-label", name);
         const reset = controls.createEl("button", { cls: "clickable-icon simple-format-reset", attr: {
           type: "button", title: "恢复当前主题", "aria-label": `${name}：恢复当前主题`,
         } });
         setActionIcon(reset, "rotate-ccw");
-        reset.disabled = !value;
+        this.updateThemeReset(reset, !!value);
         reset.addEventListener("click", runAsync(async () => {
           formatting[key] = "";
           await save();
-          picker.setValue(readRenderedFormatColor(tag, property));
-          reset.disabled = true;
+          this.setThemeColor(picker, readRenderedFormatColor(tag, property));
+          this.updateThemeReset(reset, false);
+          refreshIcon();
         }));
+        this.watchThemeControl(row, () => {
+          this.updateThemeReset(reset, !!formatting[key]);
+          this.setThemeColor(picker, formatting[key] || readRenderedFormatColor(tag, property));
+          refreshIcon();
+        });
       };
 
+      colorSetting("正文文字颜色", "设置正文默认颜色。", "textColor", "span", "color");
       colorSetting("加粗文字颜色", "设置 Markdown 加粗文字颜色。", "boldColor", "strong", "color");
       colorSetting("斜体文字颜色", "设置 Markdown 斜体文字颜色。", "italicColor", "em", "color");
+      colorSetting("下划线颜色", "设置下划线文字颜色。", "underlineColor", "u", "color");
       colorSetting("高亮背景颜色", "设置 ==高亮== 文本的背景颜色。", "highlightBackground", "mark", "backgroundColor");
       colorSetting("高亮文字颜色", "设置高亮文本的前景颜色。", "highlightColor", "mark", "color");
       colorSetting("删除线颜色", "设置 Markdown 删除线文字颜色。", "strikethroughColor", "del", "color");
@@ -2255,39 +2349,20 @@ export class SimpleSettingTab extends PluginSettingTab {
     this.renderPageHeader(container, QUICK_FORMAT_NAME, () => this.openPage({ type: "feature-enhancements" }));
 
     settingsCard(container, (card) => {
-      new Setting(card)
-        .setName("启用格式调整快捷键")
-        .addToggle((toggle) =>
-          toggle
-            .setValue(quickFormat.enabled)
-            .onChange(async (value) => {
-              quickFormat.enabled = value;
-              await this.plugin.saveSettings();
-              this.plugin.refreshQuickFormatActions();
-              this.renderSettings();
-            })
-        );
-
-      new Setting(card)
-        .setName("电脑端：编辑区顶部显示本快捷键")
-        .setDesc("左键执行当前预设，右键选择格式。")
-        .addToggle((toggle) => toggle
-          .setValue(quickFormat.showDesktopEntry)
-          .onChange(async (value) => {
-            quickFormat.showDesktopEntry = value;
-            await this.plugin.saveSettings();
-            this.plugin.refreshQuickFormatActions();
-          }));
-      new Setting(card)
-        .setName("手机端：编辑区顶部显示本快捷键")
-        .setDesc("点击执行当前预设，长按选择格式。")
-        .addToggle((toggle) => toggle
-          .setValue(quickFormat.showMobileEntry)
-          .onChange(async (value) => {
-            quickFormat.showMobileEntry = value;
-            await this.plugin.saveSettings();
-            this.plugin.refreshQuickFormatActions();
-          }));
+      new Setting(card).setName("翻译 · Simple AI 联动").setDesc("使用 Simple AI 的模型与凭据；选择翻译模型和提示词。").addButton(button => button.setButtonText("设置").onClick(() => new TranslationSettingsModal(this.plugin).open()));
+      this.renderDisplayCheckbox(card, "启用浮动工具栏", "启用快捷功能，并显示顶部 H 入口。", quickFormat.enabled, async value => {
+        quickFormat.enabled = value; quickFormat.showDesktopEntry = value; quickFormat.showMobileEntry = value;
+        await this.plugin.saveSettings(); this.plugin.refreshQuickFormatActions(); this.renderSettings();
+      });
+      this.renderDisplayCheckbox(card, "禁用浮动编辑栏", "勾选后不自动弹出；也可通过顶部 H 切换。", !quickFormat.selectionToolbar, async disabled => {
+        quickFormat.selectionToolbar = !disabled; await this.plugin.saveSettings(); this.plugin.refreshQuickFormatActions();
+      });
+      this.renderDisplayCheckbox(card, "电脑端：顶部显示 H 快速开关", "点击暂时暂停或恢复浮动工具栏；关闭该功能时沿用原预设操作。", quickFormat.showDesktopEntry, async value => {
+        quickFormat.showDesktopEntry = value; await this.plugin.saveSettings(); this.plugin.refreshQuickFormatActions();
+      });
+      this.renderDisplayCheckbox(card, "手机端：顶部显示 H 快速开关", "点击暂时暂停或恢复浮动工具栏。", quickFormat.showMobileEntry, async value => {
+        quickFormat.showMobileEntry = value; await this.plugin.saveSettings(); this.plugin.refreshQuickFormatActions();
+      });
       new Setting(card).setName("在右键菜单中添加“段落设置（Callout 块）”")
         .setDesc("在编辑区右键菜单中添加“段落设置（Callout 块）”，选中文本后选择类型，即可快速创建对应的 Callout 块。")
         .addToggle(toggle => toggle.setValue(quickFormat.showCalloutsInParagraphMenu).onChange(async value => {
@@ -2365,19 +2440,30 @@ export class SimpleSettingTab extends PluginSettingTab {
     input.addEventListener("change", runAsync(async () => {
       if (input.value && (!Number.isFinite(Number(input.value)) || Number(input.value) < 10 || Number(input.value) > 96)) return;
       quickFormat.headingSizes[level] = input.value;
+      this.updateThemeReset(reset, !!(input.value || quickFormat.headingColors[level]));
       await this.plugin.saveSettings();
       applyQuickFormatStyles(this.plugin);
     }));
-    const picker = new ColorComponent(controls).setValue(color || fallback).onChange(async value => {
+    const picker = new ThemeColorPicker(controls, this.plugin).setValue(color || fallback).onChange(async value => {
+      if (this.refreshingThemeColor) return;
       quickFormat.headingColors[level] = value;
+      this.updateThemeReset(reset, true);
       await this.plugin.saveSettings();
       applyQuickFormatStyles(this.plugin);
     });
-    controls.querySelector('input[type="color"]')?.setAttribute("aria-label", `${level} 颜色`);
+    picker.buttonEl.setAttribute("aria-label", `${level} 颜色`);
     const reset = controls.createEl("button", { cls: "clickable-icon simple-format-reset", attr: {
       type: "button", title: "恢复当前主题", "aria-label": `${level}：恢复当前主题字号和颜色`,
     } });
     setActionIcon(reset, "rotate-ccw");
+    const refresh = (): void => {
+      this.updateThemeReset(reset, !!(quickFormat.headingSizes[level] || quickFormat.headingColors[level]));
+      const current = readRenderedFontSize(level);
+      input.placeholder = stripPx(current);
+      input.title = `当前字号 ${current}${compareFontSizes(current, readRenderedFontSize())}`;
+      this.setThemeColor(picker, quickFormat.headingColors[level] || readThemeColor(QUICK_FORMAT_HEADING_LABELS[level]));
+    };
+    this.watchThemeControl(row, refresh);
     reset.addEventListener("click", runAsync(async () => {
       quickFormat.headingSizes[level] = "";
       quickFormat.headingColors[level] = "";
@@ -2387,7 +2473,8 @@ export class SimpleSettingTab extends PluginSettingTab {
       const restoredSize = readRenderedFontSize(level);
       input.placeholder = stripPx(restoredSize);
       input.title = `当前字号 ${restoredSize}${compareFontSizes(restoredSize, readRenderedFontSize())}`;
-      picker.setValue(readThemeColor(QUICK_FORMAT_HEADING_LABELS[level]));
+      this.setThemeColor(picker, readThemeColor(QUICK_FORMAT_HEADING_LABELS[level]));
+      refresh();
     }));
   }
 

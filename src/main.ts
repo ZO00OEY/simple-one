@@ -45,6 +45,7 @@ import { normalizePopupScalePercent } from "./shared/popupSizing";
 import { activeDisplayProfile, displayParameterEnabled, loadMobileDisplayProfile } from "./shared/displayProfile";
 import { normalizeTypography } from "./shared/typography";
 import { registerTypography } from "./features/typography";
+import { registerThemeAppearance } from "./features/themeAppearance";
 import { applySwitchStates, collectSwitchStates, isSharedSwitchPath, mobileSettingsForSave, type SwitchStates } from "./shared/platformSwitches";
 import {
   DEFAULT_SETTINGS,
@@ -91,6 +92,7 @@ export default class SimplePlugin extends Plugin {
   openReformatSettings: () => void = () => {};
   refreshPopupWindowSizing: () => void = () => {};
   refreshTypography: () => void = () => {};
+  refreshThemeAppearance: () => void = () => {};
   private readableLineWidthDocuments = new Set<Document>();
   private templateFolder = "";
   private desktopSwitchStates: SwitchStates = {};
@@ -109,6 +111,7 @@ export default class SimplePlugin extends Plugin {
     applyQuickFormatStyles(this);
     this.applyReadableLineWidth();
     this.refreshTypography = registerTypography(this);
+    this.refreshThemeAppearance = registerThemeAppearance(this);
     this.applyImageHeightLimit();
     this.applyMobileHeaderButtons();
     this.applyThemeFormattingStyles();
@@ -436,6 +439,8 @@ export default class SimplePlugin extends Plugin {
     const docs = targetDoc ? new Set([targetDoc]) : new Set<Document>([document]);
     if (!targetDoc) this.app.workspace.iterateAllLeaves((leaf) => docs.add(leaf.getContainer().doc));
     const formats = [
+      ["textColor", "simple-format-text-color", "--simple-format-text-color"],
+      ["underlineColor", "simple-format-underline-color", "--simple-format-underline-color"],
       ["boldColor", "simple-format-bold-color", "--simple-format-bold-color"],
       ["italicColor", "simple-format-italic-color", "--simple-format-italic-color"],
       ["highlightBackground", "simple-format-highlight-background", "--simple-format-highlight-background"],

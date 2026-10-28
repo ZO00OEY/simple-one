@@ -18,9 +18,9 @@ doc.elementFromPoint = () => list.querySelector('summary');
 const dispose = context.module.exports.installShareHoldEdit(list, () => enabled,
   (id, directory) => { entries.push([id, directory]); list.querySelector('.simple-share-note-row').innerHTML = '<input type="checkbox">Note'; },
   (...args) => drops.push(args), (...args) => trashed.push(args));
-function pointer(target, type, x = 10) {
+function pointer(target, type, x = 10, pointerType = "touch") {
   const event = new window.Event(type, { bubbles: true, cancelable: true });
-  Object.assign(event, { pointerId: 1, button: 0, clientX: x, clientY: 10 });
+  Object.assign(event, { pointerId: 1, button: 0, clientX: x, clientY: 10, pointerType });
   target.dispatchEvent(event); return event;
 }
 pointer(list.firstElementChild, 'pointerdown'); pointer(doc, 'pointerup');
@@ -42,6 +42,15 @@ doc.elementFromPoint = () => trashTarget;
 pointer(list.firstElementChild, 'pointerdown'); hold(); pointer(doc, 'pointermove', 40); pointer(doc, 'pointerup', 40);
 assert.deepEqual(trashed, [['note', undefined]], 'hold drop into trash uses deletion, not directory movement');
 assert.equal(drops.length, 1);
+const countBeforeMouse = entries.length;
+pointer(list.firstElementChild, 'pointerdown', 10, 'mouse');
+pointer(doc, 'pointermove', 14, 'mouse');
+assert.equal(entries.length, countBeforeMouse, 'small mouse movements preserve click behavior');
+pointer(doc, 'pointerup', 14, 'mouse');
+pointer(list.firstElementChild, 'pointerdown', 10, 'mouse');
+pointer(doc, 'pointermove', 25, 'mouse');
+assert.equal(entries.length, countBeforeMouse + 1, 'mouse movement enters editing without a timer');
+pointer(doc, 'pointercancel', 25, 'mouse');
 dispose();
 assert.equal(doc.querySelector('.simple-share-drag-preview'), null);
 console.log('Share hold: click, scroll, edit transition, continuous drag, disabled state and cancellation passed.');

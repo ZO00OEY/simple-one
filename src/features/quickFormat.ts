@@ -7,11 +7,12 @@ import {
 } from "../types";
 import { registerMarkdownAction } from "../shared/markdownAction";
 import { readCalloutColor } from "../shared/calloutColor";
+import { registerSelectionToolbar } from "./selectionToolbar";
 
 const ACTION_ATTR = "data-simple-quick-format";
 const quickFormatSheets = new WeakMap<Document, CSSStyleSheet>();
 export const QUICK_FORMAT_ICON = "heading";
-export const QUICK_FORMAT_NAME = "格式调整快捷键";
+export const QUICK_FORMAT_NAME = "浮动工具栏";
 
 type ColumnFormatTarget = { apply: (mode: QuickFormatMode) => boolean; hold: (value: boolean) => void };
 let activeColumnFormatTarget: ColumnFormatTarget | null = null;
@@ -102,6 +103,7 @@ function addCalloutColorRules(rules: string[], type: string, rgb: string): void 
 
 export function registerQuickFormat(plugin: SimplePlugin): () => void {
   let openMenu: Menu | null = null;
+  const toolbar = registerSelectionToolbar(plugin, () => syncAllActions());
   plugin.addCommand({
     id: "apply-quick-format",
     name: "执行格式编辑预设",
@@ -153,7 +155,9 @@ export function registerQuickFormat(plugin: SimplePlugin): () => void {
       return settings.enabled && (plugin.isMobile ? settings.showMobileEntry : settings.showDesktopEntry);
     },
     (view) => {
-      const action = view.addAction(QUICK_FORMAT_ICON, actionTitle(plugin), () => applyQuickFormat(plugin));
+      const action = view.addAction(QUICK_FORMAT_ICON, actionTitle(plugin), () => {
+        toolbar.toggle();
+      });
       action.addEventListener("pointerdown", (event) => { if (event.button === 0 || activeColumnFormatTarget) event.preventDefault(); });
       action.addEventListener("contextmenu", (evt) => {
         evt.preventDefault();
@@ -167,10 +171,19 @@ export function registerQuickFormat(plugin: SimplePlugin): () => void {
       });
       return action;
     },
-    (action) => syncActionButton(plugin, action)
+    (action) => {
+      syncActionButton(plugin, action);
+      action.classList.toggle("is-selection-paused", toolbar.isPaused());
+      if (toolbar.isPaused()) {
+        const badge = action.createSpan({ cls: "simple-quick-format-paused-mark", attr: { "aria-hidden": "true" } });
+        setIcon(badge, "ban");
+      }
+      action.setAttribute("aria-pressed", String(!toolbar.isPaused()));
+      setTooltip(action, toolbar.isPaused() ? "浮动编辑栏已禁用；点击恢复" : "点击禁用浮动编辑栏；右键选择原格式预设");
+    }
   );
   plugin.register(() => openMenu?.hide());
-  return syncAllActions;
+  return () => { toolbar.refresh(); syncAllActions(); };
 }
 
 function createQuickFormatMenu(plugin: SimplePlugin, syncAllActions: () => void): Menu {
@@ -343,8 +356,8 @@ function actionTitle(_plugin: SimplePlugin): string {
 }
 
 function syncActionButton(plugin: SimplePlugin, action: HTMLElement): void {
-  const mode = plugin.settings.enhancements.quickFormat.lastMode;
-  setIcon(action, modeIcon(mode));
+  action.replaceChildren();
+  setIcon(action, QUICK_FORMAT_ICON);
   action.style.color = quickFormatIconColor(plugin);
   action.addClass("simple-quick-format-action");
   setTooltip(action, `当前预设：${modeLabel(plugin, plugin.settings.enhancements.quickFormat.lastMode)}；左键执行，右键选择预设`);

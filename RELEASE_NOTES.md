@@ -1,3 +1,16 @@
+# Simple One 1.0.28
+
+- 新增浮动编辑工具栏：主题预览、格式切换、自定义颜色、收藏与按钮显隐/排序。
+- 新增选区搜索工具箱，以及可选 Simple AI 翻译联动；模型与凭据由 Simple AI 管理。
+- 翻译按自然段编号校验，原文与译文交错预览后插入；支持自定义语言与提示词、撤销和原文变更保护。
+- 修复重复改色时的实体二次转义、波浪号代码块保护，以及触屏拖动命中与卸载清理。
+- 保留主库最新调色盘和侧栏背景设置。
+
+English: floating editing tools, theme-aware colors, customizable controls, selection search, and optional paragraph-aligned translation via Simple AI. Local settings and notes are preserved.
+
+翻译联动需要 Simple AI 0.0.2 或兼容接口；Simple One 仍可独立使用。升级替换 main.js、manifest.json、styles.css，保留个人配置。
+
+---
 # Simple One 1.0.27
 
 - 新增前置复选框「长按笔记进入批量编辑模式」，默认开启；长按 0.6 秒进入，可多选拖动，点击面板外部或按 Esc 退出。

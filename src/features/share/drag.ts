@@ -6,6 +6,7 @@ export function installShareDrag(container: HTMLElement, selected: Set<string>, 
   const doc = container.ownerDocument, win = doc.defaultView!;
   let timer: number | undefined, preview: HTMLElement | undefined, target: HTMLElement | undefined, heldRow: HTMLElement | undefined;
   let pointer: number | undefined, startX = 0, startY = 0, active = false, ids: string[] = [], suppressClickUntil = 0;
+  let start: (() => void) | undefined, mouse = false;
   const rowAt = (event: Event): HTMLElement | null => (event.target as Element | null)?.closest?.<HTMLElement>("[data-share-drag-id]") ?? null;
   const interactive = (event: Event): boolean => !!(event.target as Element | null)?.closest?.("button, input, a, .setting-item-control");
   const choose = (row: HTMLElement): string[] => {
@@ -36,8 +37,10 @@ export function installShareDrag(container: HTMLElement, selected: Set<string>, 
   const move = (event: PointerEvent) => {
     if (event.pointerId !== pointer) return;
     if (!active) {
-      if (Math.hypot(event.clientX - startX, event.clientY - startY) > 6) finish();
-      return;
+      if (Math.hypot(event.clientX - startX, event.clientY - startY) <= 6) return;
+      if (!mouse) { finish(); return; }
+      start?.();
+      if (!active) return;
     }
     event.preventDefault();
     if (preview) { preview.style.left = `${event.clientX + 14}px`; preview.style.top = `${event.clientY + 14}px`; }
@@ -56,7 +59,7 @@ export function installShareDrag(container: HTMLElement, selected: Set<string>, 
     doc.removeEventListener("keydown", keydown, true);
     win.removeEventListener("blur", cancel);
     if (active) suppressClickUntil = Date.now() + 350;
-    active = false; pointer = undefined;
+    active = false; pointer = undefined; start = undefined;
   };
   const cancel = () => finish();
   const up = (event: PointerEvent) => {
@@ -81,7 +84,9 @@ export function installShareDrag(container: HTMLElement, selected: Set<string>, 
     doc.addEventListener("pointermove", move, { capture: true, passive: false });
     doc.addEventListener("pointerup", up, true); doc.addEventListener("pointercancel", cancel, true);
     doc.addEventListener("keydown", keydown, true); win.addEventListener("blur", cancel);
-    timer = win.setTimeout(() => {
+    mouse = event.pointerType !== "touch";
+    start = () => {
+      if (timer !== undefined) win.clearTimeout(timer);
       timer = undefined;
       if (!row.isConnected) { finish(); return; }
       ids = choose(row);
@@ -89,7 +94,8 @@ export function installShareDrag(container: HTMLElement, selected: Set<string>, 
       heldRow = row; row.draggable = false;
       active = true; container.classList.add("is-dragging-shares");
       preview = makePreview(row, ids.length); preview.style.left = `${startX + 14}px`; preview.style.top = `${startY + 14}px`;
-    }, 450);
+    };
+    timer = win.setTimeout(start, 450);
   };
   const nativeStart = (event: DragEvent) => {
     if (active) { event.preventDefault(); event.stopPropagation(); return; }
