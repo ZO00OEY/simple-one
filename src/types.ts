@@ -111,6 +111,7 @@ export interface TypographySettings {
 }
 
 export interface SimplePluginSettings {
+  lastSettingsTab?: string;
   showSyncSharingEntry: boolean;
   showSharingEntry: boolean;
   showCalendarDiaryEntry: boolean;

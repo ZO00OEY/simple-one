@@ -1901,6 +1901,9 @@ export default class SyncFeature extends Component {
   getSetupTrackingChoice(): "keep" | "rebuild" | undefined { return this.setupTrackingChoice; }
   setSetupTrackingChoice(choice: "keep" | "rebuild" | undefined): void { this.setupTrackingChoice = choice; }
   getVaultBasePath(): string { return this.vaultBasePath(); }
+  async trustSetupVault(): Promise<void> {
+    await this.exec("git", ["config", "--global", "--add", "safe.directory", this.vaultBasePath().replace(/\\/g, "/")]);
+  }
   async readSetupOverlap(path: string): Promise<SetupOverlapContent> {
     if (!this.settings.setupVerified || !this.setupPreview) throw new Error("请先检查本地与远端文件");
     return this.setup().readOverlap(this.setupPreview, path);
@@ -1908,7 +1911,7 @@ export default class SyncFeature extends Component {
 
   private setup(): GitSetup {
     return new GitSetup(this.vaultBasePath(), (program, args, timeoutMs, onOutput, stdinText, signal) =>
-      this.exec(program, args, program === "git" && (args[0] === "fetch" || args[0] === "push"), true, timeoutMs, onOutput, stdinText, signal), this.app.vault.configDir);
+      this.exec(program, args, program === "git", true, timeoutMs, onOutput, stdinText, signal), this.app.vault.configDir);
   }
 
   async inspectFileTracking(): Promise<FileTrackingPreview> {
@@ -2094,6 +2097,8 @@ export default class SyncFeature extends Component {
     publishProgress();
     const progressTimer = window.setInterval(publishProgress, 1000);
     try {
+    this.settings.gitAuthorName = this.settings.gitAuthorName.trim() || DEFAULT_GIT_AUTHOR_NAME;
+    this.settings.gitAuthorEmail = this.settings.gitAuthorEmail.trim() || DEFAULT_GIT_AUTHOR_EMAIL;
     const skippedPaths = await this.enqueueSetupGit(() => this.setup().finish(verified, preview, this.setupChoices, {
       name: this.settings.gitAuthorName,
       email: this.settings.gitAuthorEmail
@@ -2123,10 +2128,11 @@ export default class SyncFeature extends Component {
       : "首次接入完成");
     if (skippedPaths.length > 0) new Notice(`接入已完成；${skippedPaths.length} 个预览后变化的文件未提交，请在同步面板继续同步。`, 10000);
     window.clearInterval(progressTimer);
-    this.setSetupActivity("接入已完成 · 请在同步面板执行首次同步", "success");
-    onProgress?.("接入已完成 · 请在同步面板执行首次同步");
+    this.setSetupActivity("接入已完成 · 首次同步将在同步面板执行", "success");
+    onProgress?.("接入已完成 · 首次同步将在同步面板执行");
     this.setupActivity = undefined;
     void this.refreshSyncView().catch(error => this.recordError("刷新同步面板", error));
+    window.setTimeout(() => void this.syncNow(false).catch(error => this.recordError("首次同步", error)), 0);
     } catch (error) {
       const message = `${stage}失败 · ${formatStatusError(explainSetupError(error))}`;
       this.setSetupActivity(message, "error");
@@ -3416,6 +3422,7 @@ type SyncSettingsPage = "root" | "share-root" | "mobile" | "server" | "setup" | 
 export class SyncSettingsTab extends PluginSettingTab {
   private desktopPage: SyncSettingsPage = "root";
   private navigationParents: SyncSettingsPage[] = [];
+  private navigationRoot: SyncSettingsPage = "root";
   private setupViewStep = 1;
   private lightweightGuideController?: AbortController;
   private lightweightGuideToken = "";
@@ -3441,6 +3448,7 @@ export class SyncSettingsTab extends PluginSettingTab {
   private setupBrowserRequest = 0;
   private setupTokenInput = "";
   private setupAuthVerified = false;
+  private setupTrustRequired = false;
   private setupBusy = false;
   private setupRebuildConfirmed = false;
   private setupReviewPreview?: SetupPreview;
@@ -3489,7 +3497,8 @@ export class SyncSettingsTab extends PluginSettingTab {
     this.stopSetupBrowserAuthorization();
     this.lightweightGuideController?.abort();
     this.navigationParents = [];
-    this.desktopPage = sharing ? "share-root" : "root";
+    this.navigationRoot = sharing ? "share-root" : "root";
+    this.desktopPage = this.navigationRoot;
   }
 
   openShareSettings(): void {
@@ -3508,10 +3517,10 @@ export class SyncSettingsTab extends PluginSettingTab {
   backToOverview(): boolean {
     if (["server", "share-root"].includes(this.desktopPage) && this.plugin.host?.share?.backFromEdgeOneGuide()) return true;
     if (["server", "share-root"].includes(this.desktopPage) && this.plugin.host?.share?.backFromShareLibraryManagement?.()) return true;
-    if (this.desktopPage === "root") return false;
+    if (this.desktopPage === (this.navigationRoot ?? "root")) return false;
     this.stopSetupBrowserAuthorization();
     this.lightweightGuideController?.abort();
-    this.desktopPage = this.navigationParents?.pop() ?? "root";
+    this.desktopPage = this.navigationParents?.pop() ?? this.navigationRoot ?? "root";
     this.renderSettings();
     return true;
   }
@@ -4133,7 +4142,10 @@ export class SyncSettingsTab extends PluginSettingTab {
       if (advanceView) this.setupViewStep = this.plugin.settings.setupStep;
     } catch (error) {
       this.setupFailure = true;
-      this.setupMessage = explainSetupError(error);
+      this.setupTrustRequired = /detected dubious ownership|unsafe repository|safe\.directory/i.test(messageOf(error));
+      this.setupMessage = this.setupTrustRequired
+        ? `Git 尚未信任此笔记库：目录所有者与当前用户不一致，可能由迁移电脑、更换系统用户或使用管理员身份创建目录引起。确认来源可信后，可仅将当前路径加入本机 Git 信任列表：${this.plugin.getVaultBasePath()}`
+        : explainSetupError(error);
       this.syncSetupProgress(step, this.setupMessage, "error");
       new Notice(`同步：${this.setupMessage}`, 10000);
     } finally {
@@ -4197,9 +4209,12 @@ export class SyncSettingsTab extends PluginSettingTab {
     } catch (error) {
       const raw = messageOf(error);
       if (/ENOENT|is not recognized|spawn (?:git|gh)/i.test(raw)) {
-        throw new Error("当前设备未找到 GitHub CLI，请先安装后重试。");
+        throw new Error("当前设备缺少 Git 或 GitHub CLI，请先安装后重试。");
       }
-      throw new Error("当前 GitHub CLI 中未找到登录状态，请先选择浏览器登录授权或 Token 授权。");
+      if (/not logged (?:in|into)|not authenticated|gh auth login/i.test(raw)) {
+        throw new Error("当前 GitHub CLI 中未找到登录状态，请先选择浏览器登录授权或 Token 授权。");
+      }
+      throw error;
     }
   }
 
@@ -4267,26 +4282,19 @@ export class SyncSettingsTab extends PluginSettingTab {
     this.renderDeviceHeader(page, "从创建仓库开始：电脑端同步");
     page.createEl("p", { text: "按顺序完成四步。已核验的步骤可以随时返回查看。", cls: "simple-one-sync-section-desc" });
     const guidedDone = this.plugin.settings.setupComplete && !!this.plugin.settings.setupVerified;
-    const latestConnectionLog = this.plugin.getRecentErrorLogs()
-      .find((entry) => /测试连接|Fetch|Pull|Push|同步/.test(entry.context));
-    const loggedFailure = guidedDone && latestConnectionLog?.status === "error" ? latestConnectionLog : undefined;
     let tone: "success" | "error" | "disconnected" = "disconnected";
     let title = "当前未连接";
     let description = "尚未完成 GitHub 授权与仓库接入。按下方步骤继续。";
-    if (!this.plugin.settings.enabled) {
+    if (guidedDone) {
+      tone = "success";
+      title = "接入成功";
+      description = "笔记库接入已完成。同步进度、结果和失败原因请查看右侧同步面板。";
+    } else if (!this.plugin.settings.enabled) {
       description = "同步已关闭。返回同步首页启用后，再继续同步。";
     } else if (this.setupFailure) {
       tone = "error";
       title = this.setupViewStep <= 2 ? "连接失败" : "接入检查失败";
       description = `上次检查未通过：${formatStatusError(this.setupMessage)}。请在当前步骤重试。`;
-    } else if (loggedFailure) {
-      tone = "error";
-      title = loggedFailure.context === "测试连接" ? "连接失败" : "同步异常";
-      description = `上次${loggedFailure.context}未通过。请在同步面板查看详情，检查后重试。`;
-    } else if (guidedDone) {
-      tone = "success";
-      title = "首次接入已完成";
-      description = "已连接 GitHub，自动同步已启用；需要重新核验时可再次运行引导。";
     } else if (this.plugin.settings.setupComplete) {
       title = "当前连接待核验";
       description = "检测到旧版同步配置，但尚未通过本向导核验。可从第一步重新检查。";
@@ -4338,7 +4346,7 @@ export class SyncSettingsTab extends PluginSettingTab {
       "",
       "可以核验已有仓库，也可以由插件创建一个新的私人仓库。",
       "核对本地与远端文件，并决定同名文件如何处理。",
-      guidedDone ? "接入已完成，可回看核验结果或重新检查两端状态。" : "确认接入信息；首次推送请在同步面板执行。"
+      guidedDone ? "接入已完成，可回看核验结果或重新检查两端状态。" : "确认接入信息；接入成功后将自动触发一次同步。"
     ];
     if (this.setupViewStep !== 1) {
       new Setting(body).setName(steps[this.setupViewStep - 1]).setHeading();
@@ -4523,11 +4531,14 @@ export class SyncSettingsTab extends PluginSettingTab {
     }
     body.createEl("p", { text: preview && !this.setupBusy && !this.setupFailure ? ["✓ 检查完成", preview.commitSummary, "忽略规则已自动整理"].filter(Boolean).join(" · ") : this.setupMessage, cls: `simple-one-sync-setup-preview-progress ${this.setupFailure ? "simple-one-sync-setup-error" : this.setupMessage.startsWith("✓") ? "simple-one-sync-setup-done" : "simple-one-sync-section-desc"}`, attr: { role: "status", "aria-live": "polite" } });
     if ((!preview || this.setupFailure) && this.plugin.settings.setupStep >= 3 && (this.plugin.settings.setupVerified || this.plugin.settings.setupRepoUrl)) {
-      const actionLabel = preview ? "重新检查两端" : "检查两端";
+      const needsTrust = this.setupFailure && this.setupTrustRequired;
+      const actionLabel = needsTrust ? "信任此笔记库并重试" : preview ? "重新检查两端" : "检查两端";
       const action = body.createDiv({ cls: "simple-one-sync-setup-file-check" });
       const check = action.createEl("button", { text: this.setupBusy ? "正在检查…" : actionLabel, cls: "mod-cta", attr: { type: "button" } });
       check.disabled = this.setupBusy;
+      check.toggleClass("simple-one-sync-trust-action", needsTrust && !this.setupBusy);
       check.addEventListener("click", () => void this.runSetup(async () => {
+        if (needsTrust) await this.plugin.trustSetupVault();
         this.setupRebuildConfirmed = false;
         const started = Date.now();
         let stage = "正在开始检查…";
@@ -4652,13 +4663,13 @@ export class SyncSettingsTab extends PluginSettingTab {
           : "本次保持现有追踪；如需清理已提交的本机文件，可在 Git 同步设置中检查并修复。", cls: "simple-one-sync-section-desc" });
     }
     const authorNameSetting = new Setting(body).setName("提交作者名称").setDesc("显示在 Git 提交记录中，不是登录账号。")
-      .addText((text) => text.setValue(this.plugin.settings.gitAuthorName === DEFAULT_GIT_AUTHOR_NAME ? "" : this.plugin.settings.gitAuthorName).onChange(async (value) => {
+      .addText((text) => text.setPlaceholder(DEFAULT_GIT_AUTHOR_NAME).setValue(this.plugin.settings.gitAuthorName === DEFAULT_GIT_AUTHOR_NAME ? "" : this.plugin.settings.gitAuthorName).onChange(async (value) => {
         this.plugin.settings.gitAuthorName = value.trim();
         await this.plugin.saveSettings();
       }));
     authorNameSetting.settingEl.addClass("simple-one-sync-setup-author-setting");
     const authorEmailSetting = new Setting(body).setName("提交作者邮箱").setDesc("用于 Git 提交记录，不是登录密码。")
-      .addText((text) => text.setValue(this.plugin.settings.gitAuthorEmail === DEFAULT_GIT_AUTHOR_EMAIL ? "" : this.plugin.settings.gitAuthorEmail).onChange(async (value) => {
+      .addText((text) => text.setPlaceholder(DEFAULT_GIT_AUTHOR_EMAIL).setValue(this.plugin.settings.gitAuthorEmail === DEFAULT_GIT_AUTHOR_EMAIL ? "" : this.plugin.settings.gitAuthorEmail).onChange(async (value) => {
         this.plugin.settings.gitAuthorEmail = value.trim();
         await this.plugin.saveSettings();
       }));
@@ -4671,7 +4682,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     if (preview.overlaps.length) this.setupFileList(body, "已选择远端版本的同名文件", preview.overlaps.filter((path) => this.plugin.getSetupChoices()[path] === "remote"));
     const finished = this.setupFinishedPreview === preview;
     if (finished) {
-      body.createEl("p", { text: "✓ 接入已完成。请在同步面板执行首次同步，无需再次接入。", cls: "simple-one-sync-setup-done simple-one-sync-finish-success", attr: { role: "status" } });
+      body.createEl("p", { text: "✓ 接入成功。同步进度与结果请查看右侧同步面板，无需再次接入。", cls: "simple-one-sync-setup-done simple-one-sync-finish-success", attr: { role: "status" } });
     }
     if (this.setupBusy || this.setupFailure) {
       body.createEl("p", {
@@ -4682,9 +4693,11 @@ export class SyncSettingsTab extends PluginSettingTab {
     }
     if (!finished) {
       const footer = body.createDiv({ cls: "simple-one-sync-setup-footer simple-one-sync-check-actions" });
-      const finish = footer.createEl("button", { text: this.plugin.settings.setupComplete ? "应用接入设置" : "确认完成接入", cls: "mod-cta", attr: { type: "button" } });
+      const needsTrust = this.setupFailure && this.setupTrustRequired;
+      const finish = footer.createEl("button", { text: this.setupBusy ? "正在完成接入…" : needsTrust ? "信任此笔记库并重试" : this.plugin.settings.setupComplete ? "应用接入设置" : "确认完成接入", cls: "mod-cta", attr: { type: "button" } });
+      finish.toggleClass("simple-one-sync-trust-action", needsTrust && !this.setupBusy);
       finish.disabled = this.setupBusy || (this.plugin.getSetupTrackingChoice() === "rebuild" && !this.setupRebuildConfirmed);
-      finish.addEventListener("click", () => void this.runSetup(async () => { await this.plugin.finishSetup(this.setupRebuildConfirmed, (message, error) => {
+      finish.addEventListener("click", () => void this.runSetup(async () => { if (needsTrust) await this.plugin.trustSetupVault(); await this.plugin.finishSetup(this.setupRebuildConfirmed, (message, error) => {
         if (this.desktopPage !== "setup" || this.setupViewStep !== 4) return;
         this.setupMessage = message;
         const progress = (this.settingsHost ?? this.containerEl).querySelector(".simple-one-sync-setup-finish-progress");
@@ -4693,7 +4706,7 @@ export class SyncSettingsTab extends PluginSettingTab {
           progress.toggleClass("simple-one-sync-setup-error", !!error);
           progress.toggleClass("simple-one-sync-setup-feedback", !error);
         }
-      }); this.setupFinishedPreview = preview; }, "接入已完成，请在同步面板继续同步。"));
+      }); this.setupFinishedPreview = preview; }, "接入成功，同步进度与结果请查看右侧同步面板。"));
     }
   }
 

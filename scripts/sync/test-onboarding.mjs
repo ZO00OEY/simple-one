@@ -39,6 +39,11 @@ try {
     }
   }
   const missingSetupIgnoreRules = (existing) => onboarding.missingSetupIgnoreRules(existing, ".obsidian");
+  const rootFailure = new Error("fatal: detected dubious ownership in repository");
+  const rejectedRoot = new GitSetup(folder, async () => { throw rootFailure; });
+  await assert.rejects(() => rejectedRoot.localRoot(), error => error === rootFailure, 'repository access errors must not be treated as a new vault');
+  const noRoot = new GitSetup(folder, async () => { throw new Error('fatal: not a git repository (or any of the parent directories): .git'); });
+  assert.equal(await noRoot.localRoot(), null, 'only an uninitialized vault uses the temporary repository');
   const applySetupIgnoreBase = preview => onboarding.applySetupIgnoreBase(preview, ".obsidian");
   assert.equal(parseGithubRepoUrl("https://github.com/example/vault.git").name, "vault");
   assert.throws(() => parseGithubRepoUrl("https://gitee.com/example/vault"));
@@ -149,7 +154,9 @@ try {
   applySetupIgnoreBase(preview);
   assert(preview.optimizedIgnore.includes("remote-only/"));
   const finishProgress = [];
-  await setup.finish(repo, preview, { "identical.md": "local", "shared.md": "remote" }, { name: "Test", email: "test@example.com" }, undefined, new Set(), false, message => finishProgress.push(message));
+  await setup.finish(repo, preview, { "identical.md": "local", "shared.md": "remote" }, { name: "default", email: "default@default.com" }, undefined, new Set(), false, message => finishProgress.push(message));
+  assert.equal(run(vault, ['config', 'user.name']), 'default');
+  assert.equal(run(vault, ['config', 'user.email']), 'default@default.com');
   assert(!finishProgress.some(message => message.includes("计算本地文件哈希")));
   assert(finishProgress.some(message => message.includes("Fetch：解析差异 100%")));
   assert(finishProgress.some(message => message.includes("Merge：")));

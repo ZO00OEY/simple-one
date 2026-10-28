@@ -54,6 +54,8 @@ Start with the features you need. Many concise settings expose extra explanation
 
 Choose one vault sync method per device. Avoid multiple tools writing to the same vault concurrently. Review first-sync, deletion and conflict previews. Keep an independent backup before sync setup or bulk attachment operations.
 
+Desktop Git sync obtains credentials through GitHub CLI. If you switch between multiple GitHub accounts, grant each account the required read and write access to the same sync repository; otherwise, changing the active CLI account may prevent pulls or pushes. You do not need to sign in before every sync, but signing out or invalid credentials requires authorization again. This advice concerns vault sync. Lightweight Git sync uses its separately configured token, which must have sufficient access to the sync repository.
+
 ## Access and privacy
 
 - **No telemetry.** Web capture contacts the requested site. GitHub sync and sharing contact their configured services. EdgeOne is optional.

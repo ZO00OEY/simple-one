@@ -21,8 +21,32 @@ const notices = [];
 class ItemView { constructor(leaf) { this.app=leaf.app;this.containerEl=leaf.containerEl;this.leaf=leaf; } }
 const obsidian = new Proxy({ ItemView, Platform:{isMobile:false}, Notice:class { constructor(message) { notices.push(message); } }, setIcon:()=>{},setTooltip:()=>{},addIcon:()=>{} }, { get:(target,key)=>key in target?target[key]:class {} });
 const built = await esbuild.build({ entryPoints:['src/features/sync/index.ts'],bundle:true,platform:'node',format:'cjs',write:false,external:['obsidian'],plugins:[{name:'expose-panel',setup(build){build.onLoad({filter:/features[\\/]sync[\\/]index\.ts$/}, async args=>({contents:(await readFile(args.path,'utf8'))+'\nexport { ZoeySyncView };',loader:'ts'}));}}] });
-const context = vm.createContext({module:{exports:{}},require:name=>name==='obsidian'?obsidian:require(name),console,Date,setTimeout,clearTimeout});context.window=context;vm.runInContext(built.outputFiles[0].text,context);
+const context = vm.createContext({module:{exports:{}},require:name=>name==='obsidian'?obsidian:require(name),process,console,Date,setTimeout,clearTimeout});context.window=context;vm.runInContext(built.outputFiles[0].text,context);
 const {default:Sync,ZoeySyncView}=context.module.exports;
+const setupCommands = [];
+const setupHost = Object.create(Sync.prototype);
+setupHost.host = { app: { vault: { configDir: '.obsidian' } } };
+setupHost.vaultBasePath = () => 'D:/test-vault';
+setupHost.exec = async (program, args, authenticated) => { setupCommands.push({ program, args, authenticated }); return ''; };
+const setup = setupHost.setup();
+await setup.run('git', ['fetch', 'origin']);
+await setup.run('git', ['--git-dir', 'preview.git', 'fetch', 'https://github.com/example/vault.git', 'main']);
+await setup.run('gh', ['auth', 'status']);
+assert.deepEqual(setupCommands.map(command => command.authenticated), [true, true, false], 'onboarding Git commands reuse gh credentials even with leading Git options');
+await setupHost.trustSetupVault();
+assert.deepEqual(Array.from(setupCommands.at(-1).args), ['config', '--global', '--add', 'safe.directory', 'D:/test-vault'], 'trust only the current vault, never all repositories');
+const authView = Object.create(context.module.exports.SyncSettingsTab.prototype);
+let authError;
+authView.plugin = { checkSetupAuthorization: async () => { if (authError) throw authError; } };
+await authView.verifyExistingSetupAuthorization();
+for (const message of ['network connection timed out', 'the token in keyring is invalid', 'unexpected CLI error']) {
+  authError = new Error(message);
+  await assert.rejects(() => authView.verifyExistingSetupAuthorization(), error => error === authError, 'preserve the real verification failure');
+}
+authError = new Error('You are not logged into any GitHub hosts.');
+await assert.rejects(() => authView.verifyExistingSetupAuthorization(), /未找到登录状态/);
+authError = new Error('spawn git ENOENT');
+await assert.rejects(() => authView.verifyExistingSetupAuthorization(), /缺少 Git 或 GitHub CLI/);
 let reads=0, fail=false, release;
 let changes=[{path:'notes/a.md',kind:'modified'},{path:'notes/b.md',kind:'added'}];
 const plugin={settings:{viewLayout:'list',lastSyncAt:Date.now(),setupComplete:true,mobile:{mode:'github'}},getPendingConflictPaths:async()=>[],getDeferredMergePaths:()=>[],getChanges:async()=>{reads++;if(release)await new Promise(resolve=>{release.resolve=resolve;});if(fail)throw Error('offline status');return changes;},getSetupActivity:()=>undefined,getSyncActivity:()=>undefined,nativeGitEnabled:()=>true,useLightweightSync:()=>false,isSyncing:()=>false,getLightweightPendingStatus:()=>undefined,getActiveSyncError:()=>undefined,getRecentErrorLogs:()=>[],saveSettings:async()=>{},syncNow:async()=>{}};
@@ -158,4 +182,65 @@ settingsTab.navigationParents = ['share-root']; settingsTab.desktopPage = 'begin
 settingsTab.stopSetupBrowserAuthorization = () => {}; settingsTab.renderSettings = () => {};
 assert.equal(settingsTab.backToOverview(), true);
 assert.equal(settingsTab.desktopPage, 'share-root', 'share guide returns to the sharing homepage');
+settingsTab.plugin.host.share.backFromEdgeOneGuide = () => false;
+settingsTab.resetNavigation(true);
+assert.equal(settingsTab.desktopPage, 'share-root');
+settingsTab.desktopPage = 'beginner-server'; settingsTab.navigationParents = [];
+assert.equal(settingsTab.backToOverview(), true);
+assert.equal(settingsTab.desktopPage, 'share-root', 'missing history returns to the selected sharing root');
+assert.equal(settingsTab.backToOverview(), false, 'sharing root does not fall through to sync');
+settingsTab.resetNavigation(false);
+settingsTab.desktopPage = 'setup'; settingsTab.navigationParents = [];
+assert.equal(settingsTab.backToOverview(), true);
+assert.equal(settingsTab.desktopPage, 'root', 'sync guide stays in the sync category');
 console.log('Settings split: sync/share guides, inline sharing settings and return navigation passed.');
+const trustView = Object.create(SyncSettingsTab.prototype);
+Object.assign(trustView, { setupFailure: true, setupTrustRequired: true, setupBusy: false, setupMessage: 'Git 尚未信任此笔记库',
+  plugin: { settings: { setupStep: 3, setupRepoUrl: 'https://github.com/example/vault.git' }, getSetupPreview: () => undefined, getVaultBasePath: () => 'D:/test-vault' } });
+let trustBody = dom.window.document.createElement('div');
+trustView.displaySetupPreview(trustBody);
+assert.equal(trustBody.querySelector('button').textContent, '信任此笔记库并重试');
+assert(trustBody.querySelector('button').classList.contains('simple-one-sync-trust-action'));
+assert(trustBody.querySelector('.simple-one-sync-setup-error'));
+trustView.setupBusy = true; trustView.setupFailure = false;
+trustBody = dom.window.document.createElement('div');
+trustView.displaySetupPreview(trustBody);
+assert.equal(trustBody.querySelector('button').textContent, '正在检查…');
+assert(trustBody.querySelector('button').disabled);
+assert(!trustBody.querySelector('button').classList.contains('simple-one-sync-trust-action'));
+trustView.setupBusy = false; trustView.setupFailure = true; trustView.setupTrustRequired = false;
+trustBody = dom.window.document.createElement('div');
+trustView.displaySetupPreview(trustBody);
+assert.equal(trustBody.querySelector('button').textContent, '检查两端', 'ordinary errors keep the normal retry action');
+console.log('Vault trust: exact path, red error action, disabled retry and ordinary error isolation passed.');
+const connectedView = Object.create(SyncSettingsTab.prototype);
+Object.assign(connectedView, { setupFailure: true, setupMessage: 'old failure', renderDeviceHeader() {},
+  plugin: { settings: { setupComplete: true, setupVerified: {}, enabled: true },
+    getRecentErrorLogs() { throw Error('onboarding status must not read sync history'); } } });
+const connectedRoot = dom.window.document.createElement('div');
+const stopAfterStatus = new Error('status rendered');
+connectedRoot.createDiv = function(options) {
+  const page = prototype.createDiv.call(this, options);
+  page.createDiv = function(options) {
+    if (options.cls === 'simple-one-sync-setup-tab-panel') throw stopAfterStatus;
+    return prototype.createDiv.call(this, options);
+  };
+  return page;
+};
+assert.throws(() => connectedView.displaySetup(connectedRoot), error => error === stopAfterStatus);
+assert.equal(connectedRoot.querySelector('.simple-one-sync-setup-status strong').textContent, '接入成功');
+assert(connectedRoot.querySelector('.simple-one-sync-setup-status.is-success'), 'sync failures cannot turn a completed connection red');
+
+const settingsSource = await readFile('src/settings.ts', 'utf8');
+const entryBody = /plugin\.sync\.openSettings = \(share = false\) => \{([\s\S]*?)\n    \};/.exec(settingsSource)?.[1];
+assert(entryBody, 'settings shortcut exists');
+for (const share of [true, false, true]) {
+  const resets = [], pages = [];
+  const entry = { syncTab: { resetNavigation: value => resets.push(value) }, openPage: page => pages.push(page.type) };
+  new Function('share', entryBody).call(entry, share);
+  assert.equal(entry.displayPreviewTab, share ? 'sharing' : 'sync-sharing');
+  assert.equal(entry.syncNavigationTab, entry.displayPreviewTab);
+  assert.deepEqual(resets, [share]);
+  assert.deepEqual(pages, ['overview'], 'settings shortcut opens the current tabbed page, never the legacy page');
+}
+console.log('Settings shortcuts: sync and sharing open their own current tabs.');

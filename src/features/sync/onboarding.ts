@@ -282,7 +282,10 @@ export class GitSetup {
 
   private async localRoot(): Promise<string | null> {
     try { return (await this.run("git", ["rev-parse", "--show-toplevel"])).trim(); }
-    catch { return null; }
+    catch (error) {
+      if (/not a git repository/i.test(error instanceof Error ? error.message : String(error))) return null;
+      throw error;
+    }
   }
 
   private async readIgnore(): Promise<string> {
@@ -658,7 +661,7 @@ export class GitSetup {
       if (overlap) throw new Error(`远端也修改了正在编辑的文件 ${overlap}。请先暂停编辑并处理该文件，再重新检查第 3 步。`);
     }
     for (const file of latest.overlaps) if (!choices[file]) throw new Error(`请选择同名文件的保留版本：${file}`);
-    if (!author.name.trim() || !author.email.trim() || author.name === "default" || author.email === "default@default.com") {
+    if (!author.name.trim() || !author.email.trim()) {
       throw new Error("请填写 Git 提交作者名称和邮箱。");
     }
     await onMutationStart?.();

@@ -2,7 +2,7 @@ import { setIcon } from "obsidian";
 
 /** Native mouse dragging plus a held-pointer fallback for embedded windows. */
 export function installShareDrag(container: HTMLElement, selected: Set<string>, canMove: (id: string) => boolean,
-  selectionChanged: () => void, drop: (ids: string[], directory: string) => void): () => void {
+  selectionChanged: () => void, drop: (ids: string[], directory: string) => void, trash?: (ids: string[]) => void): () => void {
   const doc = container.ownerDocument, win = doc.defaultView!;
   let timer: number | undefined, preview: HTMLElement | undefined, target: HTMLElement | undefined, heldRow: HTMLElement | undefined;
   let pointer: number | undefined, startX = 0, startY = 0, active = false, ids: string[] = [], suppressClickUntil = 0;
@@ -28,8 +28,8 @@ export function installShareDrag(container: HTMLElement, selected: Set<string>, 
     return element;
   };
   const markTarget = (x: number, y: number) => {
-    const found = doc.elementFromPoint(x, y)?.closest<HTMLElement>("[data-share-directory]");
-    const next = found && container.contains(found) ? found : undefined;
+    const found = doc.elementFromPoint(x, y)?.closest<HTMLElement>("[data-share-directory], [data-share-trash]");
+    const next = found && (container.contains(found) || trash && found.hasAttribute("data-share-trash") && found.closest(".simple-share-panel") === container.closest(".simple-share-panel")) ? found : undefined;
     if (next === target) return;
     target?.classList.remove("is-drop-target"); target = next; target?.classList.add("is-drop-target");
   };
@@ -64,8 +64,12 @@ export function installShareDrag(container: HTMLElement, selected: Set<string>, 
     const moving = active, movingIds = ids;
     if (moving) { event.preventDefault(); markTarget(event.clientX, event.clientY); }
     const directory = target?.dataset.shareDirectory;
+    const deleting = target?.hasAttribute("data-share-trash");
     finish();
-    if (moving && directory !== undefined && movingIds.every(canMove)) drop(movingIds, directory);
+    if (moving && movingIds.every(canMove)) {
+      if (deleting) trash?.(movingIds);
+      else if (directory !== undefined) drop(movingIds, directory);
+    }
   };
   const keydown = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); finish(); } };
   const down = (event: PointerEvent) => {

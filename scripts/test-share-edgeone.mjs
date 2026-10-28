@@ -278,7 +278,7 @@ try {
   linkedRoot.replaceChildren(); renderEdgeOneGuide(linkedRoot, initialize.connection, true, true, () => {}, () => {}, true, undefined,
     undefined, '正在读取云端文件清单…');
   assert(linkedRoot.querySelector('.simple-share-edgeone-project-step progress'), 'deployment progress appears below the project heading');
-  assert.equal(linkedRoot.querySelector('.simple-share-edgeone-project-step > p.simple-one-sync-setup-feedback').textContent,
+  assert.equal(linkedRoot.querySelector('.simple-share-edgeone-project-step > p.simple-share-guide-progress').textContent,
     '正在读取云端文件清单…');
   const verifiedCheck = initialize.connection.state.lastCheck;
   const verifiedMessage = initialize.connection.message;
@@ -286,8 +286,8 @@ try {
   initialize.connection.state.lastCheck = { kind: 'pending', text: initialize.connection.message, commit: 'abc123', checkedAt: Date.now() };
   linkedRoot.replaceChildren(); renderEdgeOneGuide(linkedRoot, initialize.connection, true, true, () => {}, () => {}, true, undefined,
     undefined, '内容未变化，正在检查网站部署…');
-  assert.equal(linkedRoot.querySelector('.simple-share-edgeone-project-step > p.simple-one-sync-setup-feedback').textContent,
-    '最近一次分享正在部署，请稍后检查。', 'EdgeOne deployment status wins over duplicate publish status');
+  assert.equal(linkedRoot.querySelector('.simple-share-edgeone-project-step > p.simple-share-guide-progress').textContent,
+    '内容未变化，正在检查网站部署…', 'Guide shows the detailed publishing progress');
   initialize.connection.state.lastCheck = verifiedCheck;
   initialize.connection.message = verifiedMessage;
   linkedRoot.replaceChildren(); renderEdgeOneGuide(linkedRoot, initialize.connection, true, false, () => {}, () => {}, true, undefined, privateVisibility);

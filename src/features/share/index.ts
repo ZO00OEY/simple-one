@@ -1,5 +1,6 @@
 import { setActionIcon } from "../../shared/actionButton";
 import { compactSettingsSection } from "../../shared/settingsLayout";
+import { checkboxRow } from "../../shared/checkboxRow";
 import { addIcon, Component, FuzzySuggestModal, ItemView, MarkdownView, Menu, Modal, Notice, Platform, Setting, setIcon, setTooltip, parseYaml, requireApiVersion, TFile, TFolder, WorkspaceLeaf, type ViewStateResult } from "obsidian";
 import type SimplePlugin from "../../main";
 import { runAsync } from "../../shared/async";
@@ -9,6 +10,8 @@ import { ID_PATTERN, SHARE_FOLDER, emptyManifest, DEFAULT_SHARE_COPY_CONTENT, fo
 import { addLibrary, ensureLibraries, libraryOptions, removeLibrary, selectLibrary, selectedLibraryIds } from "./libraries";
 import { exportNote, type ShareAssetCache } from "./export";
 import { installShareDrag } from "./drag";
+import { installShareHoldEdit } from "./holdEdit";
+import { editShareName } from "./inlineName";
 import { ShareRepository, websiteFiles } from "./repository";
 import { ApiShareRepository, FallbackShareRepository, canFallbackToApi } from "./apiRepository";
 import { githubJson } from "../sync/githubApi";
@@ -20,28 +23,10 @@ import { renderEdgeOneGuide, renderMainlandPreviewNotice, shareExternalLink, typ
 const VIEW = "simple-one-share";
 interface Row { id: string; title: string; state: string; file?: TFile }
 type ShareLayout = "list" | "source" | "public";
-interface ShareDisplaySettings { showPaths: boolean; layout: ShareLayout; descending: boolean }
-interface ShareSelection { mode: "move" | "delete"; selected: Set<string>; onChange(): void; onDrop?(ids: string[], directory: string): void; directory?: string; onDirectory?(directory: string): void }
+interface ShareDisplaySettings { layout: ShareLayout; descending: boolean }
+interface ShareSelection { mode: "move" | "delete"; selected: Set<string>; onChange(): void; onDrop?(ids: string[], directory: string): void; onTrash?(ids: string[]): void; directory?: string; onDirectory?(directory: string): void }
 interface ShareFolder { children: Map<string, ShareFolder>; rows: Row[] }
 interface LocalState { version: 1; site?: string; commit?: string; pendingCommit?: string; published?: PublishState }
-class CategoryModal extends Modal {
-  constructor(private feature: ShareFeature, private id: string) { super(feature.host.app); }
-  onOpen(): void {
-    this.titleEl.setText("公开目录与文件名");
-    let category = this.feature.manifest.notes[this.id].category;
-    let publicName = this.feature.manifest.notes[this.id].publicName || "";
-    new Setting(this.contentEl).setName("分享库目录").setDesc("例如 写作/人物；保存目录映射后推送生效，不会改变原笔记目录或分享链接。")
-      .addText(text => text.setValue(category).onChange(value => { category = value; }));
-    new Setting(this.contentEl).setName("公开发布文件名").setDesc("留空沿用原笔记名；不修改本地笔记名或固定分享链接。无需填写 .md 后缀。")
-      .addText(text => text.setPlaceholder(this.feature.manifest.notes[this.id].sourcePath.split("/").pop()?.replace(/\.md$/i, "") || "原笔记名").setValue(publicName).onChange(value => { publicName = value; }));
-    new Setting(this.contentEl).addButton(button => button.setButtonText("保存").setCta().onClick(runAsync(async () => {
-      const name = publicName.trim().replace(/\.md$/i, "");
-      if (/[\\/\r\n]/.test(name)) { new Notice("公开文件名不能包含目录分隔符或换行。"); return; }
-      await this.feature.moveShares([this.id], category, name); this.close();
-    })));
-  }
-  onClose(): void { this.contentEl.empty(); }
-}
 export class ShareDirectoryModal extends Modal {
   constructor(private feature: ShareFeature, private ids: string[], private completed: () => void) { super(feature.host.app); }
   onOpen(): void {
@@ -228,6 +213,9 @@ export default class ShareFeature extends Component {
   }
   private publishProgress(message: string): void {
     this.status = message;
+    for (const status of this.setupHost?.querySelectorAll<HTMLElement>(".simple-share-guide-progress") ?? []) {
+      status.textContent = (this.deploymentPending() ? "部署中 · " : "") + this.progressText;
+    }
     for (const leaf of this.host.app.workspace.getLeavesOfType(VIEW)) if (leaf.view instanceof ShareView) leaf.view.updateStatus();
   }
   private scanTimer?: number;
@@ -277,7 +265,7 @@ export default class ShareFeature extends Component {
   private checkingDeployment = false;
   private edgeOneGuideOpen = false;
   readonly edgeone: EdgeOneConnection;
-  display: ShareDisplaySettings = { showPaths: false, layout: "public", descending: false };
+  display: ShareDisplaySettings = { layout: "public", descending: false };
   private displayStored = false;
   private templateFile = DEFAULT_TEMPLATE_FILE;
   private templateFiles: Record<string, string> = { [DEFAULT_TEMPLATE_FILE]: "默认模板" };
@@ -299,7 +287,7 @@ export default class ShareFeature extends Component {
     try { return (await this.host.sync.exec("gh", ["auth", "token", "--hostname", "github.com"])).trim(); }
     catch { return ""; }
   }
-  private async fallbackToken(): Promise<string> { return this.savedToken() || await this.cliToken(); }
+  private async fallbackToken(): Promise<string> { return await this.cliToken() || this.savedToken(); }
   private async github(path: string, method = "GET", body?: unknown): Promise<string> {
     let token = "";
     if (await this.useCli()) {
@@ -315,7 +303,7 @@ export default class ShareFeature extends Component {
     return JSON.stringify(await githubJson(token || await this.fallbackToken(), `/${path}`, method, body));
   }
   private async repository(site = this.manifest.site): Promise<ShareRepository> {
-    const cli = await this.cliToken(), token = this.savedToken() || cli;
+    const cli = await this.cliToken(), token = cli || this.savedToken();
     if (cli) return new FallbackShareRepository(this.host, site, token);
     return new ApiShareRepository(this.host, site, token);
   }
@@ -355,9 +343,6 @@ export default class ShareFeature extends Component {
     addIcon("simple-share-sort-asc", '<g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M25 85V15m-12 12 12-12 12 12M60 35l10-25 10 25M64 27h12M60 60h20L60 85h20"/></g>');
     addIcon("simple-share-sort-desc", '<g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M25 15v70m-12-12 12 12 12-12M60 10h20L60 35h20M60 85l10-25 10 25M64 77h12"/></g>');
     const settingsBadge = '<path d="M71 60h12l2 7 7 2 4 10-5 5 1 8-10 4-5-5-8 1-4-10 5-5-1-8 7-4z"/><circle cx="79" cy="79" r="6"/>';
-    const pathVisibilityIcon = '<path d="M6 35c19-32 57-32 76 0-19 32-57 32-76 0z"/><circle cx="44" cy="35" r="13"/><path stroke-width="5" d="M61 91V67h12l5 6h17v18z"/>';
-    addIcon("simple-share-paths-visible", `<g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">${pathVisibilityIcon}</g>`);
-    addIcon("simple-share-paths-hidden", `<g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">${pathVisibilityIcon}<path d="M13 8l60 53"/></g>`);
     addIcon("simple-share-copy-settings", `<g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M27 53H13V9h43v14M55 79H28V26h43v26"/>${settingsBadge}</g>`);
     this.refreshActions = registerMarkdownAction(this.host, "data-simple-share-note", () => this.manifest.enabled,
       view => { const action = view.addAction("share-2", "分享当前笔记", runAsync(async () => {
@@ -1199,7 +1184,22 @@ export default class ShareFeature extends Component {
     this.status = `已将 ${ids.length} 篇分享标记为待撤下，点击「推送新分享」后生效。`; this.renderViews();
     new Notice(this.status);
   }
-  async moveShares(ids: readonly string[], directory?: string, publicName?: string): Promise<void> {
+  async renameShares(ids: readonly string[], name: string): Promise<void> {
+    const base = name.trim().replace(/\.md$/i, ""), unique = [...new Set(ids)];
+    if (!base || /[\\/\r\n]/.test(base)) throw new Error("公开文件名不正确。");
+    await this.change(manifest => {
+      for (const id of unique) if (!manifest.notes[id]) throw new Error("所选笔记不存在。");
+      const width = Math.max(2, String(unique.length).length);
+      unique.forEach((id, index) => {
+        manifest.notes[id].publicName = unique.length === 1 ? base : base + String(index + 1).padStart(width, "0");
+        manifest.notes[id].revision++;
+      });
+    });
+  }
+  async confirmRemoveShares(ids: readonly string[]): Promise<void> {
+    if (!ids.length || !await confirmAction(this.host.app, `将所选 ${ids.length} 篇分享标记为待撤下？推送后移除公开副本，原笔记保留。`)) return;
+    await this.removeShares(ids);
+  }  async moveShares(ids: readonly string[], directory?: string, publicName?: string): Promise<void> {
     const target = directory === undefined ? undefined : normalizeShareDirectory(directory);
     if (!ids.length) return;
     await this.change(manifest => {
@@ -1240,6 +1240,14 @@ export default class ShareFeature extends Component {
     const source = normalizeShareDirectory(directory), leaf = name.trim();
     if (!source || !leaf || leaf.includes("/")) throw new Error("请输入单个目录名称，根目录不能重命名。");
     const target = normalizeShareDirectory([...source.split("/").slice(0, -1), leaf].join("/"));
+    return this.relocateShareDirectory(source, target);
+  }
+  async moveShareDirectory(directory: string, parent: string): Promise<string> {
+    const source = normalizeShareDirectory(directory), destination = normalizeShareDirectory(parent);
+    if (!source || destination === source || destination.startsWith(source + "/")) throw new Error("不能将目录移入自身或子目录。");
+    return this.relocateShareDirectory(source, normalizeShareDirectory([destination, source.split("/").pop()].filter(Boolean).join("/")));
+  }
+  private async relocateShareDirectory(source: string, target: string): Promise<string> {
     await this.change(async manifest => {
       if (source === target) return;
       const directories = (await this.shareDirectories()).share;
@@ -1386,25 +1394,28 @@ export default class ShareFeature extends Component {
       const total = Object.values(this.manifest.notes).filter(entry => entry.enabled).length;
       let prepared = 0;
       this.publishProgress(`正在检查正文与附件：0/${total}`);
-      for (const [id, entry] of Object.entries(this.manifest.notes)) {
-        if (!entry.enabled) continue;
-        const matches = index.get(id) || [];
-        if (matches.length !== 1) { failures.push(entry.sourcePath + "：源文件缺失或 ID 重复"); continue; }
-        try {
-          const result = await exportNote(this.host, matches[0], entry.category, this.manifest, index, entry.publicName, assetCache);
-          const path = shareNotePath(id, entry); files.set(path, result.source);
-          const checkedState = !old.notes[id] ? "待发布"
-            : old.notes[id].hash !== result.hash || (old.notes[id].path ?? `notes/${id}.md`) !== path ? "待更新" : "推送成功";
-          this.checkedNoteStates.set(id, checkedState);
-          const row = this.rows.find(row => row.id === id);
-          if (row) row.state = checkedState;
-          for (const [asset, data] of result.assets) files.set(asset, data);
-          state.notes[id] = { title: result.title, category: result.category, hash: result.hash, assets: [...result.assets.keys()].sort(), ...(entry.directoryCode ? { path } : {}) };
-        } catch (error) {
-          this.checkedNoteStates.set(id, `导出异常：${error instanceof Error ? error.message : String(error)}`);
-          failures.push(matches[0].basename + "：" + String(error));
-        }
-        this.publishProgress(`正在检查正文与附件：${++prepared}/${total}`);
+      const enabledNotes = Object.entries(this.manifest.notes).filter(([, entry]) => entry.enabled);
+      for (let offset = 0; offset < enabledNotes.length; offset += 4) {
+        await Promise.all(enabledNotes.slice(offset, offset + 4).map(async ([id, entry]) => {
+
+          const matches = index.get(id) || [];
+          if (matches.length !== 1) { failures.push(entry.sourcePath + "：源文件缺失或 ID 重复"); return; }
+          try {
+            const result = await exportNote(this.host, matches[0], entry.category, this.manifest, index, entry.publicName, assetCache);
+            const path = shareNotePath(id, entry); files.set(path, result.source);
+            const checkedState = !old.notes[id] ? "待发布"
+              : old.notes[id].hash !== result.hash || (old.notes[id].path ?? `notes/${id}.md`) !== path ? "待更新" : "推送成功";
+            this.checkedNoteStates.set(id, checkedState);
+            const row = this.rows.find(row => row.id === id);
+            if (row) row.state = checkedState;
+            for (const [asset, data] of result.assets) files.set(asset, data);
+            state.notes[id] = { title: result.title, category: result.category, hash: result.hash, assets: [...result.assets.keys()].sort(), ...(entry.directoryCode ? { path } : {}) };
+          } catch (error) {
+            this.checkedNoteStates.set(id, `导出异常：${error instanceof Error ? error.message : String(error)}`);
+            failures.push(matches[0].basename + "：" + String(error));
+          }
+          this.publishProgress(`正在检查正文与附件：${++prepared}/${total}`);
+          }));
       }
       // An absent local entry is not an explicit withdrawal. Retain remote references, not content.
       const retained = new Set<string>();
@@ -1414,6 +1425,7 @@ export default class ShareFeature extends Component {
       }
       files.set("catalog.json", JSON.stringify({ version: 1, notes: Object.entries(state.notes).map(([id, note]) => ({ id, title: note.title, category: note.category, ...(note.path ? { path: note.path } : {}) })).sort((a, b) => a.category.localeCompare(b.category) || a.title.localeCompare(b.title)) }, null, 2));
       files.set("publish-state.json", ""); state.files = [...new Set([...files.keys(), ...retained])].sort();
+      state.notes = Object.fromEntries(Object.entries(state.notes).sort(([a], [b]) => a.localeCompare(b)));
       files.set("publish-state.json", JSON.stringify(state, null, 2));
       await this.reload();
       if (serializeManifest(this.manifest) !== snapshot) throw new Error("分享设置在生成期间发生变化，请重新发布。");
@@ -1574,7 +1586,6 @@ export default class ShareFeature extends Component {
   restoreDisplay(state: Record<string, unknown>): void {
     this.display.layout = "public";
     if (this.displayStored) return;
-    if (typeof state.showPaths === "boolean" && state.layout !== undefined) this.display.showPaths = state.showPaths;
     if (typeof state.descending === "boolean") this.display.descending = state.descending;
   }
   updateDisplay(change: Partial<ShareDisplaySettings>): void {
@@ -1707,7 +1718,7 @@ export default class ShareFeature extends Component {
       .setDisabled(this.isPublishing || this.checkingDeployment || this.templateBusy || !this.manifest.site.repo || !this.manifest.enabled)
       .onClick(() => { void this.publish().catch(error => this.fail(error)); }).buttonEl.addClass("simple-share-publish"));
   }
-  renderPanel(container: HTMLElement, query: string, showPaths = false, layout: ShareLayout = "list", collapsed = new Set<string>(), onFolderToggle?: () => void, descending = false, selection?: ShareSelection): void {
+  renderPanel(container: HTMLElement, query: string, layout: ShareLayout = "list", collapsed = new Set<string>(), onFolderToggle?: () => void, descending = false, selection?: ShareSelection): void {
     for (const [element, cleanup] of this.panelDragCleanups) if (element === container || !element.isConnected) { cleanup(); this.panelDragCleanups.delete(element); }
     container.empty();
     const compareNames = (a: string, b: string): number => (descending ? -1 : 1) * a.localeCompare(b, "zh-CN", { numeric: true, sensitivity: "base" });
@@ -1715,7 +1726,7 @@ export default class ShareFeature extends Component {
     const rows = this.rows.filter(row => {
       const entry = this.manifest.notes[row.id];
       const fields = [row.title, displayName(row)];
-      if (showPaths || layout === "source") fields.push(row.file?.path || entry?.sourcePath || "");
+      if (layout === "source") fields.push(row.file?.path || entry?.sourcePath || "");
       if (layout === "public") fields.push(entry?.category || this.published.notes[row.id]?.category || "");
       return fields.join(" ").toLowerCase().includes(query.trim().toLowerCase());
     }).sort((a, b) => compareNames(displayName(a), displayName(b)) || compareNames(a.id, b.id));
@@ -1804,7 +1815,7 @@ export default class ShareFeature extends Component {
               for (const id of ids) {
                 if (checkbox.checked) selection.selected.add(id); else selection.selected.delete(id);
               }
-              this.renderPanel(container, query, showPaths, layout, collapsed, onFolderToggle, descending, selection);
+              this.renderPanel(container, query, layout, collapsed, onFolderToggle, descending, selection);
               selection.onChange();
             });
           }
@@ -1829,6 +1840,7 @@ export default class ShareFeature extends Component {
       const path = row.file?.parent?.path ?? entry?.sourcePath.split("/").slice(0, -1).join("/") ?? "";
       const name = displayName(row);
       const setting = new Setting(targets.get(row.id) || container).setName(name).setDesc(path || "/").setClass("simple-share-note-row");
+      setting.settingEl.dataset.shareNoteId = row.id;
       if (selection) {
         const checkbox = setting.settingEl.createEl("input", { cls: "simple-share-selection", attr: { type: "checkbox", "aria-label": `选择分享笔记：${name}`, "data-share-id": row.id } });
         checkbox.checked = selection.selected.has(row.id);
@@ -1877,11 +1889,12 @@ export default class ShareFeature extends Component {
       setting.infoEl.createSpan({ text: row.state, cls: `simple-share-note-state${row.state === "推送成功" ? " is-published" : ""}`, attr: { title: row.state === "推送成功" ? "上次推送成功；正文与附件仅在点击「推送新分享」时重新检查。" : row.state } });
       if (entry) setting.settingEl.addEventListener("contextmenu", event => {
         event.preventDefault();
-        new Menu().addItem(item => item.setTitle("修改公开目录与文件名").setIcon("pencil").setDisabled(this.isPublishing)
-          .onClick(() => new CategoryModal(this, row.id).open())).showAtMouseEvent(event);
-      });
-      setting.descEl.hidden = !showPaths;
-      setting.settingEl.toggleClass("has-file-path", showPaths);
+        const ids = selection?.selected.has(row.id) ? this.rows.filter(item => selection.selected.has(item.id)).map(item => item.id) : [row.id];
+        new Menu().addItem(item => item.setTitle(ids.length > 1 ? `批量重命名 ${ids.length} 篇` : "重命名").setIcon("pencil").setDisabled(this.isPublishing)
+          .onClick(() => editShareName(setting.nameEl, entry.publicName || row.title, name => this.renameShares(ids, name))))
+          .addItem(item => item.setTitle(ids.length > 1 ? `删除所选 ${ids.length} 篇` : "删除").setIcon("trash-2").setDisabled(this.isPublishing)
+            .onClick(runAsync(async () => { await this.confirmRemoveShares(ids); }))).showAtMouseEvent(event);      });
+      setting.descEl.hidden = true;
       setting.descEl.setAttribute("title", `原笔记目录：${path || "/"} · 公开分类：${entry?.category || "未分类"}`);
       if (this.published.notes[row.id]) setting.addButton(button => {
         let resetTimer: number | undefined;
@@ -1917,7 +1930,7 @@ export default class ShareFeature extends Component {
     }
     if (layout === "public" && selection?.onDrop) this.panelDragCleanups.set(container,
       installShareDrag(container, selection.selected, id => !this.isPublishing && !!this.manifest.notes[id]?.enabled && !this.manifest.notes[id]?.deleted,
-        () => { folderSelectionUpdates.forEach(sync => sync()); selection.onChange(); }, (ids, directory) => selection.onDrop!(ids, directory)));
+        () => { folderSelectionUpdates.forEach(sync => sync()); selection.onChange(); }, (ids, directory) => selection.onDrop!(ids, directory), ids => selection.onTrash?.(ids)));
   }
   get isEdgeOneGuideOpen(): boolean { return this.edgeOneGuideOpen; }
   backFromEdgeOneGuide(): boolean {
@@ -1970,6 +1983,10 @@ export default class ShareFeature extends Component {
           .onChange(value => {
             if (value === "root" || value === "source") void this.change(manifest => { manifest.defaultPath = value; }).catch(error => this.fail(error));
           }));
+      const holdEdit = checkboxRow(management, "长按笔记进入批量编辑模式", "长按 0.6 秒进入，可多选拖动或撤下分享。", this.manifest.holdToEdit !== false);
+      holdEdit.input.addEventListener("change", () => {
+        void this.change(manifest => { manifest.holdToEdit = holdEdit.input.checked; }).catch(error => this.fail(error));
+      });
       const librariesGroup = compactSettingsSection(page, "分享库管理");
       const libraries = ensureLibraries(this.manifest);
       for (const [id, stored] of Object.entries(libraries.entries)) {
@@ -2288,7 +2305,7 @@ export default class ShareFeature extends Component {
         const content = container.createDiv({ cls: "simple-one-sync-setup-platform-content" });
         renderEdgeOneGuide(content, this.edgeone, this.manifest.enabled, this.isPublishing,
           () => this.renderViews(), () => { this.guideStep = 2; this.renderViews(); }, true, () => run(completeEdgeOne),
-          inspectEdgeOneFailure ? this.edgeOneRepositoryVisibility() : undefined, this.error ? "" : this.status);
+          inspectEdgeOneFailure ? this.edgeOneRepositoryVisibility() : undefined, this.error ? "" : (this.deploymentPending() ? "部署中 · " : "") + this.progressText);
         const footer = content.createDiv({ cls: "simple-share-guide-footer" });
         const linkedProgress = this.edgeone.linked && this.edgeone.projectCheckDone &&
           (this.isPublishing || this.edgeone.state.lastCheck?.kind === "pending");
@@ -2452,7 +2469,6 @@ export default class ShareFeature extends Component {
 }
 export class ShareView extends ItemView {
   private query = "";
-  private get showPaths(): boolean { return this.feature.display.showPaths; }
   private get layout(): ShareLayout { return this.feature.display.layout; }
   private get descending(): boolean { return this.feature.display.descending; }
   private collapsed = new Set<string>();
@@ -2460,9 +2476,6 @@ export class ShareView extends ItemView {
   private selected = new Set<string>();
   private activeDirectory?: string;
   private activeLibrary = "";
-  private creatingDirectory?: { parent: string; name: string };
-  private creatingBusy = false;
-  private creatingError = "";
   constructor(leaf: WorkspaceLeaf, private feature: ShareFeature) { super(leaf); }
   getViewType(): string { return VIEW; }
   getDisplayText(): string { return "分享"; }
@@ -2473,7 +2486,65 @@ export class ShareView extends ItemView {
     if (Array.isArray(state.collapsed)) this.collapsed = new Set(state.collapsed.filter((key): key is string => typeof key === "string"));
     await super.setState(state, result); this.render();
   }
-  async onOpen(): Promise<void> { this.render(); }
+  async onOpen(): Promise<void> {
+    this.registerDomEvent(this.contentEl.ownerDocument, "pointerdown", event => {
+      if (!this.editing) return;
+      const target = event.target as Element;
+      if (this.contentEl.contains(target) || target.closest(".menu, .modal-container")) return;
+      this.contentEl.querySelector<HTMLInputElement>(".simple-share-inline-name")?.blur();
+      this.exitEditing();
+    });
+    this.registerDomEvent(this.contentEl.ownerDocument, "keydown", event => {
+      if (event.key === "Escape" && this.editing) this.exitEditing();
+    });
+    this.register(installShareHoldEdit(this.contentEl,
+      row => this.feature.manifest.holdToEdit !== false && (!this.editing || row.dataset.shareDirectory !== undefined) && this.feature.manifest.enabled && !this.feature.isPublishing,
+      (id, directory) => {
+        this.editing = true; this.selected.clear();
+        if (id) this.selected.add(id);
+        if (directory !== undefined) for (const [noteId, entry] of Object.entries(this.feature.manifest.notes)) {
+          if (entry.enabled && !entry.deleted && (entry.category === directory || entry.category.startsWith(directory + "/"))) this.selected.add(noteId);
+        }
+        this.activeDirectory = directory ?? (id ? this.feature.manifest.notes[id]?.category : undefined);
+        if (this.layout !== "public") this.feature.updateDisplay({ layout: "public" });
+        this.render();
+      }, (id, directory, target) => {
+        void (async () => {
+          try {
+            if (id) await this.feature.moveShares([id], target);
+            else if (directory) await this.feature.moveShareDirectory(directory, target);
+            this.selected.clear(); this.activeDirectory = target; this.render();
+          } catch (error) { new Notice(String(error)); }
+        })();
+      }, (id, directory) => {
+        if (directory) void this.feature.deleteShareDirectory(directory, async () => true).catch(error => new Notice(String(error)));
+        else if (id) void this.feature.removeShares([...this.selected]).catch(error => new Notice(String(error)));
+      }));
+    this.registerDomEvent(this.contentEl, "contextmenu", event => {
+      if (event.defaultPrevented || !this.feature.manifest.enabled || this.feature.isPublishing) return;
+      const heading = (event.target as Element).closest<HTMLElement>("[data-share-directory]");
+      if (!heading && (event.target as Element).closest(".simple-share-note-row, button, input")) return;
+      const parent = heading?.dataset.shareDirectory ?? "";
+      event.preventDefault();
+      const menu = new Menu().addItem(item => item.setTitle(heading ? "新建子目录" : "新建分享目录").setIcon("folder-plus").onClick(() => {
+        this.newDirectory(parent);
+      }));
+      if (parent) menu.addItem(item => item.setTitle("重命名目录").setIcon("pencil").onClick(() => {
+        editShareName(heading!.querySelector<HTMLElement>(".simple-share-folder-name")!, parent.split("/").pop()!, name => this.feature.renameShareDirectory(parent, name));
+      }));
+      if (parent) menu.addItem(item => item.setTitle("删除目录").setIcon("trash-2").onClick(() => {
+        void (async () => {
+          try {
+            if (await this.feature.deleteShareDirectory(parent)) {
+              this.selected.clear(); this.activeDirectory = undefined; this.render();
+            }
+          } catch (error) { new Notice(String(error)); }
+        })();
+      }));
+      menu.showAtMouseEvent(event);
+    });
+    this.render();
+  }
   updateStatus(): void {
     const status = this.contentEl.querySelector<HTMLElement>(".simple-share-progress");
     if (!status) return;
@@ -2486,24 +2557,13 @@ export class ShareView extends ItemView {
   }
   render(): void {
     if (this.activeLibrary !== this.feature.libraryId) {
-      this.activeLibrary = this.feature.libraryId; this.selected.clear(); this.activeDirectory = undefined; this.creatingDirectory = undefined;
+      this.activeLibrary = this.feature.libraryId; this.selected.clear(); this.activeDirectory = undefined;
     }
     this.contentEl.empty(); this.contentEl.addClass("simple-share-panel");
     this.feature.renderLibrarySelector(this.contentEl);
     const header = new Setting(this.contentEl)
       .addButton(button => {
-        button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("square-pen").setTooltip(this.editing ? "退出编辑" : "编辑分享")
-          .setDisabled(this.feature.isPublishing || !this.feature.manifest.enabled).onClick(() => {
-            this.editing = !this.editing; this.selected.clear(); this.activeDirectory = undefined; this.creatingDirectory = undefined;
-            if (this.editing) this.feature.updateDisplay({ layout: "public" });
-            this.render();
-          });
-        button.buttonEl.addClass("simple-share-header-icon", "simple-share-edit", "clickable-icon", "nav-action-button");
-        button.buttonEl.setAttribute("aria-label", "编辑分享");
-        button.buttonEl.setAttribute("aria-pressed", String(this.editing));
-      })
-      .addButton(button => {
-        button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("globe").setTooltip("选择分享网站").onClick(runAsync(async event => {
+        button.setClass("simple-action-button").setClass("simple-action-button--plain").setIcon("globe").setTooltip("选择分享网站").onClick(runAsync(async event => {
           button.setDisabled(true);
           try {
             const websites = await this.feature.shareWebsites();
@@ -2527,21 +2587,13 @@ export class ShareView extends ItemView {
         button.buttonEl.addClass("simple-share-header-icon", "clickable-icon", "nav-action-button");
       });
     header.addButton(button => {
-      button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon(this.descending ? "simple-share-sort-desc" : "simple-share-sort-asc")
+      button.setClass("simple-action-button").setClass("simple-action-button--plain").setIcon(this.descending ? "simple-share-sort-desc" : "simple-share-sort-asc")
         .setTooltip(this.descending ? "名称倒序 Z→A；点击切换正序" : "名称正序 A→Z；点击切换倒序")
         .onClick(() => this.feature.updateDisplay({ descending: !this.descending }));
       button.buttonEl.addClass("simple-share-header-icon", "simple-share-sort-button", "clickable-icon", "nav-action-button");
     });
     header.addButton(button => {
-      button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon(this.showPaths ? "simple-share-paths-visible" : "simple-share-paths-hidden").setTooltip("是否显示路径").onClick(() => {
-        this.feature.updateDisplay({ showPaths: !this.showPaths });
-      });
-      button.buttonEl.addClass("simple-share-header-icon", "simple-share-paths-toggle", "clickable-icon", "nav-action-button");
-      button.buttonEl.setAttribute("aria-label", "是否显示路径");
-      button.buttonEl.setAttribute("aria-pressed", String(this.showPaths));
-    });
-    header.addButton(button => {
-      button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("simple-share-copy-settings").setTooltip("复制设置").onClick(runAsync(async event => {
+      button.setClass("simple-action-button").setClass("simple-action-button--plain").setIcon("simple-share-copy-settings").setTooltip("复制设置").onClick(runAsync(async event => {
         const menu = new Menu();
         await this.feature.addCopyContentMenu(menu);
         menu.showAtMouseEvent(event);
@@ -2550,13 +2602,14 @@ export class ShareView extends ItemView {
       button.buttonEl.setAttribute("aria-label", "复制设置");
     });
     header.addButton(button => {
-      button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("settings").setTooltip("打开分享设置").onClick(() => this.feature.host.sync.openPluginSettings(true));
+      button.setClass("simple-action-button").setClass("simple-action-button--plain").setIcon("settings").setTooltip("打开分享设置").onClick(() => this.feature.host.sync.openPluginSettings(true));
       button.buttonEl.addClass("simple-share-header-icon", "clickable-icon", "nav-action-button");
       button.buttonEl.setAttribute("aria-label", "打开分享设置");
     });
     header.settingEl.addClass("simple-share-header");
     const publish = this.feature.addPublishButton(new Setting(this.contentEl));
     publish.settingEl.addClass("simple-share-publish-row");
+    publish.settingEl.toggleClass("is-editing", this.editing);
     const primary = publish.settingEl.querySelector<HTMLButtonElement>(".simple-share-publish")!;
     primary.addClass("simple-share-new", "mod-cta");
     const uploadIcon = primary.createSpan({ cls: "simple-share-new-icon", attr: { "aria-hidden": "true" } });
@@ -2564,13 +2617,13 @@ export class ShareView extends ItemView {
     publish.controlEl.createEl("p", { cls: "simple-share-progress", attr: { role: "status", "aria-live": "polite" } });
     this.updateStatus();
     for (const id of this.selected) if (!this.feature.rows.some(row => row.id === id)) this.selected.delete(id);
-    const renderList = () => this.feature.renderPanel(body, this.query, this.showPaths, this.layout, this.collapsed, () => this.app.workspace.requestSaveLayout(), this.descending,
+    const renderList = () => this.feature.renderPanel(body, this.query, this.layout, this.collapsed, () => this.app.workspace.requestSaveLayout(), this.descending,
       this.editing ? { mode: "delete", selected: this.selected, directory: this.activeDirectory,
         onDirectory: directory => {
           this.activeDirectory = directory;
           body.querySelectorAll<HTMLElement>("[data-share-directory]").forEach(element => element.toggleClass("is-active-directory", element.dataset.shareDirectory === directory));
           renderSelection();
-        }, onChange: () => { renderSelection(); }, onDrop: (ids, directory) => {
+        }, onChange: () => { renderSelection(); }, onTrash: ids => { void this.feature.removeShares(ids).catch(error => new Notice(String(error))); }, onDrop: (ids, directory) => {
         void (async () => {
           try {
             await this.feature.moveShares(ids, directory);
@@ -2581,82 +2634,60 @@ export class ShareView extends ItemView {
       } } : undefined);
     new Setting(this.contentEl).addSearch(search => search.setPlaceholder("搜索分享笔记…").setValue(this.query).onChange(value => { this.query = value; renderList(); }))
       .settingEl.addClass("simple-share-search");
-    const selectionBar = this.contentEl.createDiv({ cls: "simple-share-selection-bar" });
+    const selectionBar = publish.controlEl.createDiv({ cls: "simple-share-selection-bar" });
+    primary.after(selectionBar);
     const renderSelection = () => {
       selectionBar.empty();
       selectionBar.hidden = !this.editing;
       if (!this.editing) return;
-      selectionBar.createSpan({ text: `批量操作 · 已选 ${this.selected.size} 篇`, attr: { role: "status", "aria-live": "polite" } });
+      selectionBar.createSpan({ text: `已选 ${this.selected.size} 篇`, attr: { role: "status", "aria-live": "polite" } });
       const button = (label: string, action: () => void, needsSelection = false) => {
         const control = selectionBar.createEl("button", { text: label, attr: { type: "button" } });
         control.disabled = this.feature.isPublishing || !this.feature.manifest.enabled || needsSelection && !this.selected.size;
         control.addEventListener("click", action); return control;
       };
-      button("全选", () => {
-        body.querySelectorAll<HTMLInputElement>(".simple-share-selection:not(:disabled)").forEach(input => { this.selected.add(input.dataset.shareId!); });
-        renderList(); renderSelection();
-      }).setAttribute("title", "全选搜索筛选后显示的笔记");
-      button("反选", () => {
-        body.querySelectorAll<HTMLInputElement>(".simple-share-selection:not(:disabled)").forEach(input => {
-          const id = input.dataset.shareId!;
-          if (this.selected.has(id)) this.selected.delete(id); else this.selected.add(id);
-        });
-        renderList(); renderSelection();
-      }).setAttribute("title", "反选搜索筛选后显示的笔记");
-      button("清空", () => { this.selected.clear(); this.activeDirectory = undefined; renderList(); renderSelection(); });
-      const create = button("新建", () => {
-        const directories = new Set([...this.selected].map(id => this.feature.manifest.notes[id]?.category ?? ""));
-        this.creatingDirectory = { parent: this.activeDirectory ?? (directories.size === 1 ? [...directories][0] : ""), name: "新建文件夹" };
-        this.creatingError = "";
-        if (this.layout !== "public") this.feature.updateDisplay({ layout: "public" });
-        this.render();
+      const remove = button("", () => { void this.deleteSelected(); }, true);
+      remove.addClass("simple-share-trash"); remove.dataset.shareTrash = "true";
+      remove.setAttribute("aria-label", "删除所选分享；也可拖入此处");
+      setTooltip(remove, "拖入或点击以撤下分享，原笔记保留"); setIcon(remove, "trash-2");
+      remove.addEventListener("dragover", event => {
+        if (!event.dataTransfer?.types.includes("application/x-simple-share-notes")) return;
+        event.preventDefault(); remove.addClass("is-drop-target");
       });
-      create.addClass("simple-share-selection-right");
-      create.setAttribute("title", `新建文件夹于：${this.activeDirectory || "分享库根目录"}`);
-      create.disabled ||= this.creatingBusy;
-      const remove = button("删除", () => { void this.deleteSelected(); }, true);
-      remove.addClass("mod-warning");
-      if (this.creatingDirectory) {
-        const draft = this.creatingDirectory;
-        const form = selectionBar.createEl("form", { cls: "simple-share-create-folder" });
-        form.createEl("label", { text: `新建于：${draft.parent || "分享库根目录"}` });
-        const input = form.createEl("input", { attr: { type: "text", "aria-label": "新文件夹名称", required: "true" } });
-        input.value = draft.name; input.disabled = this.creatingBusy;
-        input.addEventListener("input", () => { draft.name = input.value; });
-        const save = form.createEl("button", { text: this.creatingBusy ? "创建中…" : "创建", attr: { type: "submit" } });
-        save.disabled = this.creatingBusy || this.feature.isPublishing;
-        const cancel = form.createEl("button", { text: "取消", attr: { type: "button" } });
-        cancel.disabled = this.creatingBusy;
-        const dismiss = () => { if (!this.creatingBusy) { this.creatingDirectory = undefined; this.creatingError = ""; renderSelection(); } };
-        cancel.addEventListener("click", dismiss);
-        input.addEventListener("keydown", event => { if (event.key === "Escape") { event.preventDefault(); dismiss(); } });
-        form.addEventListener("submit", event => {
-          event.preventDefault();
-          if (this.creatingBusy || this.feature.isPublishing) return;
-          this.creatingBusy = true; renderSelection();
-          const library = this.feature.libraryId;
-          void (async () => {
-            try {
-              const name = draft.name.trim();
-              const path = await this.feature.createShareDirectory(draft.parent, name === "新建文件夹" ? undefined : name);
-              if (library !== this.feature.libraryId) return;
-              this.creatingDirectory = undefined; this.activeDirectory = path; this.query = "";
-              const parts = path.split("/");
-              for (let end = 1; end <= parts.length; end++) this.collapsed.delete(`public:/${parts.slice(0, end).join("/")}`);
-              new Notice(`已新建「${path}」，可将所选笔记拖入此文件夹。`);
-            } catch (error) { if (library === this.feature.libraryId) this.creatingError = error instanceof Error ? error.message : String(error); }
-            finally { this.creatingBusy = false; this.render(); }
-          })();
-        });
-        if (this.creatingError) form.createEl("p", { text: this.creatingError, cls: "simple-share-error", attr: { role: "alert" } });
-      }
+      remove.addEventListener("dragleave", () => remove.removeClass("is-drop-target"));
+      remove.addEventListener("drop", event => {
+        event.preventDefault(); remove.removeClass("is-drop-target");
+        const ids = event.dataTransfer?.getData("application/x-simple-share-notes").split(",").filter(Boolean) ?? [];
+        if (ids.length) void this.feature.removeShares(ids).catch(error => new Notice(String(error)));
+      });
+
     };
     renderSelection();
-    const body = this.contentEl.createDiv(); renderList();
-    if (this.creatingDirectory && !this.creatingBusy) {
-      const input = this.contentEl.querySelector<HTMLInputElement>('.simple-share-create-folder input');
-      input?.focus(); input?.select();
-    }
+    const body = this.contentEl.createDiv({ cls: "simple-share-list" }); renderList();
+  }
+  private newDirectory(parent: string): void {
+    const heading = [...this.contentEl.querySelectorAll<HTMLElement>("[data-share-directory]")].find(element => element.dataset.shareDirectory === parent);
+    const details = heading?.closest("details");
+    if (details) details.open = true;
+    const target = details?.querySelector<HTMLElement>(":scope > .simple-share-folder-body") ?? this.contentEl.querySelector<HTMLElement>(".simple-share-list");
+    if (!target) return;
+    const row = target.createDiv({ cls: "simple-share-folder-heading simple-share-draft-folder" });
+    target.prepend(row);
+    setIcon(row.createSpan({ cls: "simple-share-folder-icon" }), "folder");
+    const label = row.createSpan({ cls: "simple-share-folder-name", text: "新建文件夹" });
+    const library = this.feature.libraryId;
+    editShareName(label, "新建文件夹", async name => {
+      if (library !== this.feature.libraryId) throw new Error("分享库已切换，请重新新建目录。");
+      const path = await this.feature.createShareDirectory(parent, name === "新建文件夹" ? undefined : name);
+      this.activeDirectory = path;
+      const parts = path.split("/");
+      for (let end = 1; end <= parts.length; end++) this.collapsed.delete(`public:/${parts.slice(0, end).join("/")}`);
+      this.render();
+    }, () => row.remove());
+  }
+  private exitEditing(): void {
+    this.editing = false; this.selected.clear(); this.activeDirectory = undefined;
+    this.render();
   }
   private async deleteSelected(): Promise<void> {
     const ids = [...this.selected];

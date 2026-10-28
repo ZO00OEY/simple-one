@@ -1,3 +1,22 @@
+# Simple One 1.0.27
+
+- 新增前置复选框「长按笔记进入批量编辑模式」，默认开启；长按 0.6 秒进入，可多选拖动，点击面板外部或按 Esc 退出。
+- 新建目录和文件/目录重命名采用原位输入，Enter 或失焦保存、Esc 取消；批量重命名自动补零编号。
+- 新增浅红色垃圾桶拖放目标，拖入笔记直接标记待撤下，推送后生效；原笔记保留。支持右键重命名、删除及新建子目录。
+- 修复待撤下笔记重命名受阻，以及保存失败后焦点锁定和重复报错。
+- 分享齿轮直接打开当前分享标签页，避免进入旧的独立设置页面。
+- 设置页首次打开默认第一个分类，此后记住上次分类；修复分享引导返回后标签与内容错位。
+- 分享列表移除路径显示，缩小行尾按钮；顶部图标采用无边框样式，调整 EdgeOne Token 行对齐。
+- 分享引导显示详细发布阶段与耗时；正文和附件检查最多四篇并行，共用附件只读取一次，发布清单保持稳定顺序。
+- 中英文 README 补充多账号切换时的同步仓库权限建议。
+
+English: remember settings tabs, fix sync/share return navigation, compact sharing controls, show detailed deployment progress, and check up to four shared notes concurrently while deduplicating attachment reads.
+
+验证：分享回归测试、同步面板与导航测试、TypeScript 检查及构建通过。未验证 Obsidian 实际 UI 和真实仓库发布性能。
+
+升级仅替换 `main.js`、`manifest.json`、`styles.css`，保留个人配置。发布附件不包含个人设置、凭据、日志或分享记录。
+
+---
 # Simple One 1.0.26
 
 - 精简同步修复弹窗，统一设置页字体与间距，使用红色确认按钮提示清理风险。

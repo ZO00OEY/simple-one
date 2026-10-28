@@ -134,6 +134,11 @@ try {
   const index = new Map([[other, [target]]]);
   const exported = await exporter.exportNote(host, source, "写作", manifest, index);
   assert.equal(attachmentReads, 1, 'repeated references read and hash an attachment once per export');
+  attachmentReads = 0;
+  const sharedAssetCache = new Map();
+  const parallelExports = await Promise.all(Array.from({ length: 4 }, () => exporter.exportNote(host, source, '写作', manifest, index, undefined, sharedAssetCache)));
+  assert.equal(attachmentReads, 1, 'parallel note exports share one attachment read');
+  assert(parallelExports.every(note => note.hash === exported.hash), 'parallel exports preserve published content');
   const sharedAssets = new Map(), beforeShared = attachmentReads;
   await exporter.exportNote(host, source, "写作", manifest, index, '', sharedAssets);
   await exporter.exportNote(host, { ...source, path: 'another.md' }, "写作", manifest, index, '', sharedAssets);
@@ -178,14 +183,19 @@ try {
     assert(await desktop.repository() instanceof combined.FallbackShareRepository);
     assert.equal(probes, 1, 'desktop reads local CLI credentials without network authentication probes');
     await desktop.repository(); assert.equal(probes, 2, 'local credentials are checked again for each operation');
+    assert.equal(await desktop.fallbackToken(), 'gh version', 'CLI credentials take priority over a saved token from another account');
+    assert.equal((await desktop.repository()).token, 'gh version', 'publishing fallback keeps the active CLI account');
+    const desktopProbes = probes;
     combined.Platform.isMobile = true;
     try {
       const mobile = new combined.ShareFeature(host);
       assert(await mobile.repository() instanceof combined.ApiShareRepository);
-      assert.equal(probes, 2, 'mobile never probes or executes CLI');
+      assert.equal(probes, desktopProbes, 'mobile never probes or executes CLI');
+      assert.equal(await mobile.fallbackToken(), 'fixture-token', 'mobile still uses its saved token');
     } finally { combined.Platform.isMobile = false; }
     const missing = new combined.ShareFeature({ ...host, sync: { exec: async () => { throw new Error('CLI not installed'); } } });
     assert(await missing.repository() instanceof combined.ApiShareRepository);
+    assert.equal(await missing.fallbackToken(), 'fixture-token', 'saved tokens remain available when CLI is missing');
   }
   // Exercise authorization selection through DOM events, without real credentials.
   const dom = new JSDOM("<body><main></main></body>");
@@ -657,37 +667,52 @@ try {
     };
     layout.rows = [{ id: firstId, title: "甲", state: "已发布" }, { id: secondId, title: "乙", state: "待发布" }, { id: withdrawnId, title: "旧记录", state: "未分享" }];
     const collapsed = new Set(["source:/本地"]);
-    layout.renderPanel(rootEl, "", false, "source", collapsed);
+    layout.renderPanel(rootEl, "", "source", collapsed);
     assert.equal(rootEl.querySelectorAll("details").length, 3);
     assert.equal(rootEl.querySelector("details").open, false);
     assert.equal(rootEl.querySelectorAll(".simple-share-note-row").length, 3);
     assert(rootEl.querySelector("details details .simple-share-note-row").textContent.includes("甲"));
-    layout.renderPanel(rootEl, "甲", false, "source", collapsed);
+    layout.renderPanel(rootEl, "甲", "source", collapsed);
     assert([...rootEl.querySelectorAll("details")].every(element => element.open), "search reveals matching nested notes");
     assert(collapsed.has("source:/本地"), "search preserves normal folder collapse state");
-    layout.renderPanel(rootEl, "", false, "public", collapsed);
+    layout.renderPanel(rootEl, "", "public", collapsed);
     assert(rootEl.querySelector("details details .simple-share-note-row").textContent.includes("公开甲"));
     assert(rootEl.textContent.includes('旧记录'), 'legacy disabled records remain manageable without a withdrawal setting');
     assert.equal(rootEl.querySelectorAll('button[data-icon="eye"], button[data-icon="eye-off"]').length, 0);
-    layout.renderPanel(rootEl, "", false);
+    layout.renderPanel(rootEl, "");
     assert.equal(rootEl.querySelector("details"), null, "default layout is flat");
     assert([...rootEl.querySelectorAll(".simple-share-note-row .setting-item-description")].every(element => element.hidden), "paths are hidden by default");
     const ascendingNames = [...rootEl.querySelectorAll(".simple-share-note-row")].map(element => element.children[0].textContent);
-    layout.renderPanel(rootEl, "", false, "list", collapsed, undefined, true);
+    layout.renderPanel(rootEl, "", "list", collapsed, undefined, true);
     assert.deepEqual([...rootEl.querySelectorAll(".simple-share-note-row")].map(element => element.children[0].textContent), ascendingNames.toReversed(), "descending reverses the visible filename order");
     layout.manifest.notes[firstId].publicName = "Z public";
     layout.manifest.notes[secondId].publicName = "A public";
-    layout.renderPanel(rootEl, "", false, "public");
+    layout.renderPanel(rootEl, "", "public");
     const publicFolder = [...rootEl.querySelectorAll("details")].find(element => element.querySelector(":scope > summary").textContent === "公开");
     assert(publicFolder.querySelector(":scope > .simple-share-folder-body > .simple-share-note-row").textContent.includes("A public"));
     const openedNotes = [];
+    const renameFeature = Object.create(combined.ShareFeature.prototype);
+    const renameManifest = { notes: Object.fromEntries(Array.from({ length: 101 }, (_, i) => ['id' + i, { category: 'keep', revision: 1 }])) };
+    renameFeature.change = async mutate => mutate(renameManifest);
+    await renameFeature.renameShares(['id0', 'id1'], '标题');
+    assert.equal(renameManifest.notes.id0.publicName, '标题01');
+    assert.equal(renameManifest.notes.id1.publicName, '标题02');
+    assert.equal(renameManifest.notes.id0.category, 'keep');
+    await renameFeature.renameShares(Object.keys(renameManifest.notes), '批量');
+    assert.equal(renameManifest.notes.id0.publicName, '批量001');
+    assert.equal(renameManifest.notes.id100.publicName, '批量101');
+    await renameFeature.renameShares(['id0'], '单篇');
+    assert.equal(renameManifest.notes.id0.publicName, '单篇');
+    renameManifest.notes.id0.deleted = true; renameManifest.notes.id0.enabled = false;
+    await renameFeature.renameShares(['id0'], '撤下重命名');
+    assert.equal(renameManifest.notes.id0.publicName, '撤下重命名');
+    assert.equal(renameManifest.notes.id0.deleted, true); assert.equal(renameManifest.notes.id0.enabled, false);
+    await assert.rejects(() => renameFeature.renameShares(['id0'], '../bad'), /不正确/);
     const numericSearch = new combined.ShareFeature({ sync: { isSyncing: () => false } });
     numericSearch.rows = [{ id: firstId, title: '笔记', state: '已发布', file: { path: '目录1/笔记.md', parent: { path: '目录1' } } }, { id: secondId, title: '未命名 1', state: '已发布' }];
-    numericSearch.renderPanel(rootEl, '1', false);
+    numericSearch.renderPanel(rootEl, '1');
     assert.equal(rootEl.querySelectorAll('.simple-share-note-row').length, 1, 'hidden directory digits do not match title search');
     assert(rootEl.textContent.includes('未命名 1'));
-    numericSearch.renderPanel(rootEl, '1', true);
-    assert.equal(rootEl.querySelectorAll('.simple-share-note-row').length, 2, 'visible paths remain searchable');
     const folderSelect = new combined.ShareFeature({ sync: { isSyncing: () => false } });
     folderSelect.manifest = structuredClone(layout.manifest);
     folderSelect.rows = layout.rows.filter(row => row.id !== withdrawnId).map((row, index) => ({
@@ -695,7 +720,7 @@ try {
     }));
     const folderSelected = new Set();
     const folderSelection = { selected: folderSelected, onChange() {} };
-    const renderFolders = query => folderSelect.renderPanel(rootEl, query, false, 'source', new Set(['source:/group/child']), undefined, false, folderSelection);
+    const renderFolders = query => folderSelect.renderPanel(rootEl, query, 'source', new Set(['source:/group/child']), undefined, false, folderSelection);
     renderFolders('');
     assert.equal(rootEl.querySelectorAll('.simple-share-folder-selection').length, 2);
     rootEl.querySelector('.simple-share-selection').click();
@@ -711,7 +736,7 @@ try {
     assert.deepEqual([...folderSelected], [folderSelect.rows[0].id], 'folder selection respects search filtering');
     const dropped = [];
     folderSelected.clear(); folderSelected.add(firstId); folderSelected.add(secondId);
-    folderSelect.renderPanel(rootEl, '', false, 'public', new Set(), undefined, false,
+    folderSelect.renderPanel(rootEl, '', 'public', new Set(), undefined, false,
       { selected: folderSelected, onChange() {}, onDrop: (ids, directory) => dropped.push({ ids, directory }) });
     const destination = [...rootEl.querySelectorAll('.simple-share-folder-heading')]
       .find(summary => summary.querySelector('.simple-share-folder-name').textContent === '专栏');
@@ -725,7 +750,7 @@ try {
     destination.dispatchEvent(drop);
     assert.deepEqual(dropped, [{ ids: [firstId, secondId], directory: '公开/专栏' }], 'dragging one selected row moves the whole selection to the public folder');
     const heldBox = dom.window.document.body.createDiv(), heldDrops = [];
-    folderSelect.renderPanel(heldBox, '', false, 'public', new Set(), undefined, false,
+    folderSelect.renderPanel(heldBox, '', 'public', new Set(), undefined, false,
       { selected: folderSelected, onChange() {}, onDrop: (ids, directory) => heldDrops.push({ ids, directory }) });
     const heldRow = heldBox.querySelector('[data-share-drag-id]');
     const heldTarget = heldBox.querySelector('[data-share-directory="公开/专栏"]');
@@ -766,7 +791,7 @@ try {
       assert(!nativeImage.isConnected);
     } finally {
       dom.window.setTimeout = savedTimer; dom.window.clearTimeout = savedCancelTimer; dom.window.document.elementFromPoint = savedHitTest;
-      folderSelect.renderPanel(heldBox, '', false); heldBox.remove();
+      folderSelect.renderPanel(heldBox, ''); heldBox.remove();
     }
     const panel = new combined.ShareFeature({ app: { workspace: { getLeavesOfType: () => [], requestSaveLayout() {}, getLeaf: () => ({ openFile: async file => openedNotes.push(file.path) }) } }, sync: { isSyncing: () => false } });
     panel.manifest = structuredClone(layout.manifest); panel.rows = layout.rows.filter(row => row.id !== withdrawnId);
@@ -791,7 +816,7 @@ try {
     assert(rootEl.querySelector('.simple-share-progress').textContent.includes('测试构建检查提示'), 'build errors do not hide successful repository publication');
     panel.status = ''; panel.error = ''; panel.publishStartedAt = 0;
     view.updateStatus();
-    assert(rootEl.querySelector('.simple-share-header button').classList.contains('simple-share-edit'), 'tools start at the left of the top toolbar');
+    assert.equal(rootEl.querySelector('.simple-share-edit'), null, 'editing is entered by holding a row, not a toolbar button');
     assert.equal(rootEl.querySelector('.simple-one-panel-switch'), null, 'sharing has no sync switch');
     assert.equal(view.getDisplayText(), '分享');
     assert.equal(view.getIcon(), 'share-2');
@@ -805,7 +830,7 @@ try {
     panel.publish = async () => { sidebarPushes++; };
     rootEl.querySelector('.simple-share-publish-row button').click();
     assert.equal(sidebarPushes, 1, 'top push button publishes all pending sharing changes');
-    assert(rootEl.querySelector('.simple-share-search').nextElementSibling.classList.contains('simple-share-selection-bar'));
+    assert(rootEl.querySelector('.simple-share-publish-row .simple-share-selection-bar'));
     assert.equal(rootEl.querySelector('.simple-share-actions > button'), null, 'new-share action no longer occupies the search footer');
     assert.equal(rootEl.querySelectorAll('.simple-share-note-row button[data-icon="trash-2"]').length, 0);
     assert.equal(rootEl.querySelectorAll('.simple-share-selection').length, 0);
@@ -857,10 +882,10 @@ try {
       panel.shareCopyText = oldCopyText;
     }
     openedNotes.length = 0;
-    rootEl.querySelector('.simple-share-edit').click();
+    view.editing = true; panel.display.layout = "public"; view.render();
     assert(!rootEl.querySelector('.simple-share-selection-bar').hidden);
     assert.equal(rootEl.querySelectorAll('.simple-share-locate').length, 0);
-    assert.deepEqual([...rootEl.querySelectorAll('.simple-share-selection-bar button')].map(button => button.textContent), ['全选', '反选', '清空', '新建', '删除']);
+    assert.deepEqual([...rootEl.querySelectorAll('.simple-share-selection-bar button')].map(button => button.textContent), ['']);
     assert.equal(rootEl.querySelectorAll('.simple-share-selection').length, 2);
     const selectionRow = rootEl.querySelector('.simple-share-note-row');
     selectionRow.querySelector(".setting-item-info").click();
@@ -882,25 +907,8 @@ try {
     checkbox.dispatchEvent(new dom.window.Event('change'));
     assert(rootEl.querySelector('.simple-share-selection-bar').textContent.includes('已选 1 篇'));
     assert.equal(rootEl.querySelector('.simple-share-selection-bar').firstElementChild.tagName, 'SPAN', 'mode and selected count sit above operation buttons');
-    const selectAction = label => [...rootEl.querySelectorAll('.simple-share-selection-bar button')].find(button => button.textContent === label).click();
-    selectAction('全选');
-    assert.equal(rootEl.querySelectorAll('.simple-share-selection:checked').length, 2);
-    selectAction('反选');
-    assert.equal(rootEl.querySelectorAll('.simple-share-selection:checked').length, 0);
-    const search = rootEl.querySelector('.simple-share-search input');
-    search.value = '甲'; search.dispatchEvent(new dom.window.Event('input'));
-    assert.equal(rootEl.querySelectorAll('.simple-share-selection').length, 1);
-    selectAction('全选');
-    assert(rootEl.querySelector('.simple-share-selection-bar').textContent.includes('已选 1 篇'), 'select-all applies only to visible search matches');
-    selectAction('反选');
-    assert(rootEl.querySelector('.simple-share-selection-bar').textContent.includes('已选 0 篇'), 'inverse applies only to visible search matches');
-    search.value = ''; search.dispatchEvent(new dom.window.Event('input'));
-    selectAction('全选'); selectAction('清空');
-    assert.equal(rootEl.querySelectorAll('.simple-share-selection:checked').length, 0);
-    assert(rootEl.querySelector('.simple-share-selection-bar').textContent.includes('已选 0 篇'));
-    assert([...rootEl.querySelectorAll('.simple-share-selection-bar button')].find(button => button.textContent === '删除').disabled);
-    assert(![...rootEl.querySelectorAll('.simple-share-selection-bar button')].find(button => button.textContent === '新建').disabled, 'creating a directory needs no selected notes');
-    assert.equal(rootEl.querySelectorAll('.simple-share-selection').length, 2);
+    assert(rootEl.querySelector('.simple-share-publish-row .simple-share-selection-bar'), 'delete and count sit beside publish');
+    view.selected.clear(); view.render();
     assert(!('showDirectory' in view.getState()), 'obsolete directory visibility switch is removed');
     const sidebarCreations = [], sidebarMoves = [];
     panel.createShareDirectory = async (parent, name) => {
@@ -912,13 +920,13 @@ try {
     panel.moveShares = async (ids, directory) => { sidebarMoves.push({ ids, directory }); };
     rootEl.querySelector('.simple-share-selection').click();
     const selectedId = rootEl.querySelector('.simple-share-selection:checked').dataset.shareId;
-    selectAction('新建');
-    assert.equal(panel.display.layout, 'public', 'new folders are managed in the public tree');
-    const createForm = rootEl.querySelector('.simple-share-create-folder');
+    panel.display.layout = 'public'; view.render();
     const selectedParent = panel.manifest.notes[selectedId].category;
-    assert(createForm.querySelector('label').textContent.includes(selectedParent));
-    const folderName = createForm.querySelector('input'); folderName.value = '新目录'; folderName.dispatchEvent(new dom.window.Event('input'));
-    createForm.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+    view.newDirectory(selectedParent);
+    const draftFolder = rootEl.querySelector('.simple-share-draft-folder');
+    assert.equal(draftFolder.parentElement.previousElementSibling.dataset.shareDirectory, selectedParent, 'draft lives inside its parent directory');
+    const folderName = draftFolder.querySelector('input'); folderName.value = '新目录';
+    folderName.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.deepEqual(sidebarCreations, [{ parent: selectedParent, name: '新目录' }]);
     const newFolder = rootEl.querySelector(`[data-share-directory="${selectedParent}/新目录"]`);
@@ -935,10 +943,26 @@ try {
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.deepEqual(sidebarMoves, [{ ids: [selectedId], directory: `${selectedParent}/新目录` }]);
     rootEl.querySelector(`[data-share-directory="${selectedParent}/新目录"]`).click();
-    selectAction('新建');
-    assert(rootEl.querySelector('.simple-share-create-folder label').textContent.includes(`${selectedParent}/新目录`), 'clicking an empty folder sets the parent for the next creation');
-    rootEl.querySelector('.simple-share-create-folder button[type="button"]').click();
-    rootEl.querySelector('.simple-share-edit').click();
+    view.newDirectory(`${selectedParent}/新目录`);
+    const childDraft = rootEl.querySelector('.simple-share-draft-folder');
+    assert.equal(childDraft.parentElement.previousElementSibling.dataset.shareDirectory, `${selectedParent}/新目录`);
+    childDraft.querySelector('input').dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    assert.equal(rootEl.querySelector('.simple-share-draft-folder'), null, 'Escape cancels the draft folder');
+    const editEvents = {}, editDisposers = [];
+    view.register = dispose => editDisposers.push(dispose);
+    view.registerDomEvent = (_target, type, callback) => { editEvents[type] = callback; };
+    await view.onOpen();
+    view.editing = true;
+    editEvents.pointerdown({ target: rootEl });
+    assert(view.editing, 'clicking within sharing preserves editing');
+    const menuTarget = dom.window.document.body.createDiv({ cls: 'menu' });
+    editEvents.pointerdown({ target: menuTarget });
+    assert(view.editing, 'context menu interaction preserves editing'); menuTarget.remove();
+    editEvents.pointerdown({ target: dom.window.document.body });
+    assert.equal(view.editing, false, 'clicking outside sharing exits editing');
+    view.editing = true; editEvents.keydown({ key: 'Escape' });
+    assert.equal(view.editing, false, 'Escape exits editing');
+    editDisposers.forEach(dispose => dispose());
     assert(rootEl.querySelector('.simple-share-selection-bar').hidden);
     assert.equal(rootEl.querySelectorAll('.simple-share-selection').length, 0, 'leaving edit mode hides checkboxes');
     const popup = dom.window.document.body.createDiv();
@@ -1685,6 +1709,8 @@ try {
   const numbered = await Promise.all([feature.createShareDirectory('公开'), feature.createShareDirectory('公开')]);
   assert.deepEqual(numbered, ['公开/新建文件夹(1)', '公开/新建文件夹(2)']);
   assert.equal(await feature.renameShareDirectory('公开', '公开改名'), '公开改名');
+  assert.equal(await feature.moveShareDirectory('公开改名', '目标'), '目标/公开改名');
+  await assert.rejects(() => feature.moveShareDirectory('目标', '目标/公开改名'), /自身或子目录/);
   await assert.rejects(() => feature.createShareDirectory('', '../private'), /名称/);
   await feature.createShareDirectory('空目录测试', '子目录');
   assert(await feature.deleteShareDirectory('空目录测试'));

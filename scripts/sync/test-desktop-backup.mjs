@@ -202,7 +202,7 @@ console.log('Desktop setup queue: first connection, background pause, serializat
   const setup = Object.create(Sync.prototype);
   const saved = [];
   const refreshErrors = [];
-  const settings = { setupVerified: { url: 'https://github.com/example/vault.git', branch: 'main' }, setupComplete: false };
+  const settings = { gitAuthorName: "", gitAuthorEmail: "", setupVerified: { url: 'https://github.com/example/vault.git', branch: 'main' }, setupComplete: false };
   Object.assign(setup, {
     settings, setupPreview: { trackedExcludedLocal: [], trackedExcludedRemote: [] }, setupChoices: {},
     setSetupActivity: () => {}, enqueueSetupGit: work => work(), setup: () => ({ finish: async () => [] }),

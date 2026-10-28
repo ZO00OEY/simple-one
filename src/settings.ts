@@ -183,7 +183,8 @@ export class SimpleSettingTab extends PluginSettingTab {
   private syncTab: SyncSettingsTab;
   private page: SettingsPage = { type: "overview" };
   private holidayYearFilter: Partial<Record<HolidaySource, number | "all">> = {};
-  private displayPreviewTab: "sync-sharing" | "sharing" | "display" | "theme" | "shortcuts" | "basic" | "calendar-diary" = "shortcuts";
+  private displayPreviewTab: string;
+  private syncNavigationTab?: string;
   private expandedReformatRuleSections = new Set(["builtin", "custom"]);
   private editingCustomCalloutIds = new Set<string>();
   private anniversaryTagFilter = "常用";
@@ -196,6 +197,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   constructor(app: App, plugin: SimplePlugin) {
     super(app, plugin);
     this.plugin = plugin;
+    this.displayPreviewTab = plugin.settings.lastSettingsTab ?? "";
     this.syncTab = new SyncSettingsTab(app, plugin.sync);
     plugin.openReformatSettings = () => {
       const appWithSettings = app as App & {
@@ -206,8 +208,10 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.openPage({ type: "reformat" });
     };
     plugin.sync.openSettings = (share = false) => {
-      this.openPage({ type: "sync-sharing" });
-      if (share) this.syncTab.openShareSettings();
+      this.displayPreviewTab = share ? "sharing" : "sync-sharing";
+      this.syncNavigationTab = this.displayPreviewTab;
+      this.syncTab.resetNavigation(share);
+      this.openPage({ type: "overview" });
     };
   }
 
@@ -771,7 +775,8 @@ export class SimpleSettingTab extends PluginSettingTab {
       if (tabs[index].id === "sync-sharing" || sharing) {
         const panel = panels[index];
         panel.empty();
-        if (this.displayPreviewTab !== tabs[index].id) this.syncTab.resetNavigation(sharing);
+        if (this.syncNavigationTab !== tabs[index].id) this.syncTab.resetNavigation(sharing);
+        this.syncNavigationTab = tabs[index].id;
         const title = this.renderPageHeader(panel, sharing ? "分享" : "同步", () => {
           if (!this.syncTab.backToOverview()) select(tabs.findIndex(tab => tab.id === "display"));
         });
@@ -800,6 +805,10 @@ export class SimpleSettingTab extends PluginSettingTab {
         else this.renderBasicOptimizationSettings(panel);
       }
       this.displayPreviewTab = tabs[index].id;
+      if (this.plugin.settings.lastSettingsTab !== this.displayPreviewTab) {
+        this.plugin.settings.lastSettingsTab = this.displayPreviewTab;
+        void this.plugin.saveSettings();
+      }
       buttons.forEach((button, i) => {
         button.setAttribute("aria-selected", String(i === index));
         button.tabIndex = i === index ? 0 : -1;

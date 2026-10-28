@@ -6227,6 +6227,11 @@ body.simple-one-active.is-mobile.simple-mobile-native-header .view-header :is(.v
   color: var(--color-red);
 }
 
+.simple-one-sync-setup-page button.mod-cta.simple-one-sync-trust-action {
+  background: var(--color-red);
+  color: white;
+}
+
 .simple-one-sync-setup-overview {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
@@ -6679,6 +6684,12 @@ body.simple-one-active.is-mobile.simple-mobile-native-header .view-header :is(.v
 
 .simple-one-sync-setup-page .simple-one-sync-setup-body .setting-item + .setting-item {
   border-top: 0;
+}
+
+.simple-one-sync-setup-page .simple-one-sync-setup-body .setting-item::before,
+.simple-one-sync-setup-page .simple-one-sync-setup-body .setting-item::after {
+  content: none;
+  display: none;
 }
 
 .simple-one-sync-settings.simple-one-sync-setup-page .simple-one-sync-setup-body .setting-item.simple-one-sync-setup-tracking-setting,
@@ -7650,6 +7661,7 @@ body.simple-one-active.is-mobile.simple-mobile-native-header .view-header :is(.v
 .simple-share-panel .simple-share-note-row :is(.setting-item-name, .setting-item-description) { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .simple-share-panel .simple-share-note-row .setting-item-control { flex: 0 0 auto; flex-wrap: nowrap; align-items: center; gap: 2px; min-height: 0; padding: 0; }
 .simple-share-panel .simple-share-note-row button { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; min-width: 22px; min-height: 22px; margin: 0; padding: 3px; border: 0; box-shadow: none; background: transparent; }
+.simple-share-panel .simple-share-note-row button.simple-action-button[class] { --simple-action-square: 22px; --simple-action-height: 22px; --simple-action-icon: 14px; }
 .simple-share-panel .simple-share-note-row .simple-share-selection { align-self: center; }
 .simple-share-panel .simple-share-note-row button svg { width: 16px; height: 16px; }
 .simple-share-panel .simple-share-note-row .simple-share-copy { border-radius: 4px; cursor: pointer; transition: color 120ms ease, background-color 120ms ease, transform 80ms ease; }
@@ -7679,10 +7691,6 @@ body.simple-one-active.is-mobile.simple-mobile-native-header .view-header :is(.v
 .simple-share-panel .simple-share-note-row :is(.simple-share-note-link, [role="checkbox"]):focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: -2px; border-radius: 3px; }
 .simple-share-panel .simple-share-note-row button.is-active { color: var(--interactive-accent); }
 .simple-share-panel .simple-share-note-row .setting-item-description[hidden] { display: none; }
-.simple-share-panel .simple-share-note-row.has-file-path { padding-top: 6px; padding-bottom: 6px; }
-.simple-share-panel .simple-share-note-row.has-file-path .setting-item-info { flex-direction: column; align-items: stretch; gap: 3px; }
-.simple-share-panel .simple-share-note-row.has-file-path .setting-item-name { flex: none; }
-.simple-share-panel .simple-share-note-row.has-file-path .setting-item-description { flex: none; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; }
 .simple-share-panel .simple-share-header { flex-wrap: nowrap; padding: 0 0 10px; border: 0; }
 .simple-share-panel .simple-share-header .setting-item-info { display: none; }
 .simple-share-panel .simple-share-header .setting-item-name { white-space: nowrap; font-size: var(--font-ui-medium); }
@@ -7709,6 +7717,8 @@ body.simple-one-active.is-mobile.simple-mobile-native-header .view-header :is(.v
 .simple-share-panel .simple-share-quick-actions button { width: 24px; min-width: 24px; height: 24px; min-height: 24px; padding: 4px; border: 0; box-shadow: none; background: transparent; }
 .simple-share-panel .simple-share-quick-actions button svg { width: 16px; height: 16px; }
 .simple-share-panel .simple-share-quick-actions button[aria-pressed="true"] { color: var(--interactive-accent); background: var(--background-modifier-hover); }
+.simple-share-panel .simple-share-publish-row .simple-share-selection-bar { padding: 0; flex: 0 0 auto; }
+.simple-share-panel .simple-share-publish-row .simple-share-selection-bar > span { flex: 0 0 auto; margin: 0; }
 .simple-share-panel .simple-share-selection-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-bottom: 8px; }
 .simple-share-panel .simple-share-selection-bar[hidden] { display: none; }
 .simple-share-panel .simple-share-selection-bar .simple-share-selection-right { margin-left: auto; }
@@ -8063,8 +8073,8 @@ body.simple-one-active.is-mobile.simple-mobile-native-header .view-header :is(.v
 .simple-one-sync-setup-page .simple-share-edgeone-nav::before { left: 16.66%; right: 16.66%; }
 .simple-share-edgeone-guide .simple-share-edgeone-auth-options { display: flex; flex-wrap: wrap; }
 .simple-share-edgeone-guide .simple-share-edgeone-auth-options > button { flex: 0 1 180px; }
-.simple-share-edgeone-guide .simple-one-sync-token-input { flex-wrap: wrap; }
-.simple-share-edgeone-guide .simple-one-sync-token-input .setting-item-info { flex: 0 1 180px; }
+.simple-share-edgeone-guide .setting-item.simple-one-sync-token-input { flex-wrap: wrap; align-items: center; padding-inline: 0; }
+.simple-share-edgeone-guide .simple-one-sync-token-input .setting-item-info { flex: 0 1 180px; margin-block: 0; }
 .simple-share-edgeone-guide .simple-one-sync-token-input .setting-item-control { flex: 1 1 340px; min-width: 0; }
 .simple-share-edgeone-guide .simple-one-sync-token-input input { width: 100%; max-width: none; }
 .simple-share-edgeone-reference li { margin: 8px 0; }
@@ -8216,6 +8226,7 @@ body.is-mobile .simple-one-sync-plan-confirmation .simple-one-sync-transfer__but
 .simple-one-sync-setup-page .simple-one-sync-check-page .simple-one-sync-setup-overview__item {
   padding: 12px;
   font-size: 13px;
+  background: var(--background-primary);
 }
 .simple-one-sync-setup-page .simple-one-sync-check-page .simple-one-sync-setup-overview__item strong {
   font-size: 24px;
@@ -8239,7 +8250,7 @@ body.is-mobile .simple-one-sync-plan-confirmation .simple-one-sync-transfer__but
   justify-content: center;
   text-align: left;
   box-shadow: none;
-  background: var(--background-secondary);
+  background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
   padding: 12px;
@@ -8248,7 +8259,10 @@ body.is-mobile .simple-one-sync-plan-confirmation .simple-one-sync-transfer__but
 .simple-one-sync-setup-page .simple-one-sync-check-page .simple-one-sync-setup-overview button.is-filter:hover,
 .simple-one-sync-setup-page .simple-one-sync-check-page .simple-one-sync-setup-overview button.is-filter.is-selected {
   border-color: var(--interactive-accent);
-  background: var(--background-modifier-hover);
+  background: var(--background-primary);
+}
+.simple-one-sync-setup-page .simple-one-sync-check-page .simple-one-sync-setup-overview button.is-filter.is-selected :is(strong, span) {
+  color: var(--interactive-accent);
 }
 .simple-one-sync-check-results {
   margin-top: 12px;
@@ -8688,3 +8702,9 @@ body :is(button, [role="button"]).simple-action-button--danger[class]:hover:not(
 .simple-one-sync-repair-modal .modal-content > p { margin: 0 0 12px; }
 .simple-one-sync-repair-modal .simple-one-sync-repair-warning { color: var(--text-error); }
 .simple-one-sync-repair-modal .modal-button-container { margin-top: 20px; }
+.simple-share-panel .simple-share-publish-row .simple-share-selection-bar { flex: 1 1 auto; }
+.simple-share-panel .simple-share-publish-row.is-editing .simple-share-progress { display: none; }
+.simple-share-panel .simple-share-selection-bar button.simple-share-trash { width: 30px; min-width: 30px; height: 30px; min-height: 30px; margin-left: auto; padding: 6px; color: var(--text-error); background: color-mix(in srgb, var(--color-red) 13%, transparent); border: 0; }
+.simple-share-panel .simple-share-trash svg { width: 18px; height: 18px; }
+.simple-share-panel .simple-share-trash:is(:hover, .is-drop-target) { background: color-mix(in srgb, var(--color-red) 27%, transparent); }.simple-share-panel .simple-share-folder-name.is-renaming { flex: 1; min-width: 90px; }
+.simple-share-panel input.simple-share-inline-name { width: 100%; min-width: 80px; height: 24px; padding: 1px 4px; font: inherit; }

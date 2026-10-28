@@ -171,11 +171,9 @@ export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConne
         new Setting(linked).setName("已关联 EdgeOne Makers 项目").setHeading();
         const deploying = embedded && (publishing || connection.state.lastCheck?.kind === "pending");
         if (deploying) linked.createEl("progress", { attr: { "aria-label": "正在验证仓库读取并部署" } });
-        const detail = deploying && progressText &&
-          !(connection.state.lastCheck?.kind === "pending" && /正在检查网站部署/.test(progressText))
-          ? progressText : connection.message;
+        const detail = deploying && progressText ? progressText : connection.message;
         linked.createEl("p", { text: detail,
-          cls: deploying || !embedded && connection.completed ? "simple-one-sync-setup-feedback" : "simple-one-sync-setup-helper",
+          cls: deploying ? "simple-share-guide-progress simple-one-sync-setup-helper" : !embedded && connection.completed ? "simple-one-sync-setup-feedback" : "simple-one-sync-setup-helper",
           attr: { role: "status", "aria-live": "polite" } });
         renderGithubAccessReminder(linked, repositoryVisibility);
         if (repositoryVisibility) shareExternalLink(linked.createDiv({ cls: "simple-share-provider-links" }), "查看 EdgeOne 项目及部署日志 ↗", EDGEONE_PROJECTS_URL);
