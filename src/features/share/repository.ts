@@ -149,7 +149,7 @@ export class ShareRepository {
   async deployment(commit: string): Promise<string> {
     const build = JSON.parse(await this.api([`repos/${this.site.owner}/${this.site.repo}/pages/builds/latest`])) as { commit?: string; status?: string; error?: { message?: string } };
     if (build.status === "errored") throw new Error(build.error?.message || "Pages 部署失败");
-    return build.commit === commit && build.status === "built" ? "网站已更新" : "已推送，网站部署中";
+    return build.commit === commit && build.status === "built" ? "网站已更新" : `已推送，网站部署中 · ${build.status || "尚无构建状态"}${build.commit !== commit ? "（等待本次提交）" : ""}`;
   }
 }
 export function websiteFiles(template: string, defaultTemplate: string, licenses = ""): Map<string, string | ArrayBuffer> {

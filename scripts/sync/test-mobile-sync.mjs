@@ -22,7 +22,7 @@ try {
       build.onLoad({ filter: /.*/, namespace: "mock" }, () => ({ contents: "export const requestUrl = request => globalThis.githubRequest(request);" }));
     } }] });
   const { MobileGithub, mirrorPlan, strategyChoices } = require(bundle);
-  async function fixture(localTexts, remoteTexts) {
+  async function fixture(localTexts, remoteTexts, { prepare = true, ...overrides } = {}) {
     let clock = 100, head = "c0", root = "t0", commitIndex = 0, treeIndex = 0;
     const local = new Map(), blobs = new Map(), trees = new Map(), commits = new Map(), calls = [];
     const storeBlob = value => { const bytes = Buffer.from(value); const sha = hash(bytes); blobs.set(sha, bytes); return sha; };
@@ -59,7 +59,9 @@ try {
       const body = request.body ? JSON.parse(request.body) : undefined;
       calls.push({ path, method: request.method, body });
       let json;
-      if (path === "") json = { default_branch: "main", permissions: { push: true } };
+      if (path === '/user') json = { login: 'fixture-user' };
+      else if (path === "") json = { private: true, default_branch: "main", permissions: { push: true } };
+      else if (path === '/branches/main') json = { protected: false };
       else if (path === "/commits/main") json = { sha: head, commit: { tree: { sha: root } } };
       else if (path === "/git/ref/heads/main") json = { object: { sha: head } };
       else if (path.startsWith("/compare/")) {
@@ -96,15 +98,26 @@ try {
       return { status: 200, headers: {}, json };
     };
     const options = { repoUrl: "https://github.com/example/vault.git", token: "fixture", branch: "main", bound: true,
-      syncImages: true, syncPlugins: false, plugins: [], ignorePatterns: [], cacheEnabled: true, trackPaths: true };
-    const progress = [];
-    const engine = new MobileGithub(adapter, ".obsidian", "simple-link", () => options, message => progress.push(message));
+      syncImages: true, syncPlugins: false, plugins: [], ignorePatterns: [], cacheEnabled: true, trackPaths: true, ...overrides };
+    const progress = [], timings = [];
+    let timingHook;
+    const engine = new MobileGithub(adapter, ".obsidian", "simple-link", () => options, message => progress.push(message),
+      async (context, status, message) => {
+        timings.push({ context, status, message });
+        await timingHook?.(context, status, message);
+      }, () => true);
+    if (prepare) await engine.prepareLocalRules();
     await engine.bind();
-    return { engine, adapter, local, calls, options, progress, remote: () => trees.get(root), head: () => head, root: () => root,
+    calls.length = 0;
+    return { engine, adapter, local, calls, options, progress, timings, onTiming: hook => { timingHook = hook; }, remote: () => trees.get(root), head: () => head, root: () => root,
       fail: path => { failWrite = path; },
       move: (from, to) => { local.set(to, local.get(from)); local.delete(from); engine.event("rename", to, from); },
       cloudEdit: (path, text) => {
         const next = { ...trees.get(root), [path]: { sha: storeBlob(text), mode: "100644" } };
+        const parent = head; root = `t${++treeIndex}`; trees.set(root, next); head = `c${++commitIndex}`; commits.set(head, { tree: root, parent });
+      },
+      cloudDelete: path => {
+        const next = { ...trees.get(root) }; delete next[path];
         const parent = head; root = `t${++treeIndex}`; trees.set(root, next); head = `c${++commitIndex}`; commits.set(head, { tree: root, parent });
       } };
   }
@@ -120,6 +133,8 @@ try {
       globalThis.githubRequest = async request => request.url.includes("/git/trees/")
         ? { status: 200, headers: {}, json } : upstream(request);
       await assert.rejects(f.engine.preview(), /响应|清单|目录条目|路径/);
+      assert.equal(f.timings.at(-1).status, 'error');
+      assert.match(f.timings.at(-1).message, /失败阶段：读取远端/);
       assert.equal(f.local.get("keep.md").bytes.toString(), "keep");
       assert.equal(f.calls.filter(call => call.method !== "GET").length, writesBefore);
     }
@@ -130,6 +145,175 @@ try {
     let plan = await f.engine.preview();
     assert.equal(plan.conflicts.length, 0, "identical files establish a baseline without choices");
     await f.engine.execute(plan);
+  }
+  // Explicit setup prepares local rules once; revisiting it never rewrites valid user rules.
+  {
+    const original = '# personal comment\nprivate/\n';
+    const f = await fixture({ '.gitignore': original }, {}, { prepare: false });
+    f.calls.length = 0;
+    f.adapter.list = async () => { throw Error('preparing setup must not scan the vault'); };
+    f.adapter.readBinary = async () => { throw Error('preparing setup must not hash vault contents'); };
+    const write = f.adapter.write;
+    let rootWrites = 0, failRules = true;
+    f.adapter.write = async (path, text) => {
+      if (path === '.gitignore') {
+        rootWrites++;
+        if (failRules) throw Error('fixture root write failed');
+      }
+      return write(path, text);
+    };
+    await assert.rejects(f.engine.prepareLocalRules(), /fixture root write failed/);
+    assert.equal(await f.adapter.read('.gitignore'), original);
+    failRules = false;
+    await f.engine.prepareLocalRules();
+    const prepared = await f.adapter.read('.gitignore');
+    assert(prepared.includes(original.trimEnd()));
+    const writes = rootWrites;
+    await f.engine.prepareLocalRules();
+    assert.equal(rootWrites, writes, 'reopening setup must not rewrite local rules');
+    assert.equal(await f.adapter.read('.gitignore'), prepared);
+    assert.equal(f.engine.state.baseCommitSha, null, 'preparing rules does not create a sync baseline');
+    assert(!f.calls.some(call => call.path.startsWith('/git/trees/') || ['POST', 'PATCH'].includes(call.method)),
+      'preparing local rules does not scan or mutate remote files');
+  }
+  // Root rules control portable Obsidian settings, while device workspaces remain local.
+  {
+    const texts = { '.obsidian/hotkeys.json': '{}', '.obsidian/themes/example/theme.css': 'body{}',
+      '.obsidian/workspace.json': 'device workspace', '.obsidian/cache/index.json': 'device cache' };
+    const f = await fixture({}, texts);
+    await f.engine.execute(await reviewedPreview(f));
+    for (const path of ['.obsidian/hotkeys.json', '.obsidian/themes/example/theme.css']) {
+      assert.equal(f.local.get(path).bytes.toString(), texts[path]);
+    }
+    for (const path of ['.obsidian/workspace.json', '.obsidian/cache/index.json']) {
+      assert(!f.local.has(path));
+      assert.equal(f.remote()[path].sha, hash(Buffer.from(texts[path])));
+    }
+  }
+  // Removing a path from the local scope preserves both copies, including the remote tree.
+  {
+    const f = await fixture({ 'keep.md': 'keep', 'excluded/note.md': 'original' },
+      { 'keep.md': 'keep', 'excluded/note.md': 'original' });
+    await align(f);
+    const existing = await f.adapter.read('.gitignore');
+    await f.adapter.write('.gitignore', existing + '\nexcluded/\n');
+    await f.adapter.write('excluded/note.md', 'unsynced local edit');
+    f.cloudEdit('excluded/note.md', 'unsynced cloud edit');
+    const plan = await f.engine.preview();
+    assert(!plan.local['excluded/note.md'] && !plan.remote.files['excluded/note.md']);
+    assert(!plan.localDeletes.includes('excluded/note.md') && !plan.remoteDeletes.includes('excluded/note.md'));
+    await f.engine.execute(plan);
+    assert.equal(f.local.get('excluded/note.md').bytes.toString(), 'unsynced local edit');
+    assert.equal(f.remote()['excluded/note.md'].sha, hash(Buffer.from('unsynced cloud edit')));
+  }
+  // One timing summary per active operation, without note paths, contents or raw failures.
+  {
+    const f = await fixture({ 'private-local.md': 'private local text' }, { 'private-cloud.md': 'private cloud text' });
+    const original = await f.engine.preview();
+    const previewLog = f.timings.at(-1);
+    assert.equal(previewLog.context, '轻量比对耗时'); assert.equal(previewLog.status, 'success');
+    for (const label of ['预览恢复', '读取远端', '扫描本地', '保存缓存', '差异计算']) assert(previewLog.message.includes(label));
+    const plan = await f.engine.recalculate(original, Object.fromEntries(original.conflicts.map(c => [c.id, { choice: c.local ? 'local' : 'remote' }])));
+    assert.equal(f.timings.at(-1).context, '轻量重算耗时');
+    assert.match(f.timings.at(-1).message, /差异计算/);
+    await f.engine.execute(plan);
+    const executed = f.timings.at(-1);
+    assert.equal(executed.context, '轻量执行耗时'); assert.equal(executed.status, 'success');
+    for (const label of ['核对远端', '复核本地', '上传准备与写树', '创建提交', '保存恢复记录', '更新分支', '下载与落盘', '结果验证', '保存基准']) assert(executed.message.includes(label), `${label}: ${executed.message}`);
+    assert.match(executed.message, /总耗时 \d+\.\d{2} 秒/);
+    assert.equal(f.timings.length, 3, 'files and internal stages do not create extra log entries');
+    assert(!JSON.stringify(f.timings).includes('private'), 'timing summaries contain no paths or note contents');
+    assert.match(previewLog.message, /扫描本地：\d+ 个文件/);
+    f.engine.timingEnabled = () => false;
+    const timingCount = f.timings.length;
+    await f.engine.preview();
+    assert.equal(f.timings.length, timingCount, 'disabled diagnostics skip timing collection and callbacks');
+  }
+  // Log callbacks keep the operation lock, and rejection never changes success or the original error.
+  {
+    const f = await fixture({}, { 'private.md': 'private note text' });
+    f.onTiming(async () => {
+      await assert.rejects(f.engine.preview(), /正在检查/);
+      throw new Error('simulated log storage failure');
+    });
+    const original = await f.engine.preview();
+    const plan = await f.engine.recalculate(original, Object.fromEntries(original.conflicts.map(c => [c.id, { choice: 'remote' }])));
+    await f.engine.execute(plan);
+    assert.equal(f.local.get('private.md').bytes.toString(), 'private note text');
+    assert.equal(f.engine.state.pending, undefined);
+    assert.equal(f.engine.running, false);
+    const broken = await fixture({}, { 'private.md': 'private note text' });
+    broken.onTiming(async () => { throw new Error('simulated log storage failure'); });
+    const before = await broken.engine.preview();
+    const ready = await broken.engine.recalculate(before, Object.fromEntries(before.conflicts.map(c => [c.id, { choice: 'remote' }])));
+    const originalError = new Error('private disk failure details');
+    broken.adapter.writeBinary = async () => { throw originalError; };
+    await assert.rejects(broken.engine.execute(ready), error => error === originalError);
+    assert.equal(broken.timings.at(-1).status, 'error');
+    assert.match(broken.timings.at(-1).message, /失败阶段：下载与落盘/);
+    assert(!JSON.stringify(broken.timings).includes('private'));
+    assert.equal(broken.engine.running, false); assert.equal(broken.engine.activeTiming, undefined);
+    assert(broken.engine.state.pending, 'timing logs cannot clear interrupted work');
+    assert.equal(broken.engine.state.baseCommitSha, null);
+  }
+  // Choice changes reuse one immutable preview without API calls, file scans or state writes.
+  {
+    const f = await fixture({ 'shared.md': 'local' }, { 'shared.md': 'cloud', 'remote.md': 'remote only' });
+    const original = await f.engine.preview();
+    const choices = side => Object.fromEntries(original.conflicts.map(c => [c.id, { choice: side }]));
+    const calls = f.calls.length, saved = JSON.stringify(f.engine.state);
+    const list = f.adapter.list, stat = f.adapter.stat, readBinary = f.adapter.readBinary, write = f.adapter.write;
+    let diskCalls = 0;
+    const forbidden = async () => { diskCalls++; throw new Error('recalculate must not access disk'); };
+    f.adapter.list = f.adapter.stat = f.adapter.readBinary = f.adapter.write = forbidden;
+    let localPlan, remotePlan;
+    try {
+      localPlan = await f.engine.recalculate(original, choices('local'));
+      remotePlan = await f.engine.recalculate(localPlan, choices('remote'));
+      assert.equal(localPlan.desired['shared.md'].sha, hash(Buffer.from('local')));
+      assert.equal(remotePlan.desired['shared.md'].sha, hash(Buffer.from('cloud')));
+      assert(remotePlan.downloads.includes('remote.md'));
+      const manual = await f.engine.recalculate(original, { ...choices('remote'), 'new:shared.md': { choice: 'manual', text: 'merged\r\n' } });
+      assert.equal(manual.desired['shared.md'].sha, hash(Buffer.from('merged\n')));
+      assert.equal(manual.mergedContents[manual.desired['shared.md'].sha], 'merged\n');
+      original.local['shared.md'].sha = 'tampered';
+      original.remote.files['shared.md'].sha = 'tampered';
+      const isolated = await f.engine.recalculate(original, choices('local'));
+      assert.equal(isolated.local['shared.md'].sha, hash(Buffer.from('local')), 'public plans do not mutate the private snapshot');
+      assert.equal(isolated.remote.files['shared.md'].sha, hash(Buffer.from('cloud')));
+    } finally {
+      Object.assign(f.adapter, { list, stat, readBinary, write });
+    }
+    assert.equal(diskCalls, 0);
+    assert.equal(f.calls.length, calls);
+    assert.equal(JSON.stringify(f.engine.state), saved);
+    const fresh = await f.engine.preview();
+    assert.equal(fresh.conflicts.length, 2, 'ordinary preview always reads a new snapshot');
+    await assert.rejects(f.engine.recalculate(localPlan, choices('remote')), /过期|变化/);
+    await assert.rejects(f.engine.execute(localPlan), /过期|变化/);
+  }
+  for (const changed of ['event', 'scope', 'base']) {
+    const f = await fixture({ 'shared.md': 'local' }, { 'shared.md': 'cloud' });
+    const original = await f.engine.preview();
+    if (changed === 'event') f.engine.event('modify', 'shared.md');
+    if (changed === 'scope') await f.adapter.write('.gitignore', 'excluded/\n');
+    if (changed === 'base') f.engine.state.base['new-baseline.md'] = { sha: 'changed', mode: '100644' };
+    const calls = f.calls.length;
+    await assert.rejects(f.engine.recalculate(original, { 'new:shared.md': { choice: 'local' } }), changed === 'event'
+      ? error => error.name === 'LocalSyncEdit' : /状态发生变化|gitignore.*变化/);
+    assert.equal(f.calls.length, calls);
+  }
+  for (const changed of ['local-without-event', 'remote']) {
+    const f = await fixture({ 'shared.md': 'local' }, { 'shared.md': 'cloud' });
+    const original = await f.engine.preview();
+    if (changed === 'remote') f.cloudEdit('shared.md', 'new cloud');
+    else await f.adapter.write('shared.md', 'external edit without event');
+    const calls = f.calls.length;
+    const selected = await f.engine.recalculate(original, { 'new:shared.md': { choice: 'local' } });
+    assert.equal(f.calls.length, calls, 'recalculation deliberately leaves final IO verification to execute');
+    await assert.rejects(f.engine.execute(selected), changed === 'remote' ? /云端出现新提交/ : error => error.name === 'LocalSyncEdit');
+    assert(!f.calls.some(call => ['POST', 'PATCH'].includes(call.method)), 'stale previews cannot mutate the remote');
+    assert.equal(f.engine.state.baseCommitSha, null);
   }
   // Rejoining clears interrupted work, not completed baselines or note contents.
   {
@@ -289,9 +473,7 @@ try {
   }
   // All-plugin selection includes plugins installed after the first sync.
   {
-    const f = await fixture({ 'keep.md': 'keep' }, { 'keep.md': 'keep' });
-    f.options.syncPlugins = true;
-    f.options.plugins = ['*'];
+    const f = await fixture({ 'keep.md': 'keep' }, { 'keep.md': 'keep' }, { syncPlugins: true, plugins: ['*'] });
     await align(f);
     const localPlugin = '.obsidian/plugins/new-local/main.js';
     await f.adapter.write(localPlugin, 'new local program');
@@ -302,7 +484,7 @@ try {
     f.cloudEdit(cloudPlugin, 'new cloud program');
     const cloudPlan = await f.engine.preview();
     assert(cloudPlan.downloads.includes(cloudPlugin), 'new cloud plugin is discovered after baseline');
-    f.options.plugins = ['*', '!new-cloud'];
+    await f.adapter.write('.gitignore', await f.adapter.read('.gitignore') + '\n.obsidian/plugins/new-cloud/\n');
     const excludedPlan = await f.engine.preview();
     assert(!excludedPlan.downloads.includes(cloudPlugin), 'explicitly excluded plugin remains excluded');
   }
@@ -312,9 +494,8 @@ try {
     const states = ['data.json', 'data.json.bak', 'link-state.json', 'link-state.json.recovery', 'mobile-ignore.json'];
     const remote = { [prefix + 'main.js']: 'new program', [prefix + 'manifest.json']: '{"id":"simple-link"}' };
     for (const name of states) remote[prefix + name] = 'other device state';
-    const f = await fixture({ [prefix + 'data.json']: 'my credentials', [prefix + 'mobile-ignore.json']: 'my rules' }, remote);
-    f.options.syncPlugins = true; f.options.plugins = ['simple-link'];
-    f.options.ignorePatterns = ['!' + prefix + '*'];
+    const f = await fixture({ [prefix + 'data.json']: 'my credentials', [prefix + 'mobile-ignore.json']: 'my rules' }, remote,
+      { syncPlugins: true, plugins: ['simple-link'], ignorePatterns: ['!' + prefix + '*'] });
     const plan = await reviewedPreview(f);
     assert(plan.downloads.includes(prefix + 'main.js'));
     assert(f.engine.requiresPluginReload(plan));
@@ -384,6 +565,133 @@ try {
     assert.equal(f.engine.state.baseCommitSha, base);
     assert.equal(f.local.get('note.md').bytes.toString(), 'hello');
   }
+  // A pending journal must be durable before the branch ref may be patched.
+  {
+    const f = await fixture({ 'note.md': 'base' }, { 'note.md': 'base' });
+    await align(f);
+    const baseline = f.engine.state.baseCommitSha, write = f.adapter.write;
+    await f.adapter.write('upload.md', 'local upload'); f.engine.event('create', 'upload.md');
+    const plan = await f.engine.preview();
+    f.adapter.write = async (path, text) => {
+      if (path.startsWith(f.engine.statePath) && JSON.parse(text).state?.pending) throw Error('fixture pending persistence failure');
+      return write(path, text);
+    };
+    await assert.rejects(f.engine.execute(plan), /fixture pending persistence failure/);
+    assert(!f.calls.some(call => call.method === 'PATCH'), 'journal failure must stop before updating the remote branch');
+    assert.equal(f.head(), baseline);
+    assert.equal(f.engine.state.baseCommitSha, baseline);
+    assert(!f.remote()['upload.md']);
+    f.adapter.write = write;
+    await f.engine.execute(await f.engine.preview());
+    assert.equal(f.remote()['upload.md'].sha, hash(Buffer.from('local upload')));
+  }
+  // A same-instance retry cannot mutate files while its application checkpoint cannot be persisted.
+  {
+    const f = await fixture({ 'note.md': 'base' }, { 'note.md': 'base' });
+    await align(f);
+    const baseline = f.engine.state.baseCommitSha, write = f.adapter.write, binary = f.adapter.writeBinary, remove = f.adapter.remove;
+    f.cloudEdit('note.md', 'new cloud');
+    const plan = await f.engine.preview();
+    let mutations = 0, journalWrites = 0;
+    f.adapter.writeBinary = async (...args) => { mutations++; return binary(...args); };
+    f.adapter.remove = async (...args) => { mutations++; return remove(...args); };
+    f.adapter.write = async (path, text) => {
+      if (path.startsWith(f.engine.statePath) && JSON.parse(text).state?.pending && ++journalWrites > 2) throw Error('fixture journal unavailable');
+      return write(path, text);
+    };
+    await assert.rejects(f.engine.execute(plan), /fixture journal unavailable/);
+    assert((await readStoredState(f.adapter, f.engine.statePath)).pending, 'the original journal was durable before the application checkpoint failed');
+    await assert.rejects(f.engine.preview(), /fixture journal unavailable/);
+    assert.equal(mutations, 0, 'neither initial execute nor same-instance recovery may mutate files without a durable checkpoint');
+    assert.equal(f.local.get('note.md').bytes.toString(), 'base');
+    assert.equal(f.engine.state.baseCommitSha, baseline);
+    f.adapter.write = write;
+    await f.engine.preview();
+    assert.equal(f.local.get('note.md').bytes.toString(), 'new cloud');
+    assert.equal(f.engine.state.pending, undefined);
+  }
+  // A lost PATCH response is recovered from the persisted transaction, without another PATCH.
+  {
+    const f = await fixture({ 'note.md': 'base' }, { 'note.md': 'base' });
+    await align(f);
+    const baseline = f.engine.state.baseCommitSha;
+    await f.adapter.write('upload.md', 'local upload'); f.engine.event('create', 'upload.md');
+    f.cloudEdit('download.md', 'fixed cloud bytes');
+    const plan = await f.engine.preview(), request = globalThis.githubRequest;
+    globalThis.githubRequest = async value => {
+      const response = await request(value);
+      if (value.method === 'PATCH') throw Error('fixture accepted PATCH response lost');
+      return response;
+    };
+    try { await assert.rejects(f.engine.execute(plan), /fixture accepted PATCH response lost/); }
+    finally { globalThis.githubRequest = request; }
+    const target = f.head();
+    assert.notEqual(target, baseline);
+    assert.equal(f.engine.state.baseCommitSha, baseline);
+    assert.equal((await readStoredState(f.adapter, f.engine.statePath)).pending.commit, target);
+    assert(!f.local.has('download.md'));
+    const patches = f.calls.filter(call => call.method === 'PATCH').length;
+    const restarted = new MobileGithub(f.adapter, '.obsidian', 'simple-link', () => f.options, () => {});
+    const recovered = await restarted.preview();
+    assert.equal(restarted.state.baseCommitSha, target);
+    assert.equal(restarted.state.pending, undefined);
+    assert.equal(f.local.get('download.md').bytes.toString(), 'fixed cloud bytes');
+    assert.equal(f.calls.filter(call => call.method === 'PATCH').length, patches);
+    assert.equal(recovered.uploads.length + recovered.downloads.length + recovered.localDeletes.length + recovered.remoteDeletes.length, 0);
+  }
+  // Failure to persist the final baseline retains the journal and the old common baseline.
+  {
+    const f = await fixture({ 'note.md': 'base' }, { 'note.md': 'base' });
+    await align(f);
+    const baseline = f.engine.state.baseCommitSha, oldBase = structuredClone(f.engine.state.base), write = f.adapter.write;
+    f.cloudEdit('note.md', 'new cloud');
+    const target = f.head(), plan = await f.engine.preview();
+    f.adapter.write = async (path, text) => {
+      if (path.startsWith(f.engine.statePath)) {
+        const state = JSON.parse(text).state;
+        if (state && state.baseCommitSha === target && !state.pending) throw Error('fixture final baseline persistence failure');
+      }
+      return write(path, text);
+    };
+    await assert.rejects(f.engine.execute(plan), /fixture final baseline persistence failure/);
+    assert.equal(f.engine.state.baseCommitSha, baseline);
+    assert.deepEqual(f.engine.state.base, oldBase);
+    assert(f.engine.state.pending);
+    const stored = await readStoredState(f.adapter, f.engine.statePath);
+    assert.equal(stored.baseCommitSha, baseline); assert(stored.pending);
+    assert.equal(f.local.get('note.md').bytes.toString(), 'new cloud');
+    f.adapter.write = write;
+    const restarted = new MobileGithub(f.adapter, '.obsidian', 'simple-link', () => f.options, () => {});
+    await restarted.preview();
+    assert.equal(restarted.state.baseCommitSha, target);
+    assert.equal(restarted.state.pending, undefined);
+    assert.equal(f.local.get('note.md').bytes.toString(), 'new cloud');
+  }
+  // Scope changes while a blob is in flight cannot write or advance an old transaction.
+  for (const changedScope of ['branch', 'repoUrl']) {
+    const f = await fixture({ 'note.md': 'base' }, { 'note.md': 'base' });
+    await align(f);
+    const baseline = f.engine.state.baseCommitSha;
+    f.cloudEdit('note.md', 'cloud edit');
+    const original = f.options[changedScope];
+    const plan = await f.engine.preview(), request = globalThis.githubRequest;
+    globalThis.githubRequest = async value => {
+      const response = await request(value);
+      if (value.url.includes('/git/blobs/')) f.options[changedScope] = changedScope === 'branch' ? 'other' : 'https://github.com/example/other.git';
+      return response;
+    };
+    try { await assert.rejects(f.engine.execute(plan), /范围|变化|仓库/); }
+    finally { globalThis.githubRequest = request; }
+    assert.equal(f.local.get('note.md').bytes.toString(), 'base');
+    assert.equal(f.engine.state.baseCommitSha, baseline);
+    assert(f.engine.state.pending);
+    assert(!f.calls.some(call => call.path.includes('/repos/example/other/git/blobs/')), 'scope switch cannot request the old transaction blob from a different repository');
+    f.options[changedScope] = original;
+    await f.engine.preview();
+    assert.equal(f.local.get('note.md').bytes.toString(), 'cloud edit');
+    assert.equal(f.engine.state.baseCommitSha, f.head());
+    assert.equal(f.engine.state.pending, undefined);
+  }
   // Interrupted multi-file downloads retain a durable guard and resume before
   // interpreting absent local files as deletions, including after a restart.
   {
@@ -411,6 +719,60 @@ try {
     assert.equal((await readStoredState(f.adapter, restarted.statePath)).pending, undefined);
     assert.equal(JSON.parse(await f.adapter.read(restarted.statePath)).downloadVerification, undefined);
   }
+  // Recovery finishes its fixed SHA target before a later preview offers descendant edits.
+  {
+    const f = await fixture({ 'base.md': 'base' }, { 'base.md': 'base' });
+    await align(f);
+    const baseline = f.engine.state.baseCommitSha;
+    f.cloudEdit('a.md', 'a-v1'); f.cloudEdit('b.md', 'b-v1');
+    const target = f.head(), shaA = f.remote()['a.md'].sha, shaB = f.remote()['b.md'].sha;
+    f.fail('b.md');
+    await assert.rejects(f.engine.execute(await f.engine.preview()), /disk failure/);
+    assert.equal(f.local.get('a.md').bytes.toString(), 'a-v1');
+    assert.equal(f.engine.state.baseCommitSha, baseline);
+    assert.equal(f.engine.state.pending.commit, target);
+    const beforeA = f.calls.filter(call => call.path === '/git/blobs/' + shaA).length;
+    f.cloudEdit('a.md', 'a-v2'); f.cloudEdit('b.md', 'b-v2');
+    const descendant = f.head(), newerShaB = f.remote()['b.md'].sha;
+    f.fail('');
+    const restartStart = f.calls.length;
+    const restarted = new MobileGithub(f.adapter, '.obsidian', 'simple-link', () => f.options, () => {});
+    const next = await restarted.preview();
+    assert.equal(restarted.state.baseCommitSha, target, 'recovery confirms the original target, not its descendant');
+    assert.notEqual(target, descendant);
+    assert.equal(restarted.state.pending, undefined);
+    assert.equal(f.local.get('a.md').bytes.toString(), 'a-v1');
+    assert.equal(f.local.get('b.md').bytes.toString(), 'b-v1');
+    assert.equal(f.calls.filter(call => call.path === '/git/blobs/' + shaA).length, beforeA, 'already completed blob is not downloaded again');
+    assert(f.calls.slice(restartStart).some(call => call.path === '/git/blobs/' + shaB), 'incomplete file resumes with its fixed transaction SHA');
+    assert(!f.calls.slice(restartStart).some(call => call.path === '/git/blobs/' + newerShaB));
+    assert.deepEqual(next.downloads.sort(), ['a.md', 'b.md'], 'descendant edits remain a fresh, separate sync plan');
+    await restarted.execute(next);
+    assert.equal(restarted.state.baseCommitSha, descendant);
+    assert.equal(f.local.get('b.md').bytes.toString(), 'b-v2');
+  }
+  // A rewritten remote history cannot be treated as a descendant of the pending target.
+  for (const history of ['behind', 'diverged']) {
+    const f = await fixture({ 'note.md': 'base' }, { 'note.md': 'base' });
+    await align(f);
+    const baseline = f.engine.state.baseCommitSha;
+    f.cloudEdit('note.md', 'pending cloud'); f.fail('note.md');
+    await assert.rejects(f.engine.execute(await f.engine.preview()), /disk failure/);
+    const target = f.engine.state.pending.commit;
+    f.fail(''); f.cloudEdit('other.md', 'rewritten remote history');
+    const request = globalThis.githubRequest;
+    let mutations = 0;
+    f.adapter.writeBinary = async () => { mutations++; throw Error('unexpected local write'); };
+    f.adapter.remove = async () => { mutations++; throw Error('unexpected local remove'); };
+    globalThis.githubRequest = async value => value.url.includes(`/compare/${target}...`)
+      ? { status: 200, headers: {}, json: { status: history, files: [] } } : request(value);
+    try { await assert.rejects(f.engine.preview(), /远端历史不一致/); }
+    finally { globalThis.githubRequest = request; }
+    assert.equal(mutations, 0);
+    assert.equal(f.local.get('note.md').bytes.toString(), 'base');
+    assert.equal(f.engine.state.baseCommitSha, baseline);
+    assert.equal(f.engine.state.pending.commit, target);
+  }
   // Even if an existing base lists a missing file, an unfinished download guard
   // makes that absence a download requirement, never an automatic cloud delete.
   {
@@ -437,17 +799,18 @@ try {
     f.cloudEdit('lost.md', 'must be downloaded');
     const originalWrite = f.adapter.writeBinary;
     f.adapter.writeBinary = async (path, bytes) => { if (path !== 'lost.md') await originalWrite(path, bytes); };
-    await assert.rejects(f.engine.execute(await f.engine.preview()), /下载文件缺失/);
+    await assert.rejects(f.engine.execute(await f.engine.preview()), /同步写入结果验证未通过/);
     assert.equal(f.engine.state.baseCommitSha, base);
-    assert.equal(f.engine.state.downloadVerification.phase, 'verifying');
-    assert.equal((await readStoredState(f.adapter, f.engine.statePath)).downloadVerification.phase, 'verifying');
+    assert.equal(f.engine.state.downloadVerification.phase, 'downloading', 'a no-op adapter is rejected before final verification');
+    assert.equal((await readStoredState(f.adapter, f.engine.statePath)).pending.commit, f.head());
+    assert(!f.local.has('lost.md'));
     f.adapter.writeBinary = originalWrite;
     const recovered = await f.engine.preview();
     assert.equal(recovered.remoteDeletes.length, 0);
     assert.equal(f.local.get('lost.md').bytes.toString(), 'must be downloaded');
     assert.equal(f.engine.state.pending, undefined);
   }
-  // Edits following interrupted downloads return to conflict review with the old baseline.
+  // A failed unreceipted write cannot identify later bytes safely, even after an event.
   {
     const f = await fixture({ 'note.md': 'base' }, { 'note.md': 'base' });
     await align(f);
@@ -459,12 +822,24 @@ try {
     f.fail('');
     await f.adapter.write('note.md', 'new local edit');
     f.engine.event('modify', 'note.md');
-    const plan = await f.engine.preview();
-    assert.equal(f.engine.state.pending, undefined);
-    assert.equal(f.engine.state.baseCommitSha, base);
+    const writes = f.calls.filter(call => ['POST', 'PATCH'].includes(call.method)).length;
+    await assert.rejects(f.engine.preview(), /缺少已验证完成记录/);
+    const restarted = new MobileGithub(f.adapter, '.obsidian', 'simple-link', () => f.options, () => {});
+    await assert.rejects(restarted.preview(), /缺少已验证完成记录/);
+    assert.equal(restarted.state.baseCommitSha, base);
+    assert(restarted.state.pending);
+    assert.equal(restarted.needsLocalRecheck, false);
     assert.equal(f.local.get('note.md').bytes.toString(), 'new local edit');
-    assert(plan.conflicts.some(c => c.kind === 'content'));
-    assert(f.engine.state.downloadVerification, 'download guard survives returning to conflict review');
+    const durable = await readStoredState(f.adapter, restarted.statePath);
+    assert.equal(durable.baseCommitSha, base);
+    assert(durable.pending);
+    assert.equal(f.calls.filter(call => ['POST', 'PATCH'].includes(call.method)).length, writes);
+    await f.adapter.write('note.md', 'base');
+    const recovered = await restarted.preview();
+    assert.equal(f.local.get('note.md').bytes.toString(), 'cloud edit');
+    assert.equal(restarted.state.pending, undefined);
+    assert.equal(restarted.needsLocalRecheck, false);
+    assert.equal(recovered.uploads.length + recovered.remoteDeletes.length, 0);
   }
   // Empty vault: import, preserve excluded cloud config, persist baseline/tree and final cache.
   // A startup/bulk event storm must retain the latest state without thousands
@@ -495,7 +870,7 @@ try {
   await batchEngine.save();
   assert.equal(lastSaved.revision, 4001, "failed writes can be retried");
 
-  let f = await fixture({}, { "note.md": "cloud", "copy.md": "cloud", ".obsidian/app.json": "private" });
+  let f = await fixture({}, { "note.md": "cloud", "copy.md": "cloud", ".obsidian/workspace.json": "private" });
   let plan = await f.engine.preview();
   assert.equal(f.engine.state.baseCommitSha, null);
   assert.equal(plan.remoteDeletes.length, 0);
@@ -509,7 +884,7 @@ try {
   assert.equal(f.engine.state.cache["note.md"].sha, f.engine.state.base["note.md"].sha);
   assert.equal(f.calls.filter(c => c.path.startsWith("/zipball/")).length, 0, "first sync does not request an archive");
   assert.equal(f.calls.filter(c => c.path.startsWith("/git/blobs/")).length, 1, "duplicate content is downloaded once");
-  assert(!f.local.has('.obsidian/app.json'), 'excluded settings never reach the vault');
+  assert(!f.local.has('.obsidian/workspace.json'), 'fixed local workspace settings never reach the vault');
   assert.equal(f.calls.filter(c => c.path === "/git/commits").length, 0, "import creates no unnecessary commit");
   const saved = (await readStoredState(f.adapter, f.engine.statePath));
   assert(!("baseTreeSha" in saved));
@@ -699,7 +1074,7 @@ try {
 
   // Mixed first sync: no writes before resolving conflict; one batched text upload.
   f = await fixture({ "shared.md": "local", "local.md": "local-only", "more.md": "other" },
-    { "shared.md": "cloud", "remote.md": "remote-only", ".obsidian/app.json": "private" });
+    { "shared.md": "cloud", "remote.md": "remote-only", ".obsidian/workspace.json": "private" });
   plan = await f.engine.preview();
   assert.equal(plan.conflicts.length, 4);
   await assert.rejects(f.engine.execute(plan), /冲突/);
@@ -708,7 +1083,7 @@ try {
   await f.engine.execute(plan);
   assert.equal(f.remote()["shared.md"].sha, hash(Buffer.from("local")));
   assert.equal(f.local.get("remote.md").bytes.toString(), "remote-only");
-  assert(f.remote()[".obsidian/app.json"]);
+  assert(f.remote()[".obsidian/workspace.json"]);
   assert.equal(f.calls.filter(c => c.path === "/git/trees" && c.method === "POST").length, 1);
   for (const [path, entry] of Object.entries(f.engine.state.base)) assert.equal(f.engine.state.cache[path].sha, entry.sha);
 
@@ -956,7 +1331,12 @@ try {
   console.log("Embedded desktop guide: authorization/check transitions and navigation cancellation passed");
 
   class ReviewElement {
-    constructor(tag = 'div', options = {}) { this.tag = tag; this.text = options.text; this.cls = options.cls ?? ''; this.children = []; this.style = {}; }
+    constructor(tag = 'div', options = {}) { this.tag = tag; this.text = options.text; this.cls = options.cls ?? ''; this.children = []; this.style = {}; this.dataset = {}; }
+    get classList() { return {
+      add: (...names) => { this.cls = [...new Set([...this.cls.split(' '), ...names])].filter(Boolean).join(' '); },
+      remove: (...names) => { this.cls = this.cls.split(' ').filter(name => !names.includes(name)).join(' '); },
+      contains: name => this.cls.split(' ').includes(name)
+    }; }
     createEl(tag, options = {}) { const child = new ReviewElement(tag, options); this.children.push(child); return child; }
     createDiv(options = {}) { return this.createEl('div', options); }
     createSpan(options = {}) { return this.createEl('span', options); }
@@ -977,6 +1357,11 @@ try {
     empty() { for (const child of this.children) { child.parentElement = undefined; child.connected = false; } this.children = []; }
     setText(text) { this.text = text; }
     addEventListener(event, action) { this.events[event] = action; }
+    querySelector(selector) {
+      const match = /^(:scope > )?\.([\w-]+)$/.exec(selector);
+      if (match) return (match[1] ? this.children : this.querySelectorAll('*')).find(node => node.cls.split(' ').includes(match[2])) ?? null;
+      return this.querySelectorAll(selector)[0] ?? null;
+    }
     querySelectorAll(selector) {
       const nodes = this.children.flatMap(child => [child, ...child.querySelectorAll("*")]);
       if (selector === "*") return nodes;
@@ -1034,6 +1419,41 @@ try {
       assert.equal(renders > 0, outcome === "success", "late/failed results must not repaint or advance");
       if (outcome === "failure") assert.equal(button.disabled, false, "failure must allow retry");
     }
+    // The final guide step prepares setup, retries failures, then opens sync separately.
+    for (const alreadyConnected of [false, true]) {
+      const tab = Object.create(SyncSettingsTab.prototype), host = new GuideElement();
+      const options = { repoUrl: 'fixture-repo', branch: 'main', plugins: [], ignorePatterns: [] };
+      let prepared = 0, opened = 0, fail = !alreadyConnected;
+      Object.assign(tab, { settingsHost: host, desktopPage: 'beginner-mobile', lightweightGuideStep: 4,
+        lightweightGuideDraft: options, lightweightGuideVerified: { branch: 'main' }, renderSettings: () => {},
+        app: { vault: { configDir: '.obsidian', adapter: { write: async () => { throw Error('opening guide must not write files'); } } } } });
+      tab.plugin = { manifest: { id: 'simple-one' }, settings: { mobile: { ...options, bound: alreadyConnected },
+        lightweightGuideProgress: { complete: alreadyConnected } },
+        completeLightweightGuide: async () => {
+          prepared++;
+          if (fail) throw Error('fixture preparation failure');
+          tab.plugin.settings.mobile.bound = true;
+          tab.plugin.settings.lightweightGuideProgress.complete = true;
+        }, openSyncView: async () => { opened++; } };
+      const page = host.createDiv();
+      tab.displayLightweightGuideStep(page);
+      const nodes = page.querySelectorAll('*');
+      assert(nodes.some(node => node.name === '完成接入'));
+      assert(!nodes.some(node => node.tag === 'textarea' || /缓存|路径追踪|gitignore.*正文/.test(node.text ?? '')),
+        'final setup only shows connection preparation, without advanced options or rule contents');
+      const button = nodes.find(node => node.tag === 'button' && node.text === (alreadyConnected ? '打开同步' : '准备接入'));
+      assert(button);
+      assert.equal(prepared, 0, 'reopening a completed guide performs no preparation');
+      if (!alreadyConnected) {
+        button.events.click(); await new Promise(resolve => setImmediate(resolve));
+        assert.equal(button.text, '重试接入'); assert.equal(opened, 0);
+        fail = false;
+        button.events.click(); await new Promise(resolve => setImmediate(resolve));
+        assert.equal(button.text, '打开同步'); assert.equal(opened, 0, 'setup completion never opens or starts sync');
+      }
+      button.events.click(); await new Promise(resolve => setImmediate(resolve));
+      assert.equal(opened, 1);
+    }
     // Ignore baseline, rule/tracking acknowledgement and file choices are separate gates.
     {
       const tab = Object.create(SyncSettingsTab.prototype), host = new GuideElement();
@@ -1052,8 +1472,8 @@ try {
       const render = () => { host.empty(); tab.displaySetupPreview(host.createDiv()); return host.querySelectorAll("*"); };
       let nodes = render();
       assert(!nodes.some(node => node.name?.includes("忽略规则基准")));
-      assert.equal(tracking, "rebuild", "default rules apply silently");
-      assert.equal(tab.setupRebuildConfirmed, true);
+      assert.equal(tracking, undefined, "tracking repair requires an explicit choice");
+      assert.equal(tab.setupRebuildConfirmed, false);
       for (const label of ["仅本机", "仅 GitHub", "文件变化"]) {
         const card = nodes.find(node => node.tag === "button" && node.children.some(child => child.text === label));
         assert(card, `${label} is an interactive filter`);
@@ -1064,6 +1484,14 @@ try {
       assert.equal(confirmed, 0, "unresolved file versions block completion");
       choices["note.md"] = "remote";
       await tab.advanceSetupAfterPreview();
+      assert.equal(confirmed, 0, "file choices alone cannot approve removing excluded paths from tracking");
+      const consent = nodes.find(node => node.tag === 'input' && node.events?.change);
+      assert(consent, "tracking migration exposes a confirmation checkbox");
+      consent.checked = true;
+      consent.events.change();
+      assert.equal(tracking, 'rebuild');
+      assert.equal(tab.setupRebuildConfirmed, true);
+      await tab.advanceSetupAfterPreview();
       assert.equal(confirmed, 1);
       assert.equal(tab.setupViewStep, 4);
       preview = { ...preview, trackedExcludedLocal: [], trackedExcludedRemote: [] };
@@ -1071,129 +1499,35 @@ try {
       assert.equal(tracking, undefined, "new inspection recomputes default cleanup");
       assert.equal(tab.setupRebuildConfirmed, false);
     }
-    console.log("Desktop inspection: silent default rules, interactive filters and final version confirmation passed");
+    console.log("Desktop inspection: explicit tracking repair consent, interactive filters and final version confirmation passed");
   } finally {
     GuideEngine.prototype.verifyToken = verifyToken; GuideEngine.prototype.verifyAccess = verifyAccess;
     delete globalThis.guideSetting;
   }
   console.log("Embedded lightweight guide: token/repository transitions, retries and closed-page results passed");
 
-  // The ignore review edits only differing blocks while preserving common rules byte for byte.
-  {
-    const local = "# common\r\ncommon/\r\nlocal-only/\r\n# end\r\n";
-    const remote = "# common\r\ncommon/\r\nremote-only/\r\n# end\r\n";
-    const file = { path: ".gitignore", totalLines: 0, localUpdatedAt: "", remoteUpdatedAt: "", blocks: [] };
-    const modal = new ZoeySyncConflictPreviewModal({}, { editableColumns: true, files: [file], read: async () => ({ local, remote }) });
-    modal.active = true; modal.render = () => {}; modal.close = () => {};
-    await modal.loadFile(file);
-    assert.equal(file.blocks.length, 1);
-    assert.equal(file.blocks[0].local, "local-only/\r\n");
-    assert.equal(file.blocks[0].remote, "remote-only/\r\n");
-    modal.selectBlock(file, 0, "merged");
-    const row = new ReviewElement();
-    modal.renderBlocks(row, file);
-    const block = row.children[0].children.find(node => node.cls.includes("preview__block") && !node.cls.includes("headers"));
-    assert.equal(block.children.filter(node => node.cls.includes("preview__side")).length, 2, "both source columns remain visible during editing");
-    const result = block.children.find(node => node.cls.includes("preview__result"));
-    const editor = result.children.find(node => node.tag === "textarea");
-    editor.value = "local-only/\r\nremote-only/\r\ncustom/\r\n";
-    editor.events.input();
-    let selected;
-    modal.resolve = value => { selected = value; };
-    modal.applyReadyFiles();
-    assert.equal(selected[".gitignore"].choice, "manual");
-    assert.equal(selected[".gitignore"].text, "# common\r\ncommon/\r\nlocal-only/\r\nremote-only/\r\ncustom/\r\n# end\r\n");
-    const same = { ...file, blocks: [] };
-    const identical = new ZoeySyncConflictPreviewModal({}, { files: [same], read: async () => ({ local, remote: local }) });
-    identical.render = () => {};
-    await identical.loadFile(same);
-    assert.equal(same.blocks.length, 0, "identical rules do not create fake differences");
-  }
-  console.log("Ignore diff review: three columns, editable blocks, unchanged rules and identical files passed");
-
-  // Natural wording keeps the exact keep/delete direction for either existing side.
+  // Shared whole-file review preserves the exact keep/delete direction.
   for (const side of ['local', 'remote']) {
     const f = await fixture(side === 'local' ? { 'single.md': 'text' } : {}, side === 'remote' ? { 'single.md': 'text' } : {});
-    const plan = await f.engine.preview();
-    const conflict = plan.conflicts[0];
+    const conflict = (await f.engine.preview()).conflicts[0];
     const file = mobileConflictFile(conflict);
     assert.equal(file.description, side === 'local' ? '文件仅存在于本机' : '文件仅存在于云端');
-    assert.equal(file.keepSide, side);
-    assert.equal(side === 'local' ? file.localChoiceLabel : file.remoteChoiceLabel, side === 'local' ? '上传文件' : '下载文件');
-    assert.equal(side === 'local' ? file.remoteChoiceLabel : file.localChoiceLabel, '删除文件');
-    assert.equal(file.showPaths, false);
-    const review = new ZoeySyncConflictPreviewModal({}, { files: [file], read: async () => ({ local: '', remote: '' }) });
-    const list = new ReviewElement();
-    review.renderFile(list, file);
-    const summary = list.children[0].children[0];
-    assert.equal(summary.children.some(el => el.cls.includes('__times')), false, 'collapsed rows omit repeated paths');
-    const control = summary.children.find(el => el.cls.includes('__choice-control'));
-    const segments = control.children.find(el => el.cls.includes('__segments'));
-    assert(segments.children[0].cls.includes('is-local'));
-    assert(segments.children[1].cls.includes('is-remote'));
-    assert.deepEqual(segments.children.map(el => el.text), side === 'local' ? ['上传文件', '删除文件'] : ['删除文件', '下载文件']);
-    assert(segments.children.every(el => !el.cls.includes('is-keep') && !el.cls.includes('is-delete')));
-    const kept = await f.engine.preview({ [conflict.id]: { choice: file.keepSide } });
+    assert.equal(side === 'local' ? file.remoteMissingLabel : file.localMissingLabel, side === 'local' ? '云端无此文件' : '本地无此文件');
+    const kept = await f.engine.preview({ [conflict.id]: { choice: side } });
     assert.equal((side === 'local' ? kept.uploads : kept.downloads).length, 1);
     const deleted = await f.engine.preview({ [conflict.id]: { choice: side === 'local' ? 'remote' : 'local' } });
     assert.equal((side === 'local' ? deleted.localDeletes : deleted.remoteDeletes).length, 1);
   }
   {
-    const f = await fixture({ 'same.md': 'local content' }, { 'same.md': 'cloud content' });
-    const file = mobileConflictFile((await f.engine.preview()).conflicts[0]);
-    assert.equal(file.description, '文件内容不同');
-    assert.equal(file.showPaths, false);
-  }
-  {
-    const f = await fixture({ 'local.md': 'same' }, { 'cloud.md': 'same' });
-    const file = mobileConflictFile((await f.engine.preview()).conflicts[0]);
-    assert.equal(file.description, '文件内容相同，路径不同');
-    assert.equal(file.localChoiceLabel, '采用本机路径');
-    assert.equal(file.remoteChoiceLabel, '采用云端路径');
-    assert.equal(file.showPaths, true);
-  }
-  // One-sided expansion is a readonly whole-file preview, not a selectable text diff.
-  {
-    const file = { path: 'missing.md', remotePaths: ['missing.md'], mergeable: false,
-      totalLines: 0, localUpdatedAt: '', remoteUpdatedAt: '', blocks: [] };
-    const modal = new ZoeySyncConflictPreviewModal({}, { files: [file], read: async () => ({ local: '', remote: 'existing cloud text' }) });
-    modal.active = true; modal.render = () => {};
-    await modal.loadFile(file);
-    assert.equal(modal.wholeContents.get(file.path).remote, 'existing cloud text');
-    assert.equal(modal.parts.has(file.path), false);
-    assert.equal(modal.getReadyFiles().length, 0, 'expansion alone is not a direction decision');
-    modal.fileChoices.set(file.path, 'local');
-    assert.equal(modal.getReadyFiles().length, 1);
-  }
-  // File stage preserves choices, bulk actions are scoped, and only final confirmation resolves.
-  {
-    const files = [
-      { path: 'cloud-only', reviewStage: 'file', keepSide: 'remote', blocks: [], mergeable: false },
-      { path: 'local-only', reviewStage: 'file', keepSide: 'local', blocks: [], mergeable: false },
-      { path: 'edited', reviewStage: 'content', blocks: [], mergeable: true }
-    ];
+    const files = [{ path: 'cloud-only', localMissingLabel: '本地已删除' }, { path: 'edited' }];
     const review = new ZoeySyncConflictPreviewModal({}, { files, read: async () => ({ local: '', remote: '' }) });
     review.render = () => {}; review.close = () => {};
     let result;
     review.resolve = choices => { result = choices; };
-    assert.equal(review.stage, 'file');
-    assert.equal(review.selectionTone(files[0]), undefined, 'undecided empty blocks have no color');
-    review.fileChoices.set('cloud-only', 'delete');
-    assert.equal(review.selectionTone(files[0]), undefined, 'delete is not a mixed choice');
-    review.clearStageChoices();
-    review.keepAll();
-    assert.equal(review.fileChoices.get('cloud-only'), 'remote');
-    assert.equal(review.fileChoices.get('local-only'), 'local');
-    assert.equal(review.fileChoices.has('edited'), false);
-    review.selectAll('local');
-    review.applyReadyFiles();
-    assert.equal(review.stage, 'content');
-    assert.equal(result, undefined);
-    assert.equal(review.pending.size, 3);
-    review.selectAll('remote');
-    assert.equal(review.fileChoices.get('cloud-only'), 'local');
-    review.applyReadyFiles();
-    assert.deepEqual(result, { 'cloud-only': { choice: 'local' }, 'local-only': { choice: 'local' }, edited: { choice: 'remote' } });
+    review.selectFile(files[0], 'local'); review.applyReadyFiles();
+    assert.equal(result, undefined, 'all files need an explicit decision');
+    review.selectFile(files[1], 'remote'); review.applyReadyFiles();
+    assert.deepEqual(result, { 'cloud-only': { choice: 'local' }, edited: { choice: 'remote' } });
   }
   // Confirming choices executes directly; cancellation/stale snapshots never execute.
   for (const scenario of ['confirm', 'cancel', 'staleLocal', 'staleRemote', 'unchanged', 'failure']) {
@@ -1216,8 +1550,8 @@ try {
       const review = new MobileSyncModal({}, f.engine, plan);
       review.open = () => { throw new Error('redundant confirmation must not open'); };
       if (scenario === 'staleLocal' || scenario === 'staleRemote') {
-        await assert.rejects(review.wait(), /状态发生变化/);
-        assert.deepEqual(stages, ['differences']);
+        await assert.rejects(review.wait(), scenario === 'staleRemote' ? /云端出现新提交/ : error => error.name === 'LocalSyncEdit');
+        assert.deepEqual(stages, scenario === 'staleRemote' ? ['differences', 'execute'] : ['differences']);
         assert.equal(f.engine.state.baseCommitSha, null);
         assert(!f.calls.some(c => ['POST', 'PATCH'].includes(c.method)));
       } else if (scenario === 'cancel') {
@@ -1237,50 +1571,69 @@ try {
       }
     } finally { ZoeySyncConflictPreviewModal.prototype.wait = originalReview; }
   }
-  async function guide(result) {
+  async function guide(outcome) {
     const plugin = Object.create(LinkPlugin.prototype), steps = [];
     const engine = { state: { baseCommitSha: null }, load: async () => {},
-      verifyAccess: async () => { steps.push("verify"); return { branch: "main" }; },
+      verifyToken: async () => { steps.push('token'); return 'fixture-user'; },
+      verifyAccess: async () => { steps.push("verify"); return { branch: "main", login: 'fixture-user' }; },
+      prepareLocalRules: async () => { steps.push('rules'); if (outcome === 'rules-failure') throw Error('fixture rules failure'); },
       bind: async verified => { assert.equal(verified.branch, "main"); steps.push("bind"); return verified; },
-      preview: async () => { assert.equal(plugin.syncing, true); assert.equal(plugin.featureActive, true); steps.push("preview"); return {}; } };
-    plugin.settings = { mobile: {}, enabled: false, desktopGitEnabled: true };
+      preview: async () => { throw Error('setup must not preview or scan files'); },
+      execute: async () => { throw Error('setup must not execute a sync'); } };
+    const nativeComplete = outcome !== 'success';
+    plugin.settings = { errorLogs: [], mobile: { bound: false }, enabled: false, desktopGitEnabled: true, setupComplete: nativeComplete, lastSyncAt: 123 };
     plugin.host = { app: {} }; plugin.desktopGitQueue = Promise.resolve();
+    plugin.syncing = false;
     plugin.getMobileGithub = () => engine;
     plugin.deactivateFeature = () => { plugin.featureActive = false; };
     plugin.activateFeature = () => { plugin.featureActive = true; };
-    plugin.saveSettings = async () => { steps.push("save"); };
+    let saveFailure = outcome === 'save-failure';
+    plugin.saveSettings = async () => { steps.push("save"); if (saveFailure) { saveFailure = false; throw Error('fixture save failure'); } };
     plugin.mobileHost = () => ({ save: async () => {} });
     plugin.refreshSyncView = async () => {
       assert.equal(plugin.syncing, false);
       assert.equal(plugin.getSyncActivity(), undefined);
     };
     plugin.setStatus = text => { plugin.lastStatus = text; };
-    plugin.recordSuccess = async () => { assert(engine.state.baseCommitSha); steps.push("success"); };
-    MobileSyncModal.prototype.wait = async function () {
-      steps.push("review");
-      if (result === "fail") throw new Error("simulated sync failure");
-      if (result) engine.state.baseCommitSha = "aligned";
-      return result;
-    };
-    if (result === true) {
-      await plugin.completeLightweightGuide({ repoUrl: "fixture", plugins: [], ignorePatterns: [] });
-      assert(plugin.settings.lastSyncAt);
-      assert(steps.indexOf("review") < steps.indexOf("success"));
+    plugin.recordSuccess = async context => { assert.equal(context, '轻量接入', 'setup must not record a completed sync'); };
+    plugin.runSync = async () => { throw Error('setup must not run a sync'); };
+    const oldWait = MobileSyncModal.prototype.wait;
+    MobileSyncModal.prototype.wait = async () => { throw Error('setup must not open sync review'); };
+    const options = { repoUrl: "fixture", plugins: [], ignorePatterns: [] };
+    try {
+      if (outcome === 'success') {
+        await plugin.completeLightweightGuide(options);
+      } else {
+        await assert.rejects(plugin.completeLightweightGuide(options), outcome === 'rules-failure' ? /fixture rules failure/ : /fixture save failure/);
+        assert(!plugin.settings.lightweightGuideProgress?.complete, 'failed preparation/save must not claim setup completion');
+        if (outcome === 'rules-failure') {
+          assert.equal(plugin.settings.mobile.bound, false, 'rules failure must not bind the account');
+          outcome = 'success';
+        }
+        await plugin.completeLightweightGuide(options);
+      }
+      assert.equal(plugin.settings.lastSyncAt, 123, 'setup preserves the last real sync time');
+      assert.equal(engine.state.baseCommitSha, null, 'setup requires no first-sync baseline');
+      assert.equal(plugin.settings.lightweightGuideProgress.complete, true);
+      assert.equal(plugin.settings.mobile.bound, true);
       assert.equal(plugin.settings.enabled, true);
       assert.equal(plugin.settings.desktopGitEnabled, false);
-    } else {
-      await assert.rejects(plugin.completeLightweightGuide({ repoUrl: "fixture", plugins: [], ignorePatterns: [] }),
-        result === "fail" ? /sync failure/ : /接入尚未完成/);
-      assert(!steps.includes("success"));
-      assert.equal(engine.state.baseCommitSha, null);
-      assert.equal(plugin.settings.mobile.bound, true, "connection remains available for retry");
-    }
+      assert.equal(plugin.settings.setupComplete, nativeComplete, 'native setup completion stays independent');
+      const completed = structuredClone(plugin.settings.lightweightGuideProgress);
+      let syncErrors = 0;
+      plugin.useLightweightSync = () => true;
+      plugin.recordError = async () => { syncErrors++; };
+      await plugin.syncNow(true);
+      assert.equal(syncErrors, 1, 'the later manual sync fails through its own error path');
+      assert.deepEqual(plugin.settings.lightweightGuideProgress, completed, 'later sync failures cannot undo completed setup');
+      assert.equal(plugin.settings.mobile.bound, true);
+    } finally { MobileSyncModal.prototype.wait = oldWait; }
     assert.equal(plugin.syncing, false);
     assert.equal(plugin.switchingSyncMode, false);
   }
   {
     const plugin = Object.create(LinkPlugin.prototype);
-    plugin.settings = { mobile: { bound: true, token: 'keep-token', repoUrl: 'keep-repo' } };
+    plugin.settings = { errorLogs: [], mobile: { bound: true, token: 'keep-token', repoUrl: 'keep-repo' } };
     plugin.host = { app: {} };
     let resets = 0;
     plugin.getMobileGithub = () => ({ restartSetup: async () => { resets++; return true; } });
@@ -1297,9 +1650,9 @@ try {
     assert.equal(plugin.settings.mobile.repoUrl, 'keep-repo');
     assert.equal(plugin.switchingSyncMode, false);
   }
-  await guide(true);
-  await guide(false);
-  await guide("fail");
+  await guide('success');
+  await guide('rules-failure');
+  await guide('save-failure');
   {
     const cloud = Object.fromEntries(Array.from({ length: 120 }, (_, i) => [`cloud/${i}.md`, `cloud ${i}`]));
     const f = await fixture({}, cloud);
@@ -1321,24 +1674,201 @@ try {
     for (const path of Object.keys(cloud)) assert(f.local.has(path));
   }
   console.log('First sync uses per-file API downloads without an archive');
-  for (const strategy of ['merge', 'local', 'remote', 'custom', 'cancel', 'cancel-confirm']) {
-    const f = await fixture({ 'local.md':'local', 'same.md':'local version' }, { 'remote.md':'remote', 'same.md':'remote version' });
-    const stages=[];
+  // An established baseline executes directly, with review only for real conflicts.
+  for (const scenario of ['ordinary', 'conflict', 'cancel-conflict', 'retry-execute']) {
+    const f = await fixture({ 'note.md': 'base' }, { 'note.md': 'base' });
+    await align(f);
+    const baseline = f.engine.state.baseCommitSha;
+    await f.adapter.write('note.md', 'local edit'); f.engine.event('modify', 'note.md');
+    if (scenario.includes('conflict')) f.cloudEdit('note.md', 'remote edit');
+    const stages = [], execute = f.engine.execute.bind(f.engine);
+    let fail = scenario === 'retry-execute';
+    f.engine.execute = async plan => { stages.push('execute'); if (fail) throw Error('fixture execute failure'); return execute(plan); };
+    const modal = async () => new MobileSyncModal({}, f.engine, await f.engine.preview(), async live => {
+      stages.push('review');
+      return scenario === 'cancel-conflict' ? null : Object.fromEntries(live.files.map(file => [file.path, { choice: 'remote' }]));
+    }, {
+      strategy: async () => assert.fail('an established baseline must not ask for initial strategy'),
+      confirm: async () => assert.fail('ordinary edits and explicit conflict choices need no extra confirmation'),
+      transfer: async () => assert.fail('daily API sync must not reopen transfer setup')
+    });
+    if (fail) {
+      const successes = f.timings.filter(timing => timing.context === '轻量执行耗时' && timing.status === 'success').length;
+      await assert.rejects(mobileFlowWait.call(await modal()), /fixture execute failure/);
+      assert.equal(f.engine.state.baseCommitSha, baseline);
+      assert.equal(f.timings.filter(timing => timing.context === '轻量执行耗时' && timing.status === 'success').length, successes);
+      fail = false;
+      assert.equal(await mobileFlowWait.call(await modal()), true);
+      assert.deepEqual(stages, ['execute', 'execute']);
+    } else {
+      assert.equal(await mobileFlowWait.call(await modal()), scenario !== 'cancel-conflict');
+      assert.deepEqual(stages, scenario === 'ordinary' ? ['execute'] : scenario === 'conflict' ? ['review', 'execute'] : ['review']);
+      if (scenario === 'cancel-conflict') assert.equal(f.engine.state.baseCommitSha, baseline);
+    }
+  }
+  // The manual sync caller records success only after execution and can retry a failure.
+  {
+    const f = await fixture({ 'note.md': 'base' }, { 'note.md': 'base' });
+    await align(f);
+    await f.adapter.write('note.md', 'edited'); f.engine.event('modify', 'note.md');
+    const plugin = Object.create(LinkPlugin.prototype), outcomes = [];
+    Object.assign(plugin, { host: { app: {} }, syncing: false, switchingSyncMode: false,
+      settings: { errorLogs: [], enabled: true, mobile: { mode: 'github', bound: true }, lastSyncAt: 123 },
+      useLightweightSync: () => true, getMobileGithub: () => f.engine,
+      lightweightFlow: () => ({ strategy: async () => assert.fail('retry is not initial setup'),
+        confirm: async () => assert.fail('ordinary retry needs no confirmation'), transfer: async () => {} }),
+      setStatus: () => {}, saveSettings: async () => {}, refreshSyncView: async () => {},
+      recordError: async () => outcomes.push('error'), recordSuccess: async () => outcomes.push('success') });
+    const execute = f.engine.execute.bind(f.engine);
+    f.engine.execute = async () => { throw Error('fixture execute failure'); };
+    await plugin.syncNow(true);
+    assert.deepEqual(outcomes, ['error']);
+    assert.equal(plugin.settings.lastSyncAt, 123);
+    f.engine.execute = execute;
+    await plugin.syncNow(true);
+    assert.deepEqual(outcomes, ['error', 'success']);
+    assert.equal(f.remote()['note.md'].sha, hash(Buffer.from('edited')));
+  }
+  // A reliable baseline propagates unchanged deletions in either direction, manually or automatically.
+  for (const deletedAt of ['local', 'remote']) for (const automatic of [false, true]) {
+    const f = await fixture({ 'keep.md': 'keep', 'remove.md': 'base' }, { 'keep.md': 'keep', 'remove.md': 'base' });
+    await align(f);
+    if (deletedAt === 'local') { await f.adapter.remove('remove.md'); f.engine.event('delete', 'remove.md'); }
+    else f.cloudDelete('remove.md');
+    const stages = [], execute = f.engine.execute.bind(f.engine);
+    f.engine.execute = async plan => { stages.push('execute'); assert.equal(plan.conflicts.length, 0);
+      assert((deletedAt === 'local' ? plan.remoteDeletes : plan.localDeletes).includes('remove.md')); return execute(plan); };
+    if (automatic) {
+      const plugin = Object.create(LinkPlugin.prototype), outcomes = [];
+      Object.assign(plugin, { host: { app: {} }, syncing: false, switchingSyncMode: false,
+        settings: { errorLogs: [], enabled: true, mobile: { mode: 'github', bound: true } },
+        useLightweightSync: () => true, getMobileGithub: () => f.engine,
+        setStatus: text => stages.push(text), saveSettings: async () => {}, refreshSyncView: async () => {},
+        recordError: async () => outcomes.push('error'), recordSuccess: async () => outcomes.push('success') });
+      await plugin.syncNow(false);
+      assert.deepEqual(outcomes, ['success'], 'automatic known deletions must not be deferred');
+      assert.equal(stages.filter(stage => stage === 'execute').length, 1);
+    } else {
+      const review = new MobileSyncModal({}, f.engine, await f.engine.preview(), async () => assert.fail('unchanged deletion needs no conflict review'), {
+        strategy: async () => assert.fail('daily deletion must not ask for initial strategy'),
+        confirm: async () => assert.fail('baseline-proven deletion needs no extra confirmation'),
+        ready: async plan => { stages.push('ready'); assert((deletedAt === 'local' ? plan.remoteDeletes : plan.localDeletes).includes('remove.md')); },
+        transfer: async () => assert.fail('daily deletion needs no transfer setup')
+      });
+      assert.equal(await mobileFlowWait.call(review), true);
+      assert.deepEqual(stages, ['ready', 'execute']);
+    }
+    assert.equal(f.local.has('remove.md'), false);
+    assert.equal(!!f.remote()['remove.md'], false);
+  }
+  // Delete/modify remains a review decision; choosing delete does not open a second confirmation.
+  for (const deletedAt of ['local', 'remote']) for (const scenario of ['delete', 'cancel', 'stale-scope', 'stale-ref']) {
+    const f = await fixture({ 'note.md': 'base' }, { 'note.md': 'base' });
+    await align(f);
+    const baseline = f.engine.state.baseCommitSha;
+    if (deletedAt === 'local') { await f.adapter.remove('note.md'); f.engine.event('delete', 'note.md'); f.cloudEdit('note.md', 'remote edit'); }
+    else { f.cloudDelete('note.md'); await f.adapter.write('note.md', 'local edit'); f.engine.event('modify', 'note.md'); }
+    const stages = [], execute = f.engine.execute.bind(f.engine), plan = await f.engine.preview();
+    assert.equal(plan.conflicts.length, 1);
+    f.engine.execute = async next => { stages.push('execute'); return execute(next); };
+    if (scenario === 'cancel') {
+      const plugin = Object.create(LinkPlugin.prototype);
+      Object.assign(plugin, { host: { app: {} }, syncing: false, switchingSyncMode: false,
+        settings: { errorLogs: [], enabled: true, mobile: { mode: 'github', bound: true } },
+        useLightweightSync: () => true, getMobileGithub: () => f.engine,
+        setStatus: () => {}, saveSettings: async () => {}, refreshSyncView: async () => {},
+        recordError: async () => assert.fail('delete/modify should be deferred, not treated as an error'),
+        recordSuccess: async () => assert.fail('automatic sync cannot resolve delete/modify') });
+      await plugin.syncNow(false);
+      assert.deepEqual(stages, [], 'automatic delete/modify waits for manual review');
+    }
+    const review = new MobileSyncModal({}, f.engine, plan, async live => {
+      stages.push('review');
+      return scenario === 'cancel' ? null : Object.fromEntries(live.files.map(file => [file.path, { choice: 'delete' }]));
+    }, { strategy: async () => assert.fail('delete/modify has a baseline'),
+      confirm: async () => assert.fail('the explicit delete choice is the confirmation'),
+      ready: async () => {
+        stages.push('ready');
+        if (scenario === 'stale-scope') await f.adapter.write('.gitignore', await f.adapter.read('.gitignore') + '\nexcluded/\n');
+        if (scenario === 'stale-ref') f.cloudEdit('other.md', 'new remote commit');
+      }, transfer: async () => assert.fail('delete review has no download setup') });
+    if (scenario.startsWith('stale-')) {
+      await assert.rejects(mobileFlowWait.call(review), /变化|过期|新提交/);
+      assert.equal(f.engine.state.baseCommitSha, baseline);
+      assert(!f.calls.some(call => ['POST', 'PATCH'].includes(call.method)));
+    } else {
+      assert.equal(await mobileFlowWait.call(review), scenario === 'delete');
+      assert.deepEqual(stages, scenario === 'delete' ? ['review', 'ready', 'execute'] : ['review']);
+      if (scenario === 'cancel') {
+        assert.equal(f.engine.state.baseCommitSha, baseline);
+        assert.equal(f.local.has('note.md'), deletedAt === 'remote');
+        assert.equal(!!f.remote()['note.md'], deletedAt === 'local');
+      } else { assert(!f.local.has('note.md')); assert(!f.remote()['note.md']); }
+    }
+  }
+  // Without a baseline, automatic sync cannot infer deletion from an absent copy.
+  {
+    const f = await fixture({}, { 'unpaired.md': 'remote only' });
+    const plugin = Object.create(LinkPlugin.prototype);
+    Object.assign(plugin, { host: { app: {} }, syncing: false, switchingSyncMode: false,
+      settings: { errorLogs: [], enabled: true, mobile: { mode: 'github', bound: true } },
+      useLightweightSync: () => true, getMobileGithub: () => f.engine,
+      setStatus: () => {}, saveSettings: async () => {}, refreshSyncView: async () => {},
+      recordError: async () => assert.fail('first alignment should be deferred'),
+      recordSuccess: async () => assert.fail('automatic sync cannot invent the first baseline') });
+    f.engine.execute = async () => assert.fail('no baseline requires explicit first alignment');
+    await plugin.syncNow(false);
+    assert.equal(f.engine.state.baseCommitSha, null);
+    assert(!f.local.has('unpaired.md'));
+    assert(f.remote()['unpaired.md']);
+  }
+  // Identical first snapshots establish a baseline without inventing a policy question.
+  for (const contents of [{}, { 'same.md': 'identical' }]) {
+    const f = await fixture(contents, contents), stages = [], execute = f.engine.execute.bind(f.engine);
+    f.engine.execute = async plan => { stages.push('execute'); return execute(plan); };
+    const review = new MobileSyncModal({}, f.engine, await f.engine.preview(), async () => assert.fail('identical first snapshots have no differences to review'), {
+      strategy: async () => assert.fail('identical first snapshots need no strategy'),
+      confirm: async () => assert.fail('identical first snapshots need no confirmation'),
+      ready: async () => { stages.push('ready'); }, transfer: async () => assert.fail('identical snapshots need no transfer') });
+    assert.equal(await mobileFlowWait.call(review), true);
+    assert.deepEqual(stages, ['ready', 'execute']);
+    assert.equal(f.engine.state.baseCommitSha, f.head());
+    assert(!f.calls.some(call => ['POST', 'PATCH'].includes(call.method)));
+  }
+  for (const strategy of ['merge', 'merge-remote', 'merge-local', 'local', 'remote', 'cancel', 'cancel-confirm']) {
+    const f = await fixture({ 'local.md':'local', 'same.md':'local version', 'local-path.md':'identical content' },
+      { 'remote.md':'remote', 'same.md':'remote version', 'remote-path.md':'identical content' });
+    const stages=[], execute = f.engine.execute.bind(f.engine);
+    f.engine.execute = async plan => { stages.push('execute'); return execute(plan); };
     const review = new MobileSyncModal({}, f.engine, await f.engine.preview(),
-      async live => Object.fromEntries(live.files.map(file=>[file.path,{choice:file.path==='new:remote.md'?'remote':'local'}])), {
-        strategy:async()=>{stages.push('strategy');return strategy==='cancel'?null:strategy==='cancel-confirm'?'merge':strategy;},
-        confirm:async plan=>{stages.push('confirm');if(strategy==='remote')assert(plan.localDeletes.includes('local.md'));return strategy!=='cancel-confirm';},
+      async live => {
+        stages.push('review');
+        assert(!strategy.startsWith('merge-'), 'a preferred side resolves differences without manual review');
+        if (strategy === 'merge') assert.deepEqual(live.files.map(file => file.path), ['new:same.md']);
+        return Object.fromEntries(live.files.map(file=>[file.path,{choice:'local'}]));
+      }, {
+        strategy:async()=>{stages.push('strategy');return strategy==='cancel'?null:strategy==='cancel-confirm'?'remote':strategy;},
+        confirm:async()=>{assert(['local', 'remote', 'cancel-confirm'].includes(strategy), 'only rebuilding one side needs its deletion summary');stages.push('confirm');return strategy!=='cancel-confirm';},
         transfer:async()=>{stages.push('transfer');}
       });
     const result=await mobileFlowWait.call(review);
     if(strategy==='cancel'||strategy==='cancel-confirm') {
       assert.equal(result,false);assert(!f.calls.some(call=>['POST','PATCH'].includes(call.method)));
       assert.equal(f.engine.state.baseCommitSha,null);
+      assert.deepEqual(stages, strategy === 'cancel' ? ['strategy'] : ['strategy', 'confirm']);
     } else {
-      assert.equal(result,true);assert.deepEqual(stages,['strategy','confirm']);
+      assert.equal(result,true);assert.deepEqual(stages, strategy === 'merge' ? ['strategy','review','execute'] : ['local', 'remote'].includes(strategy) ? ['strategy','confirm','execute'] : ['strategy','execute']);
       if(strategy==='remote') {assert(!f.local.has('local.md'));assert.equal(f.local.get('same.md').bytes.toString(),'remote version');}
       if(strategy==='local') {assert(!f.remote()['remote.md']);assert.equal(f.local.has('remote.md'),false);}
-      if(strategy==='merge') {assert(f.local.has('local.md')&&f.local.has('remote.md'));}
+      if(['merge', 'merge-remote', 'merge-local'].includes(strategy)) {
+        for (const path of ['local.md', 'remote.md', 'local-path.md', 'remote-path.md']) {
+          assert(f.local.has(path), `${strategy} retains both sides' files locally: ${path}`);
+          assert(f.remote()[path], `${strategy} retains both sides' files remotely: ${path}`);
+        }
+        const expected = strategy === 'merge-remote' ? 'remote version' : 'local version';
+        assert.equal(f.local.get('same.md').bytes.toString(), expected);
+        assert.equal(f.remote()['same.md'].sha, hash(Buffer.from(expected)));
+      }
     }
   }
   {
@@ -1346,11 +1876,11 @@ try {
     const stages = [];
     const review = new MobileSyncModal({}, f.engine, await f.engine.preview(), undefined, {
       strategy: async () => { stages.push('strategy'); return 'merge'; },
-      confirm: async () => { stages.push('confirm'); return true; },
+      confirm: async () => assert.fail('fully resolved merge policy must execute directly'),
       transfer: async () => { stages.push('transfer'); }
     });
     assert.equal(await mobileFlowWait.call(review), true);
-    assert.deepEqual(stages, ['strategy', 'confirm']);
+    assert.deepEqual(stages, ['strategy']);
     assert.equal(f.engine.downloadTask, undefined);
     assert.equal(f.calls.filter(c => c.path.startsWith('/git/blobs/')).length, 101);
     assert.equal(f.calls.filter(c => c.path.startsWith('/zipball/')).length, 0);
@@ -1368,9 +1898,13 @@ try {
     };
     f.engine.state.baseCommitSha = null;
     await f.engine.save();
-    const restored = new MobileGithub(f.adapter, '.obsidian', 'simple-link', () => f.options, () => {});
+    const restored = new MobileGithub(f.adapter, '.obsidian', 'simple-link', () => f.options, () => {},
+      async (context, status, message) => { f.timings.push({ context, status, message }); }, () => true);
     await restored.load();
     await restored.resumeAutomaticDownload();
+    assert.equal(f.timings.at(-1).context, '轻量恢复耗时');
+    assert.equal(f.timings.at(-1).status, 'success');
+    for (const label of ['保存恢复记录', '核对远端', '复核本地', '下载与落盘', '结果验证', '保存基准']) assert(f.timings.at(-1).message.includes(label));
     assert.equal(restored.downloadTask, undefined);
     assert.equal(restored.state.baseCommitSha, completed);
     assert.equal(f.calls.filter(c => c.path.startsWith('/zipball/')).length, 0);
@@ -1380,7 +1914,7 @@ try {
     for(let i=0;i<1001;i++)f.cloudEdit(`daily-${i}.md`,String(i));
     let transfers=0;
     const review=new MobileSyncModal({},f.engine,await f.engine.preview(),undefined,{
-      strategy:async()=>{throw Error('daily sync should not require initial strategy');},confirm:async()=>true,
+      strategy:async()=>{throw Error('daily sync should not require initial strategy');},confirm:async()=>{throw Error('ordinary daily downloads should not require another confirmation');},
       transfer:async()=>{transfers++;}
     });
     assert.equal(await mobileFlowWait.call(review),true);

@@ -3,15 +3,16 @@ import { build } from "esbuild";
 import { JSDOM } from "jsdom";
 import { EditorState } from "@codemirror/state";
 
-async function load(path) {
+async function load(path, obsidian) {
   const output = await build({ entryPoints: [path], bundle: true, format: "cjs", platform: "node", write: false,
-    external: ["@codemirror/state", "@codemirror/view", "@codemirror/language"] });
+    external: ["obsidian", "@codemirror/state", "@codemirror/view", "@codemirror/language"] });
   const { createRequire } = await import("node:module");
   const module = { exports: {} };
-  new Function("require", "module", "exports", output.outputFiles[0].text)(createRequire(import.meta.url), module, module.exports);
+  const require = createRequire(import.meta.url);
+  new Function("require", "module", "exports", output.outputFiles[0].text)(name => name === "obsidian" && obsidian ? obsidian : require(name), module, module.exports);
   return module.exports;
 }
-const { normalizeTypography, TYPOGRAPHY_DEFAULTS, isStandaloneBoldLine } = await load("src/shared/typography.ts");
+const { normalizeTypography, TYPOGRAPHY_DEFAULTS, isStandaloneBoldLine, headingFontFloorPatch } = await load("src/shared/typography.ts");
 const { activeDisplayProfile, displayParameterEnabled } = await load("src/shared/displayProfile.ts");
 const { DEFAULT_SETTINGS } = await load("src/types.ts");
 const displaySettings = structuredClone(DEFAULT_SETTINGS);
@@ -34,7 +35,13 @@ assert.equal(isStandaloneBoldLine("  __独立标题__  "), true);
 assert.equal(isStandaloneBoldLine("**女酒鬼剧情线完成度最高。**后面继续正文。"), false);
 assert.equal(isStandaloneBoldLine("**一段**正文**另一段**"), false);
 assert.deepEqual(normalizeTypography(), TYPOGRAPHY_DEFAULTS);
+assert.equal(TYPOGRAPHY_DEFAULTS.fontSize, 15);
+assert.equal(TYPOGRAPHY_DEFAULTS.letterSpacing, 0.04);
+assert.equal(TYPOGRAPHY_DEFAULTS.latinFont, "Segoe UI");
 assert.equal(normalizeTypography({ fontSize: NaN, lineHeight: Infinity }).fontSize, 15);
+assert.equal(normalizeTypography({ fontSize: 15, letterSpacing: 0.5 }).fontSize, 15, 'stored font size is not migrated to the new default');
+assert.equal(normalizeTypography({ fontSize: 15, letterSpacing: 0.5 }).letterSpacing, 0.04, 'legacy pixel spacing uses the em default');
+assert.equal(normalizeTypography({ letterSpacing: 0.08, letterSpacingUnit: "em" }).letterSpacing, 0.08, 'valid saved em spacing is preserved');
 assert.equal(normalizeTypography({ fontSize: 999 }).fontSize, 36);
 assert.equal("lineLength" in normalizeTypography({ lineLength: 40 }), false);
 assert.equal(normalizeTypography({ enabled: false }).enabled, false);
@@ -105,7 +112,7 @@ assert.equal(document.body.style.getPropertyValue("--file-line-width"), "900px")
 plugin.settings.desktopTypography.enabled = false;
 refresh();
 assert.equal(enabled(), false);
-assert.equal(document.body.style.length, 1);
+assert.equal(document.body.style.getPropertyValue("--simple-typography-line-height"), "", 'disabling typography clears line height without disabling independent font controls');
 assert.equal(document.body.style.getPropertyValue("--file-line-width"), "900px");
 plugin.settings.desktopTypography.paragraphStyle = "indent";
 refresh();
@@ -156,3 +163,138 @@ assert.equal(document.head.querySelector('style'), null, 'unloading restores the
 assert.equal(second.window.document.head.querySelector('style'), null);
 assert(!second.window.document.body.classList.contains('simple-theme-sidebar-background'),'unload clears popout backgrounds');
 console.log('Theme background, reset, popout, validation and cleanup tests passed');
+
+// Things' 0.9em h6 must not fall below a 15px body; other headings retain their size.
+const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
+const blankSizes = () => Object.fromEntries(levels.map(level => [level, '']));
+const themeHeadings = { h1: 30, h2: 25, h3: 22, h4: 18, h5: 15, h6: 13.5 };
+assert.deepEqual(headingFontFloorPatch(blankSizes(), 15, themeHeadings), { h6: '15' });
+assert.deepEqual(headingFontFloorPatch({ ...blankSizes(), h5: '11', h6: '12' }, 15, { ...themeHeadings, h5: 11 }), { h5: '15', h6: '15' });
+assert.deepEqual(headingFontFloorPatch({ ...blankSizes(), h6: '21' }, 15, themeHeadings), {}, 'valid larger explicit choices survive a stale computed-style sample');
+assert.deepEqual(headingFontFloorPatch({ ...blankSizes(), h6: '15' }, 15, themeHeadings), {});
+for (const body of [NaN, Infinity, 0, 9, 97]) assert.deepEqual(headingFontFloorPatch(blankSizes(), body, themeHeadings), {});
+for (const h6 of [NaN, Infinity, 0, -1]) assert.deepEqual(headingFontFloorPatch(blankSizes(), 15, { ...themeHeadings, h6 }), {});
+assert.deepEqual(headingFontFloorPatch(blankSizes(), 15.1234, { ...themeHeadings, h5: 16 }), { h6: '15.124' });
+
+const headingObsidian = new Proxy({ Menu: class {}, Notice: class {}, Modal: class {}, addIcon() {}, setIcon() {}, setTooltip() {} },
+  { get: (target, key) => key in target ? target[key] : class {} });
+const { repairHeadingFontSizes } = await load('src/features/quickFormat.ts', headingObsidian);
+function headingFixture({ mobile = false, body = 15, headings = themeHeadings, sizes = {} } = {}) {
+  const window = new JSDOM('<html><head></head><body></body></html>').window;
+  const doc = window.document, cleanups = [], applied = [];
+  const measured = { body, headings: { ...headings }, calls: 0 };
+  window.HTMLElement.prototype.createEl = function(tag, options = {}) {
+    const element = this.ownerDocument.createElement(tag);
+    if (options.cls) element.className = options.cls;
+    if (options.text) element.textContent = options.text;
+    for (const [key, value] of Object.entries(options.attr ?? {})) element.setAttribute(key, value);
+    this.append(element); return element;
+  };
+  window.HTMLElement.prototype.createDiv = function(options) { return this.createEl('div', options); };
+  doc.adoptedStyleSheets = [];
+  doc.win = {
+    closed: false,
+    getComputedStyle(element) {
+      measured.calls++;
+      assert(element.closest('.workspace-leaf-content[data-type="markdown"].simple-font-size-probe'), 'font probe inherits a real Markdown leaf');
+      assert(element.closest('.markdown-preview-view.markdown-rendered'), 'font probe inherits rendered Markdown styles');
+      return { fontSize: element.tagName === 'P' ? String(measured.body) + 'px' : String(measured.headings[element.tagName.toLowerCase()]) + 'px' };
+    },
+    CSSStyleSheet: class { replaceSync(css) { applied.push(css); } }
+  };
+  const settings = structuredClone(DEFAULT_SETTINGS);
+  settings.desktopTypography.fontSize = 36;
+  settings.enhancements.quickFormat.headingSizes = { ...blankSizes(), ...sizes };
+  settings.enhancements.quickFormat.headingColors.h3 = '#123456';
+  let saves = 0;
+  const fixture = {
+    doc, measured, applied, cleanups, save: async () => {},
+    plugin: { isMobile: mobile, settings, register: fn => cleanups.push(fn),
+      app: { workspace: { iterateAllLeaves() {} } }, saveSettings: async () => { saves++; await fixture.save(); } },
+    get saves() { return saves; },
+    use() { globalThis.document = doc; },
+    dispose() { cleanups.forEach(fn => fn()); window.close(); }
+  };
+  fixture.use(); return fixture;
+}
+const originalDocument = globalThis.document;
+try {
+  {
+    const f = headingFixture();
+    assert.equal(await repairHeadingFontSizes(f.plugin), true);
+    assert.equal(f.saves, 1);
+    assert.deepEqual(f.plugin.settings.enhancements.quickFormat.headingSizes, { ...blankSizes(), h6: '15' });
+    assert.equal(f.plugin.settings.enhancements.quickFormat.headingColors.h3, '#123456');
+    assert.match(f.applied.at(-1), /--h6-size:15px/);
+    assert.equal(f.doc.querySelector('.simple-font-size-probe'), null);
+    assert.equal(await repairHeadingFontSizes(f.plugin), false); assert.equal(f.saves, 1);
+    f.plugin.settings.enhancements.quickFormat.headingSizes.h6 = '11';
+    assert.equal(await repairHeadingFontSizes(f.plugin), false);
+    assert.equal(f.plugin.settings.enhancements.quickFormat.headingSizes.h6, '11', 'a user choice is not repeatedly overridden in the same body-size context');
+    assert.equal(await repairHeadingFontSizes(f.plugin, true), true); assert.equal(f.saves, 2);
+    assert.equal(await repairHeadingFontSizes(f.plugin, true), false); assert.equal(f.saves, 2);
+    f.measured.body = 18;
+    assert.equal(await repairHeadingFontSizes(f.plugin), true);
+    assert.deepEqual(f.plugin.settings.enhancements.quickFormat.headingSizes, { ...blankSizes(), h5: '18', h6: '18' });
+    assert.equal(f.saves, 3); f.dispose();
+  }
+  {
+    const f = headingFixture({ headings: { ...themeHeadings, h6: 16 } });
+    assert.equal(await repairHeadingFontSizes(f.plugin), false); assert.equal(f.saves, 0);
+    f.measured.headings.h6 = 13.5;
+    assert.equal(await repairHeadingFontSizes(f.plugin), false, 'ordinary refresh keeps a completed body-size context');
+    assert.equal(await repairHeadingFontSizes(f.plugin, true), true, 'a theme event remeasures headings even when body size is unchanged');
+    assert.equal(f.plugin.settings.enhancements.quickFormat.headingSizes.h6, '15'); assert.equal(f.saves, 1); f.dispose();
+  }
+  {
+    const f = headingFixture({ mobile: true });
+    const desktop = structuredClone(f.plugin.settings.desktopTypography);
+    assert.equal(await repairHeadingFontSizes(f.plugin), true);
+    assert.equal(f.plugin.settings.enhancements.quickFormat.headingSizes.h6, '15', 'mobile uses the measured theme body, not desktop fontSize 36');
+    assert.deepEqual(f.plugin.settings.desktopTypography, desktop); f.dispose();
+  }
+  {
+    const f = headingFixture({ body: NaN });
+    assert.equal(await repairHeadingFontSizes(f.plugin), false); assert.equal(f.saves, 0);
+    assert.equal(f.doc.querySelector('.simple-font-size-probe'), null); f.dispose();
+  }
+  {
+    const f = headingFixture({ sizes: { h5: '11' }, headings: { ...themeHeadings, h5: 11 } });
+    let reject;
+    f.save = () => new Promise((_resolve, failure) => { reject = failure; });
+    const pending = repairHeadingFontSizes(f.plugin);
+    assert.equal(f.plugin.settings.enhancements.quickFormat.headingSizes.h6, '15');
+    f.plugin.settings.enhancements.quickFormat.headingSizes.h5 = '27';
+    f.plugin.settings.enhancements.quickFormat.headingSizes.h3 = '44';
+    reject(Error('fixture save failure')); await assert.rejects(pending, /fixture save failure/);
+    assert.equal(f.plugin.settings.enhancements.quickFormat.headingSizes.h5, '27', 'failed save preserves a concurrent edit to a patched key');
+    assert.equal(f.plugin.settings.enhancements.quickFormat.headingSizes.h3, '44');
+    assert.equal(f.plugin.settings.enhancements.quickFormat.headingSizes.h6, '', 'only unchanged patch values roll back');
+    assert.equal(f.applied.length, 0);
+    f.save = async () => {};
+    assert.equal(await repairHeadingFontSizes(f.plugin), true, 'failed save can retry the same measured body');
+    assert.equal(f.plugin.settings.enhancements.quickFormat.headingSizes.h5, '27');
+    assert.equal(f.plugin.settings.enhancements.quickFormat.headingSizes.h6, '15'); assert.equal(f.saves, 2); f.dispose();
+  }
+  {
+    const f = headingFixture(); let finish;
+    f.save = () => new Promise(resolve => { finish = resolve; });
+    const pending = repairHeadingFontSizes(f.plugin);
+    assert.equal(await repairHeadingFontSizes(f.plugin, true), false, 'an in-flight valid patch does not trigger a duplicate save on a theme event');
+    assert.equal(f.saves, 1);
+    f.cleanups.forEach(fn => fn()); finish(); await pending;
+    assert.equal(f.applied.length, 0, 'save completion after unload cannot reapply styles'); f.dispose();
+  }
+  {
+    const f = headingFixture(); f.doc.win.closed = true;
+    assert.equal(await repairHeadingFontSizes(f.plugin), false);
+    assert.equal(f.saves, 0); assert.equal(f.measured.calls, 0); f.dispose();
+  }
+  {
+    const f = headingFixture(); let finish;
+    f.save = () => new Promise(resolve => { finish = resolve; });
+    const pending = repairHeadingFontSizes(f.plugin); f.doc.win.closed = true; finish(); await pending;
+    assert.equal(f.applied.length, 0, 'save completion after the window closes cannot apply styles'); f.dispose();
+  }
+} finally { globalThis.document = originalDocument; }
+console.log('Heading font floor: theme measurements, explicit choices, mobile isolation, save retry/concurrent edits and unloaded/closed-window guards passed.');

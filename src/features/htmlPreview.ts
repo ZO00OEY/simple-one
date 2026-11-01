@@ -1,4 +1,5 @@
 import { runAsync } from "../shared/async";
+import DOMPurify from "dompurify";
 import { editorInfoField, Notice } from "obsidian";
 import { confirmAction } from "../shared/confirm";
 import { EditorState, StateEffect, StateField } from "@codemirror/state";
@@ -589,15 +590,11 @@ function normalizeRulePattern(pattern: string): string {
 }
 
 function sanitizeDocument(doc: Document): void {
-  doc.querySelectorAll("script, iframe, object, embed, style, link").forEach((node) => node.remove());
-  doc.querySelectorAll<HTMLElement>("*").forEach((element) => {
-    for (const attr of Array.from(element.attributes)) {
-      const name = attr.name.toLowerCase();
-      const value = attr.value.trim().toLowerCase();
-      if (name.startsWith("on") || value.startsWith("javascript:")) {
-        element.removeAttribute(attr.name);
-      }
-    }
+  DOMPurify.sanitize(doc.documentElement, {
+    IN_PLACE: true, WHOLE_DOCUMENT: true,
+    ADD_TAGS: ["think", "thinking", "think_nya~", "snapshot", "abstract", "todo", "seeds", "events"],
+    FORBID_TAGS: ["script", "iframe", "object", "embed", "style", "link", "meta", "base", "form"],
+    FORBID_ATTR: ["srcdoc"],
   });
 }
 

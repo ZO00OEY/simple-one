@@ -66,13 +66,25 @@ Desktop Git sync obtains credentials through GitHub CLI. If you switch between m
 
 See the [user guide](USAGE.md), [personal files and credentials](docs/private-files.md) and [technical review notes](docs/automated-review-notes.md).
 
-## In 1.0.25
+## What's new in 1.0.29
 
-This release is the verified release baseline for the settings, attachment and reader improvements introduced in 1.0.24. Shared settings groups, checkbox icons and buttons keep the interface consistent. Attachment operations share selection and move workflows. The plugin and default sharing reader share canvas mode, drag-to-pan, mouse-anchored wheel zoom, fit and fullscreen. Published columns retain saved proportions and stack on narrow screens; editing gestures remain in Obsidian.
+- **Editable translation cards:** optional Simple AI integration streams paragraph-aligned translation before you insert it. Choose **T** for normal text or **✓** for a marked card. Cards retain source editing, regeneration and conversion to text; newly saved cards retain their original input for regeneration.
+- **Sharing workspace:** switch libraries with a single-select dropdown beside Publish. Short-click the copy/link toolbar controls to show or hide per-note actions; hold for 0.6 seconds or right-click to choose content and website channels. Git and Q badges distinguish GitHub and EdgeOne links, which open the published note.
+- **Deployment feedback:** GitHub Pages and linked EdgeOne projects are checked together, independently of the selected display channel. Pending deployments are checked once per second after each response, for up to 300 checks. Confirmed results collapse to a compact summary; Refresh checks note changes and deployment status. History opens recent sharing logs; optional performance details record individual stages.
+- **Public reader:** theme colors, a default 15px body size, line/letter/paragraph spacing controls, custom format colors and stacked translation cards. Hover over code blocks, quotes, Callouts or translation cards to copy their contents; touch devices show the button directly. Uses installed system fonts, with no font downloads or embedded font files.
+- **Display and maintenance:** separate desktop/mobile appearance, attachment reference tools, paragraph links, sync recovery and shared performance records.
 
-The settings interface remains primarily Chinese; English and Chinese documentation are maintained together. Existing websites need another publish using the updated default reader to receive the new controls. Keep personal settings and custom templates when upgrading.
+## Quick start
 
-See the [release notes](RELEASE_NOTES.md) and [review record](docs/release-review-1.0.25.md) for scope and limitations. Not every website rule, device or third-party theme combination has been validated.
+1. **Format:** select text in a note to open the floating toolbar. Configure tools under Editing; display and theme settings control font sizes, spacing and format colors.
+2. **Translate (optional):** install and configure a compatible **Simple AI** plugin, enable translation in Simple One's outer Editing settings, then use the adjacent settings button to choose a model, languages and prompt. Generated previews do not change the note until you insert them. Translation sends the selected text to your configured model provider.
+3. **Share:** enable the Sharing tab, authorize GitHub and configure a separate sharing repository. Add selected notes, review them, then click Publish. Optionally associate an EdgeOne project. The library selector, refresh, history, copy and website buttons are in the sharing sidebar.
+4. **Update an existing website:** choose the current default sharing template and publish again. Custom HTML templates are preserved and do not automatically receive reader changes.
+5. **Sync privately:** choose Desktop Git or Lightweight sync on the Sync tab, review scope and differences, then synchronize. Both modes support the optional sync-performance switch; sharing has its own switch.
+
+New installations use 15px body text, 1.7 line height, 0.04em Chinese / 0em English letter spacing, 0.8em paragraph spacing, a 900px note width, 450px image height and 70% popout scale. Existing saved preferences are preserved. The sharing reader uses Microsoft YaHei for Chinese, Segoe UI for Latin text and Times New Roman as a fallback; availability depends on the reader's device.
+
+See the [release notes](RELEASE_NOTES.md) and [review record](docs/release-review-1.0.29.md). Automated tests use mocked services; they do not establish live deployment or model performance across every device and theme.
 
 ## Development and feedback
 

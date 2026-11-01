@@ -1,9 +1,10 @@
-import { setActionIcon } from "../../shared/actionButton";
+import { setActionIcon, styleActionButton } from "../../shared/actionButton";
 import { compactSettingsSection } from "../../shared/settingsLayout";
 import { checkboxRow } from "../../shared/checkboxRow";
 import { addIcon, Component, FuzzySuggestModal, ItemView, MarkdownView, Menu, Modal, Notice, Platform, Setting, setIcon, setTooltip, parseYaml, requireApiVersion, TFile, TFolder, WorkspaceLeaf, type ViewStateResult } from "obsidian";
 import type SimplePlugin from "../../main";
 import { runAsync } from "../../shared/async";
+import { OperationTiming } from "../../shared/operationTiming";
 import { confirmAction } from "../../shared/confirm";
 import { registerMarkdownAction } from "../../shared/markdownAction";
 import { ID_PATTERN, SHARE_FOLDER, emptyManifest, DEFAULT_SHARE_COPY_CONTENT, formatShareContent, newShareId, normalizeShareDirectory, normalizeShareDomainUrl, parseManifest, parsePublishState, pruneWithdrawnDirectories, serializeManifest, shareDomainNoteUrl, shareNotePath, siteUrl, sha256, type ShareCopyContent, type ShareManifest, type PublishState } from "./model";
@@ -26,131 +27,16 @@ type ShareLayout = "list" | "source" | "public";
 interface ShareDisplaySettings { layout: ShareLayout; descending: boolean }
 interface ShareSelection { mode: "move" | "delete"; selected: Set<string>; onChange(): void; onDrop?(ids: string[], directory: string): void; onTrash?(ids: string[]): void; directory?: string; onDirectory?(directory: string): void }
 interface ShareFolder { children: Map<string, ShareFolder>; rows: Row[] }
-interface LocalState { version: 1; site?: string; commit?: string; pendingCommit?: string; published?: PublishState }
-export class ShareDirectoryModal extends Modal {
-  constructor(private feature: ShareFeature, private ids: string[], private completed: () => void) { super(feature.host.app); }
-  onOpen(): void {
-    this.titleEl.setText(`文件移动到 · ${this.ids.length} 篇分享笔记`);
-    this.modalEl?.addClass("simple-share-directory-modal");
-    this.contentEl.addClass("simple-share-directory-picker");
-    let directory: string | undefined, working = false, query = "", renaming: string | undefined, creatingParent: string | undefined;
-    let folders: { all: string[]; share: string[] } = { all: [], share: [] };
-    const toolbar = this.contentEl.createDiv({ cls: "simple-share-directory-toolbar" });
-    toolbar.createSpan({ text: "分享专用库" });
-    const search = this.contentEl.createEl("input", { cls: "simple-share-directory-search", attr: { type: "search", placeholder: "搜索文件目录…", "aria-label": "搜索文件目录" } });
-    const breadcrumb = this.contentEl.createDiv({ cls: "simple-share-directory-breadcrumb" });
-    const current = breadcrumb.createSpan();
-    const create = breadcrumb.createEl("button", { text: "新建", cls: "simple-share-directory-new", attr: { type: "button" } });
-    const form = this.contentEl.createDiv({ cls: "simple-share-directory-create" }); form.hidden = true;
-    setIcon(form.createSpan(), "folder");
-    const name = form.createEl("input", { attr: { type: "text", placeholder: "目录名称", "aria-label": "目录名称" } });
-    const save = form.createEl("button", { text: "保存", attr: { type: "button" } });
-    const dismiss = form.createEl("button", { text: "取消", attr: { type: "button" } });
-    const list = this.contentEl.createDiv({ cls: "simple-share-directory-list" });
-    const feedback = this.contentEl.createEl("p", { cls: "simple-share-directory-feedback", attr: { role: "status", "aria-live": "polite" } });
-    const footer = this.contentEl.createDiv({ cls: "simple-share-directory-footer" });
-    const cancel = footer.createEl("button", { text: "取消", attr: { type: "button" } });
-    const move = footer.createEl("button", { text: "移动到此", cls: "mod-cta", attr: { type: "button" } });
-    move.disabled = !this.ids.length;
-    const render = () => {
-      move.disabled = working || !this.ids.length || !form.hidden;
-      current.setText(directory === undefined ? "默认：与各篇原笔记相同的目录" : `分享专用库 / ${directory || "根目录"}`);
-      form.remove();
-      list.empty();
-      // Preserve folders as paths; source-vault choices become destinations in the share library.
-      const renderFolder = (parent: HTMLElement, path: string, label: string, children: string[]) => {
-        const branch = children.length ? parent.createEl("details", { cls: "simple-share-directory-branch" }) : undefined;
-        if (branch) branch.open = true;
-        const row = branch ? branch.createEl("summary", { cls: "simple-share-directory-row" }) : parent.createDiv({ cls: "simple-share-directory-row" });
-        const choose = row.createEl("button", { cls: "simple-share-directory-choice", attr: { type: "button", "data-directory": path, "aria-pressed": String(directory === path) } });
-        setIcon(choose.createSpan(), "folder"); choose.createSpan({ text: label });
-        choose.disabled = working; choose.addEventListener("click", event => { event.preventDefault(); directory = path; render(); });
-        if (path) choose.addEventListener("contextmenu", event => {
-          event.preventDefault(); event.stopPropagation(); directory = path;
-          new Menu().addItem(item => item.setTitle("重命名目录").setIcon("pencil").setDisabled(working).onClick(() => {
-            creatingParent = undefined; renaming = path; name.value = path.split("/").pop()!; form.hidden = false; render(); name.focus(); name.select();
-          })).addItem(item => item.setTitle("删除目录").setIcon("trash-2").setDisabled(working).onClick(() => {
-            void run(async () => {
-              if (!await this.feature.deleteShareDirectory(path)) return;
-              directory = ""; renaming = undefined; creatingParent = undefined; form.hidden = true;
-              folders = await this.feature.shareDirectories();
-              feedback.setText("目录已删除，其中的分享笔记已安排至根目录；推送新分享后应用到云端。");
-            });
-          })).showAtMouseEvent(event);
-          render();
-        });
-        if (!form.hidden && path === renaming) { choose.remove(); form.dataset.directory = path; row.append(form); }
-        if (branch) {
-          const childRoot = branch.createDiv(); renderTree(childRoot, path, children);
-        }
-      };
-      const renderTree = (parent: HTMLElement, prefix: string, paths: string[]) => {
-        const names = [...new Set(paths.filter(path => path.startsWith(prefix ? prefix + "/" : "") && path !== prefix)
-          .map(path => path.slice(prefix ? prefix.length + 1 : 0).split("/")[0]))].sort((a, b) => a.localeCompare(b, "zh-CN", { numeric: true }));
-        for (const label of names) {
-          const path = prefix ? `${prefix}/${label}` : label;
-          renderFolder(parent, path, label, paths.filter(candidate => candidate.startsWith(path + "/")));
-        }
-      };
-      renderFolder(list, "", "分享专用库 · 根目录", []);
-      const paths = new Set<string>();
-      for (const path of folders.share) {
-        try { const normalized = normalizeShareDirectory(path); if (normalized) paths.add(normalized); }
-        catch { /* Legacy or invalid paths cannot become tree branches. */ }
-      }
-      if (creatingParent !== undefined && renaming) paths.add(renaming);
-      const visible = [...paths].filter(path => path.toLowerCase().includes(query.toLowerCase()) || path === renaming);
-      renderTree(list, "", visible);
-      if (query && !visible.length) list.createDiv({ text: "没有匹配的目录", cls: "simple-share-empty" });
-    };
-    search.addEventListener("input", () => { query = search.value.trim(); render(); });
-    const cancelEdit = () => { if (creatingParent !== undefined) directory = creatingParent; form.hidden = true; renaming = undefined; creatingParent = undefined; render(); };
-    dismiss.addEventListener("click", cancelEdit);
-    cancel.addEventListener("click", () => this.close());
-    const run = async (action: () => Promise<void>) => {
-      if (working) return; working = true; move.disabled = create.disabled = save.disabled = true; render();
-      try { await action(); }
-      catch (error) { feedback.setText(error instanceof Error ? error.message : String(error)); }
-      finally { working = false; create.disabled = save.disabled = false; render(); if (!form.hidden) { name.focus(); name.select(); } }
-    };
-    save.addEventListener("click", () => { void run(async () => {
-      if (!renaming) return;
-      const creating = creatingParent !== undefined;
-      directory = creatingParent === undefined ? await this.feature.renameShareDirectory(renaming, name.value) : await this.feature.createShareDirectory(creatingParent, name.value);
-      creatingParent = undefined; renaming = undefined; name.value = ""; form.hidden = true; query = ""; search.value = "";
-      folders = await this.feature.shareDirectories(); feedback.setText(creating ? "文件夹已新建。" : "目录已重命名，推送新分享后应用到云端。");
-    }); });
-    create.addEventListener("click", () => {
-      if (working) return;
-      if (creatingParent !== undefined) cancelEdit();
-      creatingParent = directory || "";
-      let next = 0, leaf = "新建文件夹";
-      const path = () => [creatingParent, leaf].filter(Boolean).join("/");
-      while (folders.share.some(folder => normalizeShareDirectory(folder) === path() || normalizeShareDirectory(folder).startsWith(path() + "/"))) leaf = `新建文件夹(${++next})`;
-      renaming = path(); name.value = leaf; form.hidden = false;
-      query = ""; search.value = ""; feedback.setText(""); render(); name.focus(); name.select();
-    });
-    name.addEventListener("keydown", event => {
-      if (event.key === "Enter") { event.preventDefault(); save.click(); }
-      else if (event.key === "Escape" && !working) { event.preventDefault(); event.stopPropagation(); cancelEdit(); }
-    });
-    move.addEventListener("click", () => { void run(async () => {
-      await this.feature.moveShares(this.ids, directory);
-      this.completed(); this.close(); new Notice("目录调整已保存，点击推送新分享后应用到云端分享库。");
-    }); });
-    render();
-    void this.feature.shareDirectories().then(value => { folders = value; render(); }).catch((error: unknown) => { feedback.setText(error instanceof Error ? error.message : String(error)); });
-  }
-  onClose(): void { this.contentEl.empty(); }
-}
+interface LocalState { version: 1; site?: string; commit?: string; pendingCommit?: string; published?: PublishState; commitConfirmedAt?: number; deploymentObservedAt?: number; lastPushedAt?: number; lastCheckedAt?: number }
 class IdModal extends Modal {
   constructor(private feature: ShareFeature, private id: string, private files: TFile[]) { super(feature.host.app); }
   onOpen(): void {
+    this.modalEl.addClass("simple-one-modal");
     this.titleEl.setText("选择原分享对应的笔记");
     this.contentEl.createEl("p", { text: "所选笔记保留原链接，其他副本获得新 ID，但不会自动开启分享。" });
-    for (const file of this.files) new Setting(this.contentEl).setName(file.path).addButton(button => button.setButtonText("保留此篇").onClick(runAsync(async () => {
+    for (const file of this.files) new Setting(this.contentEl).setName(file.path).addButton(button => { styleActionButton(button.buttonEl, "text"); return (button.setButtonText("保留此篇").onClick(runAsync(async () => {
       await this.feature.resolveDuplicate(this.id, file, this.files); this.close();
-    })));
+    }))); });
     const comparison = this.contentEl.createEl("p", { text: "正在比较重复 ID 笔记的内容…", attr: { role: "status" } });
     void Promise.all(this.files.map(async file => sha256(await this.feature.host.app.vault.read(file))))
       .then(hashes => { comparison.setText(new Set(hashes).size === 1 ? "文件内容完全一致，请选择哪篇保留原分享 ID。" : "文件内容存在差异，请核对原笔记后选择哪篇保留原分享 ID。"); })
@@ -183,29 +69,115 @@ export default class ShareFeature extends Component {
     this.domainCheckTimer = undefined;
   }
   private deploymentGeneration = 0;
+  private deploymentLogState = "";
+  private bothDeploymentPending = false;
+  private checkingBothDeployments = false;
+  private deploymentSummaryTimer?: number;
+  private lastPushedAt = 0;
+  private lastCheckedAt = 0;
+  refreshingStatus = false;
+  get shareStatusBusy(): boolean { return this.refreshingStatus || this.isPublishing || this.checkingDeployment; }
+  get checkingShareStatus(): boolean { return this.checkingDeployment; }
+  get shareStatusInfo(): string {
+    const time = (value: number) => {
+      if (!value) return "暂无";
+      const seconds = Math.max(0, Math.floor((Date.now() - value) / 1000));
+      return seconds < 60 ? "刚刚" : seconds < 3600 ? `${Math.floor(seconds / 60)} 分钟前` : seconds < 86400 ? `${Math.floor(seconds / 3600)} 小时前` : new Date(value).toLocaleDateString("zh-CN");
+    };
+    return `最近推送：${time(this.lastPushedAt)} · 最近检查：${time(this.lastCheckedAt)}`;
+  }
+  get pendingShareSummary(): string {
+    const added = this.rows.filter(row => row.state === "待发布").length;
+    const updated = this.rows.filter(row => row.state === "待更新").length;
+    const removed = this.rows.filter(row => row.state === "待撤下").length;
+    const changes = [["新增", added], ["更新", updated], ["撤下", removed]] as const;
+    return added + updated + removed ? `待发布：${changes.filter(([, count]) => count > 0).map(([name, count]) => `${name} ${count}`).join(" · ")}` : "本机暂无待发布变更";
+  }
+  private async recordShareLog(context: string, status: "success" | "error", message: string): Promise<void> {
+    const basic = message.split("；总耗时")[0];
+    await this.host.sync.recordOperationLog?.(context.replace(/耗时$/, ""), status,
+      this.manifest.recordSharePerformance ? message : basic);
+  }
+  private async checkBothDeployments(commit: string): Promise<"success" | "pending" | "error" | "unknown"> {
+    const generation = this.deploymentGeneration;
+    this.checkingBothDeployments = true;
+    const results = await Promise.allSettled([
+      (async () => { const repository = await this.repository(); return repository.deployment(commit); })(),
+      (async () => {
+        if (!this.edgeone.linked && this.manifest.site.hosting !== "edgeone") return null;
+        await this.edgeone.checkDeployment();
+        return { kind: this.edgeone.state.lastCheck?.kind ?? "unknown", text: this.edgeone.message || this.edgeone.error };
+      })(),
+    ]);
+    this.checkingBothDeployments = false;
+    const github = results[0], edgeone = results[1];
+    const kinds: string[] = [];
+    const lines: string[] = [];
+    if (github.status === "fulfilled") {
+      kinds.push(github.value === "网站已更新" ? "success" : /失败|错误/.test(github.value) ? "error" : "pending");
+      lines.push(`GitHub Pages：${github.value}`);
+    } else { kinds.push("error"); lines.push(`GitHub Pages：检查失败 · ${String(github.reason)}`); }
+    if (edgeone.status === "fulfilled") {
+      if (edgeone.value) { kinds.push(edgeone.value.kind); lines.push(`腾讯 EdgeOne：${edgeone.value.text}`); }
+      else lines.push("腾讯 EdgeOne：尚未关联项目");
+    } else { kinds.push("error"); lines.push(`腾讯 EdgeOne：检查失败 · ${String(edgeone.reason)}`); }
+    if (generation !== this.deploymentGeneration) return "unknown";
+    this.bothDeploymentPending = kinds.includes("pending");
+    this.status = "推送已确认\n" + lines.join("\n");
+    if (this.deploymentSummaryTimer !== undefined) window.clearTimeout(this.deploymentSummaryTimer);
+    if (kinds.every(kind => kind === "success")) {
+      const detailed = this.status;
+      this.deploymentSummaryTimer = window.setTimeout(() => {
+        this.deploymentSummaryTimer = undefined;
+        if (generation !== this.deploymentGeneration || this.status !== detailed || this.error || this.deploymentPending()) return;
+        this.status = edgeone.status === "fulfilled" && edgeone.value ? "GitHub Pages 与腾讯 EdgeOne 均已部署成功" : "GitHub Pages 已部署成功";
+        this.renderViews();
+      }, 1500);
+    }
+    return kinds.includes("error") ? "error" : kinds.includes("unknown") ? "unknown" : this.bothDeploymentPending ? "pending" : "success";
+  }
+  private deploymentLogKey(commit: string, outcome: string): string {
+    return JSON.stringify([this.libraryId, this.manifest.site.owner, this.manifest.site.repo, this.manifest.site.branch, commit, outcome]);
+  }
+  private deploymentWait(local: LocalState, online: boolean): string {
+    if (!local.commitConfirmedAt || local.site !== `${this.manifest.site.owner}/${this.manifest.site.repo}`) return "";
+    const seconds = (Math.max(0, (online ? local.deploymentObservedAt ?? Date.now() : Date.now()) - local.commitConfirmedAt) / 1000).toFixed(2);
+    return `；${online ? "观测到上线耗时" : "距提交确认已等待"} ${seconds} 秒（含检查间隔，非云端纯构建耗时）`;
+  }
+  private async recordDeploymentCheck(timing: OperationTiming, local: LocalState, outcome: "success" | "pending" | "error" | "unknown", automatic: boolean): Promise<void> {
+    const key = this.deploymentLogKey(local.commit ?? "", outcome);
+    if (automatic && key === this.deploymentLogState) return;
+    this.deploymentLogState = key;
+    const result = { success: "网站已更新", pending: "上传已确认，网站仍在部署", error: "部署检查失败", unknown: "部署状态未确认" }[outcome];
+    await this.recordShareLog("分享部署检查耗时", outcome === "error" || outcome === "unknown" ? "error" : "success",
+      `${result}${outcome === "error" || outcome === "unknown" ? `；失败阶段：${timing.currentStage}` : ""}；${timing.summary()}${this.deploymentWait(local, outcome === "success")}；检查阶段仅统计本次调用`);
+  }
   private stopDeploymentCheck(): void {
     this.deploymentGeneration++;
+    if (this.deploymentSummaryTimer !== undefined) window.clearTimeout(this.deploymentSummaryTimer);
+    this.deploymentSummaryTimer = undefined;
+    this.bothDeploymentPending = false;
     this.publishingWebsite = false;
     if (this.deploymentTimer !== undefined) window.clearTimeout(this.deploymentTimer);
     this.deploymentTimer = undefined;
   }
   deploymentPending(): boolean {
-    return this.manifest.site.hosting === "edgeone" ? this.edgeone.state.lastCheck?.kind === "pending" : this.status.includes("部署中");
+    return this.bothDeploymentPending || (this.manifest.site.hosting === "edgeone" ? this.edgeone.state.lastCheck?.kind === "pending" : this.status.includes("部署中"));
   }
   private scheduleDeploymentCheck(commit: string, attempt = 0): void {
-    if (attempt >= 30 || !this.deploymentPending()) return;
+    if (attempt >= 300 || !this.deploymentPending()) return;
     const generation = this.deploymentGeneration, library = this.libraryId;
     this.deploymentTimer = window.setTimeout(() => {
       this.deploymentTimer = undefined;
       void (async () => {
         if (generation !== this.deploymentGeneration || library !== this.libraryId) return;
-        if (this.isPublishing || this.checkingDeployment || this.host.sync.isSyncing()) { this.scheduleDeploymentCheck(commit, attempt); return; }
+        if (this.isPublishing || this.checkingDeployment || this.refreshingStatus || this.host.sync.isSyncing()) { this.scheduleDeploymentCheck(commit, attempt); return; }
         const local = await this.local();
         if (generation !== this.deploymentGeneration || local.commit !== commit) return;
-        await this.checkDeployment();
+        try { await this.checkDeployment(true); } catch { /* Keep polling the other platform while it is building. */ }
         if (generation === this.deploymentGeneration && library === this.libraryId) this.scheduleDeploymentCheck(commit, attempt + 1);
       })().catch(error => this.fail(error));
-    }, 10000);
+    }, 1000);
   }
   get progressText(): string {
     const elapsed = this.busy && this.publishStartedAt ? ` · 已用 ${Math.floor((Date.now() - this.publishStartedAt) / 1000)} 秒` : "";
@@ -318,7 +290,7 @@ export default class ShareFeature extends Component {
         }
         return local.commit;
       }, () => {
-        if (this.publishingWebsite) this.publishProgress("推送成功 · " + this.edgeone.message);
+        if (this.publishingWebsite && !this.checkingBothDeployments) this.publishProgress("推送成功 · " + this.edgeone.message);
         else this.renderViews();
       }, undefined, () => this.libraryId);
   }
@@ -340,8 +312,6 @@ export default class ShareFeature extends Component {
     await this.readTemplateSelection().catch(error => { this.templateMessage = error instanceof Error ? error.message : String(error); });
     const progress = this.manifest.site.guideProgress ?? (this.manifest.site.initialized ? 7 : this.manifest.site.repo ? 3 : 1);
     this.guideStep = Math.min(4, progress); this.guideAvailableStep = Math.min(4, progress);
-    addIcon("simple-share-sort-asc", '<g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M25 85V15m-12 12 12-12 12 12M60 35l10-25 10 25M64 27h12M60 60h20L60 85h20"/></g>');
-    addIcon("simple-share-sort-desc", '<g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M25 15v70m-12-12 12 12 12-12M60 10h20L60 35h20M60 85l10-25 10 25M64 77h12"/></g>');
     const settingsBadge = '<path d="M71 60h12l2 7 7 2 4 10-5 5 1 8-10 4-5-5-8 1-4-10 5-5-1-8 7-4z"/><circle cx="79" cy="79" r="6"/>';
     addIcon("simple-share-copy-settings", `<g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M27 53H13V9h43v14M55 79H28V26h43v26"/>${settingsBadge}</g>`);
     this.refreshActions = registerMarkdownAction(this.host, "data-simple-share-note", () => this.manifest.enabled,
@@ -620,7 +590,7 @@ export default class ShareFeature extends Component {
         if (pages.status === "errored") github.createEl("p", { text: "最近一次构建失败，请检查 GitHub Pages 设置。", cls: "simple-one-sync-setup-error" });
       } else if (visibility === false) github.createEl("p", { text: pagesError === "GitHub Pages 尚未启用。" ? "尚未启用 GitHub Pages。" : pagesError || "尚未获取到 GitHub Pages 分享网址。", cls: "simple-share-library-detail__muted" });
       if (site.repo && visibility === false && !loadingLocal && !checking && !operating && !this.busy && !this.setupBusy && !githubError && !pages && pagesError === "GitHub Pages 尚未启用。") {
-        const button = github.createEl("button", { text: "启用 GitHub Pages", attr: { type: "button" } });
+        const button = styleActionButton(github.createEl("button", { text: "启用 GitHub Pages", attr: { type: "button" } }), "text");
         button.addEventListener("click", () => { void enablePages(); });
       }
       const edgeoneSection = body.createDiv({ cls: "simple-share-library-detail__section" });
@@ -670,10 +640,10 @@ export default class ShareFeature extends Component {
         item.createEl("a", { text: `${domain.baseUrl} ↗`, href: domain.baseUrl, attr: { target: "_blank", rel: "noopener noreferrer" } });
         item.createEl("p", { cls: "simple-share-library-detail__muted", text: `预览：${shareDomainNoteUrl(domain.baseUrl, "abcdefghijkl")}` });
         const actions = item.createDiv({ cls: "simple-share-library-detail__domain-actions" });
-        const edit = actions.createEl("button", { text: "编辑", attr: { type: "button" } });
+        const edit = styleActionButton(actions.createEl("button", { text: "编辑", attr: { type: "button" } }), "text");
         edit.disabled = this.isPublishing || this.setupBusy || operating;
         edit.addEventListener("click", () => { editingDomainId = domain.id; draftDomainName = domain.name; draftDomainUrl = domain.baseUrl; render(); });
-        const removeDomain = actions.createEl("button", { text: "移除", attr: { type: "button" } });
+        const removeDomain = styleActionButton(actions.createEl("button", { text: "移除", attr: { type: "button" } }), "text");
         removeDomain.disabled = this.isPublishing || this.setupBusy || operating;
         removeDomain.addEventListener("click", () => { void (async () => {
           if (!await confirmAction(this.host.app, `移除分享网站「${domain.name}」？仅删除本机链接配置，不会更改网站或已发布内容。`)) return;
@@ -685,7 +655,7 @@ export default class ShareFeature extends Component {
         })().catch(error => this.fail(error)); });
       }
       if (editingDomainId === null) {
-        const add = domainSection.createEl("button", { text: "新增分享网站", attr: { type: "button" } });
+        const add = styleActionButton(domainSection.createEl("button", { text: "新增分享网站", attr: { type: "button" } }), "text");
         add.disabled = this.isPublishing || this.setupBusy || operating;
         add.addEventListener("click", () => { editingDomainId = "new"; draftDomainName = ""; draftDomainUrl = ""; render(); });
       } else {
@@ -708,8 +678,8 @@ export default class ShareFeature extends Component {
         };
         nameInput.addEventListener("input", updatePreview); urlInput.addEventListener("input", updatePreview); updatePreview();
         const actions = form.createDiv({ cls: "simple-share-library-detail__domain-actions" });
-        actions.createEl("button", { text: "取消", attr: { type: "button" } }).addEventListener("click", () => { editingDomainId = null; render(); });
-        actions.createEl("button", { text: "保存", cls: "mod-cta", attr: { type: "button" } }).addEventListener("click", () => { void (async () => {
+        styleActionButton(actions.createEl("button", { text: "取消", attr: { type: "button" } }), "text").addEventListener("click", () => { editingDomainId = null; render(); });
+        styleActionButton(actions.createEl("button", { text: "保存", cls: "mod-cta", attr: { type: "button" } }), "text").addEventListener("click", () => { void (async () => {
           const domainName = draftDomainName.trim();
           if (!domainName || /[\r\n：]/.test(domainName)) throw new Error("分享名称不能为空，也不能包含换行或中文冒号。");
           const baseUrl = normalizeShareDomainUrl(draftDomainUrl);
@@ -730,10 +700,10 @@ export default class ShareFeature extends Component {
       controls.createEl("p", { text: "删除记录只移除当前笔记库中的分享配置；GitHub 仓库、已发布网站和原笔记保留。", cls: "simple-share-library-management-desc" });
       const footer = controls.createDiv({ cls: "simple-share-library-detail__footer" });
       footer.createSpan({ cls: "simple-share-library-detail__checked-at", text: checkedAt ? `上次检查：${new Date(checkedAt).toLocaleString()}` : "尚无检查记录" });
-      const refresh = footer.createEl("button", { text: checking ? "检查中…" : "重新检查", attr: { type: "button" } });
+      const refresh = styleActionButton(footer.createEl("button", { text: checking ? "检查中…" : "重新检查", attr: { type: "button" } }), "text");
       refresh.disabled = loadingLocal || checking || operating || !site.repo;
       refresh.addEventListener("click", () => { void inspect(); });
-      const remove = footer.createEl("button", { text: "删除记录", cls: "mod-warning", attr: { type: "button" } });
+      const remove = styleActionButton(footer.createEl("button", { text: "删除记录", cls: "mod-warning", attr: { type: "button" } }), "text");
       remove.disabled = loadingLocal || checking || operating || this.isPublishing || this.setupBusy || this.edgeone.busy || this.checkingDeployment;
       remove.addEventListener("click", () => { void this.removeShareLibrary(id).catch(error => this.fail(error)); });
     };
@@ -918,8 +888,8 @@ export default class ShareFeature extends Component {
         });
     });
     if (settings && allowCreate) {
-      row.addButton(button => button.setButtonText("新建分享库").setDisabled(this.isPublishing || this.setupBusy || this.edgeone.busy)
-        .onClick(() => { void this.newLibrary().catch(error => this.fail(error)); }));
+      row.addButton(button => { styleActionButton(button.buttonEl, "text"); return (button.setButtonText("新建分享库").setDisabled(this.isPublishing || this.setupBusy || this.edgeone.busy)
+        .onClick(() => { void this.newLibrary().catch(error => this.fail(error)); })); });
     }
   }
   private localPath(): string { return this.path("share-local.json" + (this.libraryId === "legacy" ? "" : "." + this.libraryId)); }
@@ -1308,6 +1278,8 @@ export default class ShareFeature extends Component {
     await this.mutation; await this.reload();
     const local = await this.local();
     const key = `${this.manifest.site.owner}/${this.manifest.site.repo}`;
+    this.lastPushedAt = local.site === key ? local.lastPushedAt ?? local.commitConfirmedAt ?? 0 : 0;
+    this.lastCheckedAt = local.site === key ? local.lastCheckedAt ?? 0 : 0;
     this.published = local.site === key && local.published ? local.published : { version: 1, notes: {}, files: [] };
     const index = this.index(true), rows: Row[] = [], moved: Record<string, string> = {};
     for (const [id, entry] of Object.entries(this.manifest.notes)) {
@@ -1340,9 +1312,38 @@ export default class ShareFeature extends Component {
     if (value.version !== 1) throw new Error("本机发布记录版本不正确。");
     // Ignore obsolete clone/cache jobs; every retry compares the current remote tree.
     return { version: 1, site: value.site, commit: value.commit, pendingCommit: value.pendingCommit,
+      ...(Number.isFinite(value.lastPushedAt) && value.lastPushedAt! > 0 ? { lastPushedAt: value.lastPushedAt } : {}),
+      ...(Number.isFinite(value.lastCheckedAt) && value.lastCheckedAt! > 0 ? { lastCheckedAt: value.lastCheckedAt } : {}),
+      ...(typeof value.commitConfirmedAt === "number" && Number.isFinite(value.commitConfirmedAt) && value.commitConfirmedAt > 0 ? { commitConfirmedAt: value.commitConfirmedAt } : {}),
+      ...(typeof value.deploymentObservedAt === "number" && Number.isFinite(value.deploymentObservedAt) && value.deploymentObservedAt > 0 ? { deploymentObservedAt: value.deploymentObservedAt } : {}),
       ...(value.published ? { published: parsePublishState(JSON.stringify(value.published)) } : {}) };
   }
   private saveLocal(value: LocalState): Promise<void> { return this.host.app.vault.adapter.write(this.localPath(), JSON.stringify(value, null, 2)); }
+  async refreshShareStatus(): Promise<void> {
+    if (this.refreshingStatus || this.isPublishing || this.checkingDeployment || this.host.sync.isSyncing()) return;
+    const library = this.libraryId;
+    this.refreshingStatus = true; this.error = ""; this.renderViews();
+    try {
+      await this.refreshPublished();
+      if (library !== this.libraryId) return;
+      const index = this.index(true), assets: ShareAssetCache = new Map();
+      for (const row of this.rows) {
+        const entry = this.manifest.notes[row.id];
+        if (!entry?.enabled || !row.file || row.state === "ID 冲突") continue;
+        const result = await exportNote(this.host, row.file, entry.category, this.manifest, index, entry.publicName, assets);
+        if (library !== this.libraryId) return;
+        const previous = this.published.notes[row.id];
+        this.checkedNoteStates.set(row.id, !previous ? "待发布" : previous.hash !== result.hash
+          || previous.category !== entry.category || previous.title !== result.title
+          || (previous.path ?? `notes/${row.id}.md`) !== shareNotePath(row.id, entry) ? "待更新" : "推送成功");
+      }
+      const local = await this.local();
+      if (local.commit) await this.checkDeployment();
+      await this.scan();
+    } catch (error) {
+      if (library === this.libraryId) this.error = error instanceof Error ? error.message : String(error);
+    } finally { this.refreshingStatus = false; this.renderViews(); }
+  }
   async refreshPublished(): Promise<void> {
     if (this.isPublishing || this.host.sync.isSyncing()) return;
     await this.reload();
@@ -1357,8 +1358,13 @@ export default class ShareFeature extends Component {
   async publish(_initialize = false, onlyId?: string | readonly string[], forceFreshEdgeOneDeployment = false,
     guideProgressOnSuccess = 7): Promise<void> {
     if (this.templateBusy) throw new Error("模板正在保存，请稍后推送。");
-    if (this.isPublishing || this.checkingDeployment || this.host.sync.isSyncing()) throw new Error("已有分享、部署检查或主库同步任务正在运行。");
-    await this.mutation; await this.reload();
+    if (this.isPublishing || this.checkingDeployment || this.refreshingStatus || this.host.sync.isSyncing()) throw new Error("已有分享、部署检查或主库同步任务正在运行。");
+    const timing = new OperationTiming(); timing.stage("准备发布");
+    try { await this.mutation; await this.reload(); }
+    catch (error) {
+      await this.recordShareLog("分享发布耗时", "error", `本次推送尚未确认完成；失败阶段：${timing.currentStage}；${timing.summary()}`);
+      throw error;
+    }
     if (!this.manifest.enabled) throw new Error("笔记分享已关闭。");
     if (this.isPublishing || this.host.sync.isSyncing()) throw new Error("已有分享或主库同步任务正在运行。");
     const selected = onlyId ? (typeof onlyId === "string" ? [onlyId] : onlyId) : [];
@@ -1368,12 +1374,15 @@ export default class ShareFeature extends Component {
     this.busy = true; this.publishStartedAt = Date.now(); this.error = ""; this.status = "正在读取云端文件清单…"; this.renderViews();
     this.checkedNoteStates.clear();
     const heartbeat = window.setInterval(() => this.publishProgress(this.status), 1000);
+    let uploadConfirmed = false;
     try {
       const snapshot = serializeManifest(this.manifest), template = await this.readTemplate();
       const readerTemplate = /<script data-simple-reader>/.test(template) ? template : await this.readDefaultTemplate();
+      timing.stage("读取远端");
       const repository = await this.repository();
       await Promise.all([repository.verify(), repository.refresh()]);
       const key = this.manifest.site.owner + "/" + this.manifest.site.repo, old = await repository.state();
+      timing.stage("导出正文附件");
       const state: PublishState = { version: 1, notes: {}, files: [] };
       const adapter = this.host.app.vault.adapter, licensePath = this.path("reader-licenses.txt");
       const files = websiteFiles(template, readerTemplate, await adapter.exists(licensePath) ? await adapter.read(licensePath) : bundledReaderFiles().licenses);
@@ -1431,63 +1440,94 @@ export default class ShareFeature extends Component {
       if (serializeManifest(this.manifest) !== snapshot) throw new Error("分享设置在生成期间发生变化，请重新发布。");
       if (template !== await this.readTemplate() || readerTemplate !== template && readerTemplate !== await this.readDefaultTemplate()) throw new Error("HTML 模板在生成期间发生变化，请重新发布。");
       if (failures.length) throw new Error("以下笔记异常；线上版本保留，请处理后重试：\n" + failures.join("\n"));
+      timing.stage("哈希比对");
       this.status = "正在按文件哈希对比并推送…"; this.renderViews();
       const job = await repository.writeFiles(files, old), previous = await this.local();
+      timing.stage("上传提交");
       const commit = await repository.push(job, pending => this.saveLocal({ ...(previous.site === key ? previous : {}), version: 1, site: key, pendingCommit: pending.commit }), message => this.publishProgress(message));
+      uploadConfirmed = true;
+      timing.stage("保存发布记录");
       this.publishProgress("推送成功 · 正在保存发布记录并检查网站构建…");
-      await this.saveLocal({ version: 1, site: key, commit, published: state }); this.published = state;
+      const sameCommit = previous.site === key && previous.commit === commit;
+      const publishedLocal: LocalState = { version: 1, site: key, commit, published: state, lastPushedAt: Date.now(),
+        commitConfirmedAt: sameCommit ? previous.commitConfirmedAt : Date.now(),
+        ...(sameCommit && previous.deploymentObservedAt ? { deploymentObservedAt: previous.deploymentObservedAt } : {}) };
+      await this.saveLocal(publishedLocal); this.published = state;
       this.checkedNoteStates.clear();
       for (const row of this.rows) if (this.manifest.notes[row.id]?.enabled && state.notes[row.id]) row.state = "推送成功";
       this.publishProgress("推送成功 · 正在检查网站是否开始构建新版本…");
+      timing.stage("部署检查");
       await this.edgeone.invalidateDeployment(commit).catch(error => { this.edgeone.error = error instanceof Error ? error.message : String(error); });
       this.status = Object.keys(job.expected).length ? "推送成功 · 正在检查网站构建状态…" : "推送成功 · 文件未变化，正在检查网站状态…"; this.renderViews();
+      let deploymentOutcome: "success" | "pending" | "error" | "unknown" = "unknown";
+      let deploymentFailureStage = "部署检查";
       try {
         this.publishingWebsite = true;
         if (this.manifest.site.hosting === "edgeone") {
-          if (_initialize) await this.edgeone.initializeWebsite(forceFreshEdgeOneDeployment && Object.keys(job.expected).length === 0); else await this.edgeone.checkDeployment();
-          this.status = "推送成功 · " + this.edgeone.message + (this.deploymentPending() ? "（每 10 秒自动检查）" : "");
-          if (_initialize && !this.edgeone.completed) throw new Error(this.edgeone.error || "EdgeOne Makers 部署尚未完成，请稍后重试。");
-        } else { await this.validateHosting(); await repository.configurePages(); this.status = "推送成功 · " + await repository.deployment(commit); }
+          if (_initialize) await this.edgeone.initializeWebsite(forceFreshEdgeOneDeployment && Object.keys(job.expected).length === 0, false);
+        } else { await this.validateHosting(); await repository.configurePages(); }
+        deploymentOutcome = await this.checkBothDeployments(commit);
+        publishedLocal.lastCheckedAt = this.lastCheckedAt = Date.now();
+        await this.saveLocal(publishedLocal);
         this.manifest.site.initialized = true; this.manifest.site.guideProgress = guideProgressOnSuccess;
+        if (deploymentOutcome === "success" && publishedLocal.commitConfirmedAt && !publishedLocal.deploymentObservedAt) {
+          publishedLocal.deploymentObservedAt = Date.now();
+          timing.stage("保存发布记录"); await this.saveLocal(publishedLocal);
+        }
+        timing.stage("保存网站配置");
         await adapter.write(this.path("share-manifest.json"), serializeManifest(this.manifest));
       } catch (error) {
+        deploymentOutcome = "error"; deploymentFailureStage = timing.currentStage;
         this.status = "推送成功 · 网站发布状态暂未确认，可点击检查网站部署重试。"; this.error = error instanceof Error ? error.message : String(error);
       }
-      new Notice("笔记分享：" + this.status, 8000);
+      this.deploymentLogState = this.deploymentLogKey(commit, deploymentOutcome);
+      const added = Object.keys(state.notes).filter(id => !old.notes[id]).length;
+      const updated = Object.keys(state.notes).filter(id => old.notes[id] && JSON.stringify(state.notes[id]) !== JSON.stringify(old.notes[id])).length;
+      const removed = Object.keys(old.notes).filter(id => !state.notes[id]).length;
+      const counts = `新增 ${added} 篇 · 更新 ${updated} 篇 · 撤下 ${removed} 篇 · 生成 ${prepared} 篇 · 上传变更 ${Object.keys(job.expected).length} 项`;
+      const deploymentFailed = deploymentOutcome === "error" || deploymentOutcome === "unknown";
+      const result = { success: "上传已确认，网站已更新", pending: "上传已确认，网站仍在部署", error: "上传已确认，网站后续检查或记录失败", unknown: "上传已确认，部署状态未确认" }[deploymentOutcome];
+      await this.recordShareLog("分享发布耗时", deploymentFailed ? "error" : "success",
+        `${counts}\n${result}${deploymentFailed ? `；失败阶段：${deploymentFailureStage}` : ""}；${timing.summary()}${this.deploymentWait(publishedLocal, deploymentOutcome === "success")}；部署检查仅为本次调用耗时`);
       if (!this.error) this.scheduleDeploymentCheck(commit);
     } catch (error) {
       if (!this.status.startsWith("推送成功")) this.status = "本次推送尚未确认完成。";
       this.error = error instanceof Error ? error.message : String(error);
+      await this.recordShareLog("分享发布耗时", "error",
+        `${uploadConfirmed ? "上传已确认，后续处理失败" : "本次推送尚未确认完成"}；失败阶段：${timing.currentStage}；${timing.summary()}`);
       throw error;
     } finally {
       window.clearInterval(heartbeat); this.publishingWebsite = false; this.publishStartedAt = 0;
       this.busy = false; await this.scan().catch(error => this.fail(error)); this.renderViews();
     }
   }
-  async checkDeployment(): Promise<void> {
+  async checkDeployment(automatic = false): Promise<void> {
     if (this.checkingDeployment || this.isPublishing) throw new Error("已有分享任务正在运行，请稍后检查。");
     const generation = this.deploymentGeneration;
-    this.checkingDeployment = true; this.error = ""; this.status = "正在检查网站发布状态…";
+    const timing = new OperationTiming(); timing.stage("读取发布记录");
+    let local: LocalState = { version: 1 };
+    this.checkingDeployment = true; this.error = "";
+    if (!this.status.includes("GitHub Pages：")) this.status = "正在检查两个平台的网站发布状态…";
     this.renderViews();
     try {
-      const local = await this.local(); if (!local.commit) throw new Error("尚未完成推送，请先初始化网站或点击「推送新分享」。");
+      local = await this.local(); if (!local.commit) throw new Error("尚未完成推送，请先初始化网站或点击「推送新分享」。");
       if (local.site !== `${this.manifest.site.owner}/${this.manifest.site.repo}`) throw new Error("最近一次推送属于其他仓库，请重新检查分享仓库配置。");
-      this.publishProgress("推送成功 · 正在检查网站发布状态…");
-      if (this.manifest.site.hosting === "edgeone") {
-        this.publishingWebsite = true;
-        await this.edgeone.checkDeployment();
-        if (generation !== this.deploymentGeneration) return;
-        this.status = "推送成功 · " + this.edgeone.message;
-      } else {
-        const repository = await this.repository();
-        const status = await repository.deployment(local.commit);
-        if (generation !== this.deploymentGeneration) return;
-        this.status = "推送成功 · " + status;
-      }
+      timing.stage("部署检查");
+      const outcome = await this.checkBothDeployments(local.commit);
+      local.lastCheckedAt = this.lastCheckedAt = Date.now();
+      if (generation !== this.deploymentGeneration) return;
+      if (outcome === "error") throw new Error("网站部署检查失败，请查看两个平台状态。");
+      if (generation !== this.deploymentGeneration) return;
+      if (outcome === "success" && local.commitConfirmedAt && !local.deploymentObservedAt) {
+        local.deploymentObservedAt = Date.now();
+        timing.stage("保存发布记录"); await this.saveLocal(local);
+      } else await this.saveLocal(local);
+      await this.recordDeploymentCheck(timing, local, outcome, automatic);
     } catch (error) {
       if (generation !== this.deploymentGeneration) return;
-      this.status = (this.status.startsWith("推送成功") ? "推送成功 · " : "") + "网站发布状态检查失败，可稍后重试。";
+      if (!this.status.includes("GitHub Pages：")) this.status = "网站发布状态检查失败，可稍后重试。";
       this.error = error instanceof Error ? error.message : String(error);
+      await this.recordDeploymentCheck(timing, local, "error", automatic);
       throw error;
     } finally { this.publishingWebsite = false; this.checkingDeployment = false; this.renderViews(); }
   }
@@ -1509,6 +1549,23 @@ export default class ShareFeature extends Component {
   }
   get isPublishing(): boolean { return this.busy || this.sharing || this.batchSharing; }
   get copyContent(): ShareCopyContent { return this.manifest.copyContent ?? DEFAULT_SHARE_COPY_CONTENT; }
+  async toggleShareButton(key: "showCopyButton" | "showLinkButtons"): Promise<void> {
+    await this.change(manifest => { manifest[key] = manifest[key] === false; });
+  }
+  async addLinkContentMenu(menu: Menu): Promise<void> {
+    const library = this.libraryId;
+    for (const site of (await this.shareWebsites()).filter(site => site.url)) {
+      const checked = (this.manifest.linkChannels ?? ["github", "pageOne"]).includes(site.key);
+      menu.addItem(item => item.setTitle(site.name.replace("EdgeOne Makers 链接", "EdgeOne 链接").replace("EdgeOne 自定义域名链接", "EdgeOne 链接")).setIcon(checked ? "check-square" : "square").setDisabled(this.isPublishing).onClick(() => {
+        if (library !== this.libraryId) return;
+        void this.change(manifest => {
+          const channels = new Set(manifest.linkChannels ?? ["github", "pageOne"]);
+          if (checked) channels.delete(site.key); else channels.add(site.key);
+          manifest.linkChannels = [...channels];
+        }).catch(error => this.fail(error));
+      }));
+    }
+  }
   async updateCopyContent(key: "title" | "github" | "pageOne", value: boolean): Promise<void> {
     await this.change(manifest => { manifest.copyContent = { ...DEFAULT_SHARE_COPY_CONTENT, ...manifest.copyContent, [key]: value }; });
   }
@@ -1517,7 +1574,7 @@ export default class ShareFeature extends Component {
     if (!this.edgeone.linked || !settings || settings.projectId !== this.edgeone.state.projectId) return [];
     return settings.domains.filter(item => item.status === "online" || !item.status).map(item => ({
       key: `edgeone:${settings.projectId}:${item.domain}`,
-      name: `EdgeOne 自定义域名链接（${item.domain}）`,
+      name: `EdgeOne 链接（${item.domain}）`,
       url: shareDomainNoteUrl(`${edgeOneWebsite(item.domain)}/`, noteId),
     }));
   }
@@ -1547,7 +1604,7 @@ export default class ShareFeature extends Component {
     const github = await this.githubShareWebsite();
     return [
       { key: "github", name: "GitHub 链接", url: github },
-      { key: "pageOne", name: "EdgeOne Makers 链接", url: this.edgeone.state.area === "overseas" ? this.edgeone.website : "" },
+      { key: "pageOne", name: "EdgeOne 链接", url: this.edgeone.state.area === "overseas" ? this.edgeone.website : "" },
       ...this.selectedEdgeOneCustomLinks("").map(domain => ({ ...domain, url: domain.url.replace(/#\/notes\/$/, "") })),
       ...(this.manifest.customDomains ?? []).map(domain => ({ key: `custom:${domain.id}`, name: domain.name, url: domain.baseUrl })),
     ];
@@ -1713,12 +1770,13 @@ export default class ShareFeature extends Component {
     document.body.appendChild(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   addPublishButton(setting: Setting): Setting {
-    return setting.addButton(button => button.setButtonText(this.isPublishing ? "推送中…" : "推送新分享")
+    return setting.addButton(button => { styleActionButton(button.buttonEl, "text"); return (button.setButtonText(this.isPublishing ? "推送中…" : "推送新分享")
       .setTooltip("检查并推送所有分享变化，包括正文更新、目录调整与删除")
       .setDisabled(this.isPublishing || this.checkingDeployment || this.templateBusy || !this.manifest.site.repo || !this.manifest.enabled)
-      .onClick(() => { void this.publish().catch(error => this.fail(error)); }).buttonEl.addClass("simple-share-publish"));
+      .onClick(() => { void this.publish().catch(error => this.fail(error)); }).buttonEl.addClass("simple-share-publish")); });
   }
   renderPanel(container: HTMLElement, query: string, layout: ShareLayout = "list", collapsed = new Set<string>(), onFolderToggle?: () => void, descending = false, selection?: ShareSelection): void {
+    let websites: ReturnType<ShareFeature["shareWebsites"]> | undefined;
     for (const [element, cleanup] of this.panelDragCleanups) if (element === container || !element.isConnected) { cleanup(); this.panelDragCleanups.delete(element); }
     container.empty();
     const compareNames = (a: string, b: string): number => (descending ? -1 : 1) * a.localeCompare(b, "zh-CN", { numeric: true, sensitivity: "base" });
@@ -1889,7 +1947,20 @@ export default class ShareFeature extends Component {
             .onClick(runAsync(async () => { await this.confirmRemoveShares(ids); }))).showAtMouseEvent(event);      });
       setting.descEl.hidden = true;
       setting.descEl.setAttribute("title", `原笔记目录：${path || "/"} · 公开分类：${entry?.category || "未分类"}`);
-      if (this.published.notes[row.id]) setting.addButton(button => {
+      if (this.published.notes[row.id] && this.manifest.showLinkButtons !== false) {
+        for (const key of this.manifest.linkChannels ?? ["github", "pageOne"]) setting.addButton(button => {
+          const name = key === "github" ? "GitHub" : key === "pageOne" ? "EdgeOne" : "自定义域名";
+          button.setClass("simple-action-button").setClass("simple-action-button--plain").setIcon("link").setTooltip(`打开${name}分享网页`).setDisabled(true);
+          button.buttonEl.addClass("simple-share-direct-link");
+          button.buttonEl.createSpan({ text: key === "github" ? "Git" : key === "pageOne" || key.startsWith("edgeone:") ? "Q" : "L", cls: "simple-share-link-badge", attr: { "aria-hidden": "true" } });
+          void (websites ??= this.shareWebsites()).then(sites => {
+            const site = sites.find(site => site.key === key && site.url);
+            if (!site) { button.buttonEl.hidden = true; return; }
+            button.setDisabled(false).onClick(() => window.open(shareDomainNoteUrl(site.url, row.id), "_blank", "noopener"));
+          }).catch(() => { button.buttonEl.hidden = true; });
+        });
+      }
+      if (this.published.notes[row.id] && this.manifest.showCopyButton !== false) setting.addButton(button => {
         let resetTimer: number | undefined;
         const tooltip = "按设置复制分享内容";
         button.buttonEl.addClass("simple-share-copy");
@@ -1942,7 +2013,7 @@ export default class ShareFeature extends Component {
     if (showTitle) {
       const header = page.createDiv({ cls: "simple-page-header" });
       if (!guide && (this.edgeOneGuideOpen || managingLibrary)) {
-        const back = header.createEl("button", { cls: "simple-back-button", attr: { type: "button", "aria-label": "返回笔记分享设置", title: "返回笔记分享设置" } });
+        const back = styleActionButton(header.createEl("button", { cls: "simple-back-button", attr: { type: "button", "aria-label": "返回笔记分享设置", title: "返回笔记分享设置" } }), "bordered");
         setIcon(back, "arrow-left"); back.addEventListener("click", () => { if (managingLibrary) this.backFromShareLibraryManagement(); else this.backFromEdgeOneGuide(); });
       }
       new Setting(header).setName(title).setHeading().setClass("simple-page-title");
@@ -1980,17 +2051,21 @@ export default class ShareFeature extends Component {
       holdEdit.input.addEventListener("change", () => {
         void this.change(manifest => { manifest.holdToEdit = holdEdit.input.checked; }).catch(error => this.fail(error));
       });
+      const performance = checkboxRow(management, "记录分享性能详情", "记录分享生成、远端比对、上传和部署检查的分步耗时；关闭后保留变更数量与结果。", this.manifest.recordSharePerformance === true);
+      performance.input.addEventListener("change", () => {
+        void this.change(manifest => { manifest.recordSharePerformance = performance.input.checked; }).catch(error => this.fail(error));
+      });
       const librariesGroup = compactSettingsSection(page, "分享库管理");
       const libraries = ensureLibraries(this.manifest);
       for (const [id, stored] of Object.entries(libraries.entries)) {
         const library = id === libraries.active ? this.manifest : stored;
         const name = library.site.repo ? library.site.owner + "/" + library.site.repo : "未完成接入 · " + id.slice(0, 8);
-        const row = new Setting(librariesGroup).setName(name);
+        const row = new Setting(librariesGroup).setName(name).setClass("mod-action").setClass("simple-setting-icon-action");
         row.addButton(button => button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("settings").setTooltip("管理分享库：" + name)
           .setDisabled(this.isPublishing || this.setupBusy || this.edgeone.busy)
           .onClick(() => { try { this.openShareLibraryDetails(id); } catch (error) { this.fail(error); } }));
       }
-      new Setting(librariesGroup).setClass("simple-share-library-add")
+      new Setting(librariesGroup).setClass("simple-share-library-add").setClass("mod-action").setClass("simple-setting-icon-action")
         .addButton(button => button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("plus").setTooltip("新增分享库")
           .setDisabled(this.isPublishing || this.setupBusy || this.edgeone.busy)
           .onClick(() => { void this.newLibrary().catch(error => this.fail(error)); }));
@@ -2017,7 +2092,7 @@ export default class ShareFeature extends Component {
     const controls = copy.querySelector<HTMLElement>(".simple-share-library-selector .setting-item-control")!;
     controls.addClass("simple-share-library-guide-controls");
     const isNewLibrary = this.guideNewLibrarySelected || !this.manifest.site.repo;
-    const guideAction = controls.createEl("button", { text: isNewLibrary ? "新建仓库" : "重新运行此库引导", attr: { type: "button" } });
+    const guideAction = styleActionButton(controls.createEl("button", { text: isNewLibrary ? "新建仓库" : "重新运行此库引导", attr: { type: "button" } }), "text");
     guideAction.disabled = this.setupBusy || this.isPublishing || this.edgeone.busy;
     guideAction.addEventListener("click", () => { void (async () => {
       if (guideAction.disabled) return;
@@ -2062,7 +2137,7 @@ export default class ShareFeature extends Component {
     };
     const action = (label: string, work: () => Promise<void>, parent = container, disabled = false) => {
       const row = new Setting(parent).setClass("simple-share-guide-action");
-      row.addButton(button => button.setButtonText(label).setCta().setDisabled(disabled || this.setupBusy || this.busy || this.edgeone.busy).onClick(() => run(work))); return row;
+      row.addButton(button => { styleActionButton(button.buttonEl, "text"); return (button.setButtonText(label).setCta().setDisabled(disabled || this.setupBusy || this.busy || this.edgeone.busy).onClick(() => run(work))); }); return row;
     };
     if (this.guideStep === 1) {
       container.addClass("simple-one-sync-setup-intro", "simple-one-sync-setup-platform-step");
@@ -2120,7 +2195,7 @@ export default class ShareFeature extends Component {
         const refresh = deviceAction.createEl("button", { cls: "simple-one-sync-setup-device-icon-button", attr: { type: "button", "aria-label": "刷新设备码", title: "刷新设备码" } });
         setActionIcon(refresh, "refresh-cw", "plain"); refresh.disabled = this.setupBusy || this.busy;
         refresh.addEventListener("click", () => run(browserLogin));
-        if (this.setupBusy) new Setting(authChoice).addButton(button => {
+        if (this.setupBusy) new Setting(authChoice).addButton(button => { styleActionButton(button.buttonEl, "text");
           button.buttonEl.addClass("simple-share-guide-cancel-auth");
           button.setButtonText("取消授权等待").onClick(() => this.authController?.abort());
         });
@@ -2136,7 +2211,7 @@ export default class ShareFeature extends Component {
         });
         tokenSetting.settingEl.addClass("simple-one-sync-setup-token-setting");
         link(tokenSetting.descEl, "前往 GitHub 创建 Token ↗", "https://github.com/settings/tokens");
-        new Setting(authChoice).addButton(button => {
+        new Setting(authChoice).addButton(button => { styleActionButton(button.buttonEl, "text");
           submit = button.buttonEl;
           button.setButtonText("已填写 token，验证授权").setCta().setDisabled(this.setupBusy || this.busy || !this.token.trim()).onClick(() => {
             const token = this.token.trim();
@@ -2185,7 +2260,7 @@ export default class ShareFeature extends Component {
         if (this.error || this.repositoryFeedback) area.createEl("p", { text: this.error || this.repositoryFeedback, cls: this.error ? "simple-one-sync-setup-error" : "simple-one-sync-setup-feedback" });
         if (mode === "create" && this.takenRepository) {
           const taken = this.takenRepository;
-          const use = area.createEl("button", { text: "使用这个已有仓库", attr: { type: "button" } });
+          const use = styleActionButton(area.createEl("button", { text: "使用这个已有仓库", attr: { type: "button" } }), "text");
           use.disabled = this.setupBusy || this.isPublishing;
           use.addEventListener("click", () => {
             if (use.disabled) return;
@@ -2473,6 +2548,30 @@ export class ShareView extends ItemView {
   getViewType(): string { return VIEW; }
   getDisplayText(): string { return "分享"; }
   getIcon(): string { return "share-2"; }
+  private bindShareControl(button: HTMLButtonElement, key: "showCopyButton" | "showLinkButtons"): void {
+    let timer: number | undefined, held = false;
+    const win = button.ownerDocument.defaultView!;
+    const cancel = () => { if (timer !== undefined) win.clearTimeout(timer); timer = undefined; };
+    const menu = (event: MouseEvent) => {
+      const choices = new Menu();
+      void (key === "showCopyButton" ? this.feature.addCopyContentMenu(choices) : this.feature.addLinkContentMenu(choices))
+        .then(() => choices.showAtMouseEvent(event)).catch(error => new Notice(String(error)));
+    };
+    button.setAttribute("aria-pressed", String(this.feature.manifest[key] !== false));
+    button.toggleClass("is-paused", this.feature.manifest[key] === false);
+    this.registerDomEvent(button, "pointerdown", event => {
+      if (event.button !== 0) return;
+      cancel(); held = false;
+      timer = win.setTimeout(() => { timer = undefined; held = true; menu(event); }, 600);
+    });
+    for (const event of ["pointerup", "pointercancel", "pointerleave"] as const) this.registerDomEvent(button, event, cancel);
+    this.registerDomEvent(button, "contextmenu", event => { event.preventDefault(); cancel(); held = true; menu(event); });
+    this.registerDomEvent(button, "click", event => {
+      event.preventDefault(); cancel(); if (held) { held = false; return; }
+      void this.feature.toggleShareButton(key).catch(error => new Notice(String(error)));
+    });
+    this.register(cancel);
+  }
   getState(): Record<string, unknown> { return { ...super.getState(), ...this.feature.display, collapsed: [...this.collapsed] }; }
   async setState(state: Record<string, unknown>, result: ViewStateResult): Promise<void> {
     this.feature.restoreDisplay(state);
@@ -2539,6 +2638,8 @@ export class ShareView extends ItemView {
     this.render();
   }
   updateStatus(): void {
+    const info = this.contentEl.querySelector<HTMLElement>(".simple-share-status-info");
+    if (info) { info.textContent = this.feature.shareStatusInfo; info.hidden = true; }
     const status = this.contentEl.querySelector<HTMLElement>(".simple-share-progress");
     if (!status) return;
     status.textContent = (this.feature.publishingTitle ? `《${this.feature.publishingTitle}》 · ` : "") + this.feature.progressText;
@@ -2546,9 +2647,21 @@ export class ShareView extends ItemView {
     const deploying = !this.feature.error && this.feature.deploymentPending();
     status.toggleClass("is-deploying", deploying);
     if (deploying) status.textContent = "部署中 · " + status.textContent;
-    status.hidden = !this.feature.progressText;
+    const pending = this.feature.pendingShareSummary.startsWith("待发布：");
+    if (!this.feature.progressText) status.textContent = this.feature.pendingShareSummary;
+    else if (!this.feature.isPublishing && !deploying && !this.feature.error && pending) status.textContent = this.feature.pendingShareSummary;
+    status.hidden = false;
     status.toggleClass("simple-share-success", !this.feature.error && !this.feature.isPublishing && !deploying);
     status.toggleClass("is-working", this.feature.isPublishing || deploying);
+    status.toggleClass("is-checking", !this.feature.error && (this.feature.refreshingStatus || this.feature.checkingShareStatus && !deploying));
+    status.toggleClass("is-pending", !this.feature.error && (deploying || pending && !this.feature.isPublishing));
+    if (this.feature.refreshingStatus && !this.feature.error) status.textContent = "正在刷新分享变更与部署状态…";
+    status.title = [this.feature.progressText, this.feature.shareStatusInfo].filter(Boolean).join("\n");
+    if (!this.feature.shareStatusBusy && !deploying && !this.feature.error) {
+      status.textContent = status.textContent?.replace("GitHub Pages 与腾讯 EdgeOne 均已部署成功", "GitHub / EdgeOne 已部署").replace("GitHub Pages 已部署成功", "GitHub Pages 已部署") ?? "";
+      const pushed = this.feature.shareStatusInfo.split(" · ")[0];
+      if (!pushed.endsWith("暂无")) status.textContent += ` · ${pushed.replace("最近推送：", "上次推送 ")}`;
+    }
     this.contentEl.querySelector(".simple-share-library-status")?.toggleClass("has-status", !status.hidden);
   }
   render(): void {
@@ -2582,19 +2695,37 @@ export class ShareView extends ItemView {
         button.buttonEl.addClass("simple-share-header-icon", "clickable-icon", "nav-action-button");
       });
     header.addButton(button => {
-      button.setClass("simple-action-button").setClass("simple-action-button--plain").setIcon(this.descending ? "simple-share-sort-desc" : "simple-share-sort-asc")
+      button.setClass("simple-action-button").setClass("simple-action-button--plain").setIcon("history").setTooltip("查看分享日志")
+        .onClick(() => this.feature.host.sync.openShareLogs());
+      button.buttonEl.addClass("simple-share-header-icon", "clickable-icon", "nav-action-button");
+      button.buttonEl.setAttribute("aria-label", "查看分享日志");
+    });
+    header.addButton(button => {
+      button.setClass("simple-action-button").setClass("simple-action-button--plain").setIcon("refresh-cw")
+        .setTooltip("刷新笔记变更与两个平台的部署状态")
+        .setDisabled(this.feature.shareStatusBusy)
+        .onClick(() => { void this.feature.refreshShareStatus(); });
+      button.buttonEl.addClass("simple-share-header-icon", "clickable-icon", "nav-action-button");
+      button.buttonEl.setAttribute("aria-label", "刷新分享状态");
+      button.buttonEl.setAttribute("aria-busy", String(this.feature.refreshingStatus));
+    });
+    header.addButton(button => {
+      button.setClass("simple-action-button").setClass("simple-action-button--plain").setIcon(this.descending ? "arrow-down-za" : "arrow-down-az")
         .setTooltip(this.descending ? "名称倒序 Z→A；点击切换正序" : "名称正序 A→Z；点击切换倒序")
         .onClick(() => this.feature.updateDisplay({ descending: !this.descending }));
       button.buttonEl.addClass("simple-share-header-icon", "simple-share-sort-button", "clickable-icon", "nav-action-button");
     });
     header.addButton(button => {
-      button.setClass("simple-action-button").setClass("simple-action-button--plain").setIcon("simple-share-copy-settings").setTooltip("复制设置").onClick(runAsync(async event => {
-        const menu = new Menu();
-        await this.feature.addCopyContentMenu(menu);
-        menu.showAtMouseEvent(event);
-      }));
-      button.buttonEl.addClass("simple-share-header-icon", "simple-share-composite-icon", "clickable-icon", "nav-action-button");
+      button.setClass("simple-action-button").setClass("simple-action-button--plain").setIcon("copy").setTooltip("复制按钮：点击启用/禁用，长按设置复制内容");
+      button.buttonEl.addClass("simple-share-header-icon", "clickable-icon", "nav-action-button");
       button.buttonEl.setAttribute("aria-label", "复制设置");
+      this.bindShareControl(button.buttonEl, "showCopyButton");
+    });
+    header.addButton(button => {
+      button.setClass("simple-action-button").setClass("simple-action-button--plain").setIcon("link").setTooltip("链接按钮：点击启用/禁用，长按选择渠道");
+      button.buttonEl.addClass("simple-share-header-icon", "clickable-icon", "nav-action-button");
+      button.buttonEl.setAttribute("aria-label", "链接设置");
+      this.bindShareControl(button.buttonEl, "showLinkButtons");
     });
     header.addButton(button => {
       button.setClass("simple-action-button").setClass("simple-action-button--plain").setIcon("settings").setTooltip("打开分享设置").onClick(() => this.feature.host.sync.openPluginSettings(true));
@@ -2603,24 +2734,26 @@ export class ShareView extends ItemView {
     });
     header.settingEl.addClass("simple-share-header");
     const libraryStatus = this.contentEl.createDiv({ cls: "simple-share-library-status" });
-    const libraryButton = libraryStatus.createEl("button", { cls: "simple-share-library-button", attr: { type: "button", "aria-label": "切换当前分享库", "aria-haspopup": "menu" } });
-    const libraryLabel = libraryButton.createSpan({ cls: "simple-share-library-label" });
-    libraryLabel.createSpan({ text: "当前分享库" });
-    setIcon(libraryLabel.createSpan({ cls: "simple-share-library-chevron", attr: { "aria-hidden": "true" } }), "chevron-down");
-    libraryLabel.createSpan({ cls: "simple-share-library-name", text: this.feature.libraries[this.feature.libraryId] || "尚未接入分享库" });
-    libraryButton.addEventListener("click", event => {
-      const menu = new Menu();
-      for (const [id, name] of Object.entries(this.feature.libraries)) menu.addItem(item => item.setTitle(name)
-        .setChecked(id === this.feature.libraryId).setDisabled(this.feature.isPublishing)
-        .onClick(() => { void this.feature.switchLibrary(id).catch(error => new Notice(String(error))); }));
-      menu.showAtMouseEvent(event);
+    const librarySelect = libraryStatus.createEl("select", { cls: "simple-share-library-button", attr: { "aria-label": "切换当前分享库" } });
+    for (const [id, name] of Object.entries(this.feature.libraries)) librarySelect.createEl("option", { text: name, attr: { value: id } });
+    if (!librarySelect.options.length) librarySelect.createEl("option", { text: "尚未接入分享库", attr: { value: "" } });
+    librarySelect.value = this.feature.libraryId;
+    librarySelect.disabled = this.feature.shareStatusBusy || !Object.keys(this.feature.libraries).length;
+    librarySelect.addEventListener("change", () => {
+      const previous = this.feature.libraryId;
+      librarySelect.disabled = true;
+      void this.feature.switchLibrary(librarySelect.value).catch(error => {
+        librarySelect.value = previous; new Notice(String(error));
+      }).finally(() => { librarySelect.disabled = this.feature.shareStatusBusy; });
     });
-    libraryButton.createSpan({ cls: "simple-share-progress", attr: { role: "status", "aria-live": "polite" } });
+    libraryStatus.createSpan({ cls: "simple-share-progress", attr: { role: "status", "aria-live": "polite" } });
+    libraryStatus.createDiv({ cls: "simple-share-status-info" });
     const publish = this.feature.addPublishButton(new Setting(this.contentEl));
     publish.settingEl.addClass("simple-share-publish-row");
     publish.settingEl.toggleClass("is-editing", this.editing);
     const primary = publish.settingEl.querySelector<HTMLButtonElement>(".simple-share-publish")!;
     primary.addClass("simple-share-new", "mod-cta");
+    primary.after(librarySelect);
     const uploadIcon = primary.createSpan({ cls: "simple-share-new-icon", attr: { "aria-hidden": "true" } });
     setIcon(uploadIcon, "upload-cloud"); primary.prepend(uploadIcon);
     this.updateStatus();
@@ -2643,7 +2776,7 @@ export class ShareView extends ItemView {
     new Setting(this.contentEl).addSearch(search => search.setPlaceholder("搜索分享笔记…").setValue(this.query).onChange(value => { this.query = value; renderList(); }))
       .settingEl.addClass("simple-share-search");
     const selectionBar = publish.controlEl.createDiv({ cls: "simple-share-selection-bar" });
-    primary.after(selectionBar);
+    librarySelect.after(selectionBar);
     const renderSelection = () => {
       selectionBar.empty();
       selectionBar.hidden = !this.editing;

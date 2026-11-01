@@ -5,6 +5,7 @@ import { JSDOM } from "jsdom";
 import { EditorState } from "@codemirror/state";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
+globalThis.window = dom.window;
 for (const key of ["document", "HTMLElement", "HTMLPreElement", "DOMParser", "NodeFilter"]) {
   globalThis[key] = key === "document" ? dom.window.document : dom.window[key];
 }

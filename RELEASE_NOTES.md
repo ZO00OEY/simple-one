@@ -1,3 +1,18 @@
+# Simple One 1.0.29
+
+- 翻译预览采用临时装饰，确认后选择文本或标记卡片；卡片支持源码编辑、按原始输入重新翻译和转为普通文字。
+- 分享侧栏采用原生单选下拉切库，提供刷新、日志、复制内容与多渠道网页入口；图标统一线宽、透明度及禁用斜杠，笔记行操作无边框。
+- GitHub Pages 与关联 EdgeOne 并行检查，部署完成后延迟合并为一行摘要；状态按阶段着色，保留最近推送与检查时间，刷新检查正文变更。
+- 最近分享日志复用同步日志弹窗；记录新增、更新、撤下和生成数量，分步耗时可独立开启；清空分享日志不影响同步记录。
+- 默认分享阅读器增加猛男粉、蓝色、绿色、火龙果粉及紧凑排版设置；支持自定义格式颜色、翻译卡片、代码／引用／Callout 快捷复制；不嵌入字体。
+- 更新桌面默认显示参数，保留现有偏好；完善附件引用与自动整理、段落链接、同步恢复、排除规则与性能记录。
+- 中英文 README 更新功能介绍、安装更新方式和编辑／翻译／同步／分享入门步骤。
+
+English: editable translation cards; compact sharing controls; dual-provider deployment checks; optional sharing performance logs; refreshed public reader with block-copy controls; display, attachment and sync improvements.
+
+升级仅替换 `main.js`、`manifest.json`、`styles.css`，保留个人配置。已有网站请选择默认模板并重新推送。个人配置、凭据、同步状态、日志、分享清单及自定义模板不包含在公开插件仓库与 Release 安装附件中。
+
+---
 # Simple One 1.0.28
 
 - 新增浮动编辑工具栏：主题预览、格式切换、自定义颜色、收藏与按钮显隐/排序。

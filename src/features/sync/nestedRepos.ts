@@ -1,3 +1,4 @@
+import { rootIgnoreMatcher } from "./localIgnore";
 import { desktopProcess, type NodeFs, type NodePath } from "../../shared/desktopNode";
 import { defaultSyncIgnorePatterns, shouldIgnore } from "./dirty";
 
@@ -23,7 +24,7 @@ export async function findNestedRepos(vaultPath: string, configDir: string): Pro
       if (!entry.isDirectory() || entry.name === ".git") continue;
       const absolute = path.join(folder, entry.name);
       const relative = path.relative(vaultPath, absolute).replace(/\\/g, "/");
-      if (!shouldIgnore(relative, defaultSyncIgnorePatterns(configDir), configDir)) await visit(absolute);
+      if (!shouldIgnore(relative + "/", defaultSyncIgnorePatterns(configDir), configDir)) await visit(absolute);
     }
   };
   await visit(vaultPath);
@@ -34,34 +35,22 @@ export function nestedGitIgnoreRules(repos: readonly NestedRepo[]): string[] {
   return repos.map((repo) => `/${repo.directory}/.git${repo.gitIsDirectory ? "/" : ""}`);
 }
 
-export async function nestedRepoFiles(vaultPath: string, repos: readonly NestedRepo[], git: GitCommand, configDir: string): Promise<string[]> {
+export async function nestedRepoFiles(vaultPath: string, repos: readonly NestedRepo[], _git: GitCommand, configDir: string): Promise<string[]> {
   if (!path || !fs) throw new Error("内嵌仓库检查仅支持桌面端");
-  const files: string[] = [];
-  let vaultIgnore: string[] = [];
-  try { vaultIgnore = (await fs.readFile(path.join(vaultPath, ".gitignore"), "utf8")).split(/\r?\n/); }
+  let rootRules = "";
+  try { rootRules = await fs.readFile(path.join(vaultPath, ".gitignore"), "utf8"); }
   catch (error) { if ((error as { code?: string }).code !== "ENOENT") throw error; }
-  for (const repo of repos) {
-    if (repo.directory === ".gitshare" || repo.directory.startsWith(".gitshare/")) continue;
-    const absolute = path.join(vaultPath, repo.directory);
-    const listed = await git(["-C", absolute, "ls-files", "--cached", "--others", "--exclude-standard", "-z"]);
-    for (const name of listed.split("\0").filter(Boolean)) {
-      if (name === ".git" || name.startsWith(".git/") || name.startsWith("../") || path.isAbsolute(name)) continue;
-      const relative = `${repo.directory}/${name.replace(/\\/g, "/")}`;
-      // The vault's exclusions govern ordinary child files too, not just data.json.
-      if (shouldIgnore(relative, [...defaultSyncIgnorePatterns(configDir), ...vaultIgnore], configDir)) continue;
-      try {
-        if ((await fs.lstat(path.join(vaultPath, relative))).isFile()) files.push(relative);
-      } catch { /* deleted child file */ }
+  const ignored = rootIgnoreMatcher(rootRules, configDir);
+  const files: string[] = [];
+  const visit = async (directory: string): Promise<void> => {
+    for (const entry of await fs.readdir(path.join(vaultPath, directory), { withFileTypes: true })) {
+      const relative = directory + "/" + entry.name;
+      if (ignored(relative + (entry.isDirectory() ? "/" : ""))) continue;
+      if (entry.isDirectory()) await visit(relative);
+      else if (entry.isFile()) files.push(relative);
     }
-    // Public plugin repositories commonly ignore private data.json. The vault
-    // keeps that user configuration unless its own ignore rules exclude it.
-    const data = `${repo.directory}/data.json`;
-    if (repo.directory.startsWith(`${configDir}/plugins/`) && repo.directory.slice(`${configDir}/plugins/`.length).split("/").length === 1 &&
-        !shouldIgnore(data, [...defaultSyncIgnorePatterns(configDir), ...vaultIgnore], configDir)) {
-      try { if ((await fs.lstat(path.join(vaultPath, data))).isFile()) files.push(data); }
-      catch { /* plugin has no data.json */ }
-    }
-  }
+  };
+  for (const repo of repos) if (!ignored(repo.directory + "/")) await visit(repo.directory);
   return [...new Set(files)].sort();
 }
 
@@ -78,15 +67,7 @@ export async function seedNestedRepoFiles(vaultPath: string, repos: readonly Nes
     await git(["update-index", "--add", "--cacheinfo", `${mode},${sha},${file}`]);
     tracked.add(file);
   };
-  for (const repo of repos) {
-    const prefix = `${repo.directory}/`;
-    if (![...tracked].some((file) => file.startsWith(prefix))) {
-      const file = candidates.find((name) => name.startsWith(prefix) && !skip.has(name));
-      if (file) await stage(file);
-    }
-    const data = `${repo.directory}/data.json`;
-    if (candidates.includes(data) && !tracked.has(data) && !skip.has(data)) await stage(data);
-  }
+  for (const file of candidates) if (!tracked.has(file) && !skip.has(file)) await stage(file);
 }
 
 // Reconcile only embedded repositories. Other staged vault changes are left as-is.

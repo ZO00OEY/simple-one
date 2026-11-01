@@ -1,3 +1,5 @@
+import ignore, { type Ignore } from "ignore";
+
 export type DirtyType = "add" | "modify" | "delete" | "move";
 
 export interface DirtyEntry {
@@ -48,56 +50,26 @@ export function defaultSyncIgnorePatterns(configDir: string): string[] {
   return recommendedIgnoreRules(configDir).filter(line => !line.startsWith("#"));
 }
 
-function globToRegex(pattern: string): string {
-  let source = "";
-  for (let index = 0; index < pattern.length; index += 1) {
-    const character = pattern[index];
-    if (character === "*") {
-      if (pattern[index + 1] === "*") {
-        source += ".*";
-        index += 1;
-      } else {
-        source += "[^/]*";
-      }
-    } else if (character === "?") {
-      source += "[^/]";
-    } else {
-      source += character.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
-    }
-  }
-  return source;
-}
-
-function matchesIgnorePattern(path: string, rawPattern: string): boolean {
-  let pattern = rawPattern.trim().replace(/\\/g, "/");
-  if (!pattern || pattern.startsWith("#")) return false;
-  if (pattern.startsWith("!")) pattern = pattern.slice(1);
-  if (pattern.startsWith("/")) pattern = pattern.slice(1);
-  const directoryOnly = pattern.endsWith("/");
-  if (directoryOnly) pattern = pattern.slice(0, -1);
-  if (!pattern) return false;
-
-  const prefix = pattern.includes("/") ? "^" : "(?:^|/)";
-  const suffix = directoryOnly ? "(?:/.*)?$" : "$";
-  return new RegExp(`${prefix}${globToRegex(pattern)}${suffix}`).test(path);
-}
+const ignoreMatchers = new Map<string, Ignore>();
 
 export function shouldIgnore(
   path: string,
   patterns: readonly string[],
   configDir?: string
 ): boolean {
-  const normalized = path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
+  const normalized = path.replace(/\\/g, "/").replace(/^\.\//, "");
   // Git metadata belongs to each device/repository, even for .git pointer files.
   if (normalized.split("/").includes(".git")) return true;
   if (configDir && isPrivateSyncPath(normalized, configDir)) return true;
-  let ignored = false;
-  for (const rawPattern of patterns) {
-    const pattern = rawPattern.trim();
-    if (!pattern || pattern.startsWith("#")) continue;
-    if (matchesIgnorePattern(normalized, pattern)) ignored = !pattern.startsWith("!");
+  if (!normalized) return false;
+  const key = JSON.stringify(patterns);
+  let matcher = ignoreMatchers.get(key);
+  if (!matcher) {
+    matcher = ignore().add([...patterns]);
+    if (ignoreMatchers.size >= 32) ignoreMatchers.clear();
+    ignoreMatchers.set(key, matcher);
   }
-  return ignored;
+  return matcher.ignores(normalized);
 }
 
 export function coalesceDirty(entries: DirtyEntry[], next: DirtyEntry): DirtyEntry[] {

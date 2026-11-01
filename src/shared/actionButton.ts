@@ -14,10 +14,17 @@ export function setDeleteIcon(element: HTMLElement, style: ActionButtonStyle = "
 }
 
 /** Size and appearance only; callers retain labels, events and disabled state. */
-export function styleActionButton(element: HTMLElement, style: ActionButtonStyle = "plain"): void {
+export function styleActionButton<T extends HTMLElement>(element: T, style: ActionButtonStyle = "plain"): T {
   element.classList.add("simple-action-button");
   element.classList.remove("simple-action-button--plain", "simple-action-button--bordered", "simple-action-button--danger", "simple-action-button--text");
   element.classList.add(`simple-action-button--${style}`);
+  return element;
+}
+
+/** A setting with an icon-only action keeps its label and control on one row. */
+export function styleSettingIconAction(element: HTMLElement): void {
+  styleActionButton(element, "bordered");
+  element.closest?.(".setting-item")?.classList.add("mod-action", "simple-setting-icon-action");
 }
 
 export function setActionIcon(element: HTMLElement, icon: string, style: ActionButtonStyle = "plain"): void {

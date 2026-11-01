@@ -1,3 +1,4 @@
+import { styleActionButton } from "../../shared/actionButton";
 import { Setting, setIcon } from "obsidian";
 import { EDGEONE_PROJECTS_URL, EDGEONE_SETTINGS_URL, EdgeOneConnection } from "./edgeone";
 
@@ -28,7 +29,7 @@ function renderGithubAccessReminder(parent: HTMLElement, visibility?: EdgeOneRep
     const status = parent.createDiv({ cls: "simple-share-edgeone-visibility-status" });
     status.createEl("p", { text: visibility.checking ? "正在检查 GitHub 分享仓库是否公开…" : visibility.error,
       cls: visibility.error ? "simple-one-sync-setup-error" : "simple-one-sync-setup-helper", attr: { role: "status", "aria-live": "polite" } });
-    if (visibility.error) status.createEl("button", { text: "重新检查仓库状态", attr: { type: "button" } })
+    if (visibility.error) styleActionButton(status.createEl("button", { text: "重新检查仓库状态", attr: { type: "button" } }), "text")
       .addEventListener("click", visibility.refresh);
     return;
   }
@@ -41,29 +42,6 @@ function renderGithubAccessReminder(parent: HTMLElement, visibility?: EdgeOneRep
   });
   if (phase === "deployment") shareExternalLink(parent.createDiv({ cls: "simple-share-provider-links" }),
     "在 GitHub 检查或补充授权 ↗", "https://github.com/settings/installations");
-}
-
-export function renderEdgeOneRow(parent: HTMLElement, connection: EdgeOneConnection, enabled: boolean,
-  publishing: boolean, openGuide: () => void): void {
-  const row = new Setting(parent).setName("EdgeOne Makers").setClass("simple-share-provider-row");
-  const links = row.descEl.createDiv({ cls: "simple-share-provider-links" });
-  if (connection.website) shareExternalLink(links, "打开分享网站 ↗", connection.website);
-  shareExternalLink(links, "在腾讯检查项目设置 ↗", EDGEONE_PROJECTS_URL);
-  if (!connection.linked) shareExternalLink(links, "腾讯授权设置 ↗", EDGEONE_SETTINGS_URL);
-  row.addButton(button => button.setButtonText(connection.linked ? "重新检查或修复接入" : "开始接入引导")
-    .setDisabled(!enabled || publishing || connection.busy).onClick(openGuide));
-  if (connection.linked) {
-    row.addButton(button => button.setButtonText(connection.busy ? "检查中…" : "检查网站部署")
-      .setDisabled(!enabled || publishing || connection.busy)
-      .onClick(() => { void connection.run(async () => { await connection.checkDeployment(); }); }));
-  }
-  const result = connection.linked ? connection.state.lastCheck : undefined;
-  row.infoEl.createEl("p", {
-    text: connection.error || (connection.busy ? connection.message : result?.text) ||
-      (connection.linked ? `已关联项目 ${connection.state.projectName}，尚未查询部署状态。` : "尚未接入腾讯分享网站。"),
-    cls: `simple-share-edgeone-result ${connection.error || result?.kind === "error" ? "simple-share-error" : !connection.busy && result?.kind === "success" ? "simple-share-success" : "simple-share-status"}`,
-    attr: { role: "status", "aria-live": "polite" }
-  });
 }
 
 export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConnection, enabled: boolean,
@@ -140,15 +118,15 @@ export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConne
         text.setPlaceholder("粘贴完整的 API Token").setValue(connection.draftToken).onChange(value => { connection.draftToken = value; });
         text.inputEl.disabled = blocked;
       });
-    new Setting(authBody).addButton(button => button.setButtonText("核验连接").setCta().setDisabled(blocked)
-      .onClick(() => { void runAndContinue(() => connection.verifyToken()); }));
+    new Setting(authBody).addButton(button => { styleActionButton(button.buttonEl, "text"); return (button.setButtonText("核验连接").setCta().setDisabled(blocked)
+      .onClick(() => { void runAndContinue(() => connection.verifyToken()); })); });
     }
   } else if (step === 2 || embedded && step >= 2) {
     const site = connection.site();
     const ready = !!site.owner && !!site.repo;
     if (!ready) {
       body.createEl("p", { text: "请先完成笔记分享引导，创建或连接分享仓库。" });
-      const button = body.createEl("button", { text: "前往笔记分享引导", attr: { type: "button" } });
+      const button = styleActionButton(body.createEl("button", { text: "前往笔记分享引导", attr: { type: "button" } }), "text");
       button.disabled = blocked; button.addEventListener("click", shareGuide);
     } else {
       const areaNames = { overseas: "全球（不含中国大陆）", mainland: "中国大陆", global: "全球（含中国大陆）" };
@@ -161,7 +139,7 @@ export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConne
             : connection.error ? "项目查找未完成，可重试。" : "核验 API Token 后自动查找与当前分享仓库和分支匹配的项目。",
           cls: "simple-one-sync-setup-helper", attr: { role: "status", "aria-live": "polite" }
         });
-        if (connection.error && connection.hasToken) new Setting(lookup).addButton(button => {
+        if (connection.error && connection.hasToken) new Setting(lookup).addButton(button => { styleActionButton(button.buttonEl, "text");
           button.buttonEl.addClass("simple-share-find-project");
           button.setButtonText("重新查找项目").setDisabled(blocked)
             .onClick(() => { void runAndContinue(async () => { await connection.enterRepositoryStep(); connection.projectCheckDone = true; }); });
@@ -177,8 +155,8 @@ export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConne
           attr: { role: "status", "aria-live": "polite" } });
         renderGithubAccessReminder(linked, repositoryVisibility);
         if (repositoryVisibility) shareExternalLink(linked.createDiv({ cls: "simple-share-provider-links" }), "查看 EdgeOne 项目及部署日志 ↗", EDGEONE_PROJECTS_URL);
-        if (!embedded) new Setting(linked).addButton(button => button.setButtonText("继续初始化或检查网站").setCta().setDisabled(blocked)
-          .onClick(() => { connection.state.step = 3; connection.refresh(); }));
+        if (!embedded) new Setting(linked).addButton(button => { styleActionButton(button.buttonEl, "text"); return (button.setButtonText("继续初始化或检查网站").setCta().setDisabled(blocked)
+          .onClick(() => { connection.state.step = 3; connection.refresh(); })); });
       } else if (connection.candidates.length) {
         const choice = project.createDiv({ cls: "simple-share-edgeone-flow-step simple-share-edgeone-project-step" });
         new Setting(choice).setName("选择已有项目").setHeading();
@@ -186,8 +164,8 @@ export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConne
         new Setting(choice).setName("匹配的 EdgeOne Makers 项目")
           .addDropdown(dropdown => dropdown.addOptions(Object.fromEntries(connection.candidates.map(item => [item.ProjectId, `${item.Name}（${item.ProjectId}）`])))
             .setValue(connection.selectedProject).setDisabled(blocked).onChange(value => { connection.selectedProject = value; }));
-        new Setting(choice).addButton(button => button.setButtonText("关联所选项目并继续").setCta().setDisabled(blocked)
-          .onClick(() => { void runAndContinue(() => connection.connectProject()); }));
+        new Setting(choice).addButton(button => { styleActionButton(button.buttonEl, "text"); return (button.setButtonText("关联所选项目并继续").setCta().setDisabled(blocked)
+          .onClick(() => { void runAndContinue(() => connection.connectProject()); })); });
       } else {
         project.createEl("p", { text: connection.message, cls: "simple-one-sync-setup-helper", attr: { role: "status", "aria-live": "polite" } });
         const steps = project.createDiv({ cls: "simple-share-edgeone-project-steps" });
@@ -221,7 +199,7 @@ export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConne
         updateAreaNote();
         new Setting(project).addButton(button => button.setButtonText("创建并关联项目").setCta().setDisabled(blocked)
           .onClick(() => { void runAndContinue(() => connection.connectProject()); }))
-          .addButton(button => {
+          .addButton(button => { styleActionButton(button.buttonEl, "text");
             button.buttonEl.addClass("simple-share-find-project");
             button.setButtonText("已在腾讯创建？重新查找").setDisabled(blocked)
               .onClick(() => { void runAndContinue(async () => { await connection.enterRepositoryStep(); connection.projectCheckDone = true; }); });
@@ -239,7 +217,7 @@ export function renderEdgeOneGuide(parent: HTMLElement, connection: EdgeOneConne
         .onClick(() => { void connection.run(async () => {
           if (completed) await connection.checkDeployment(); else await connection.initializeWebsite();
         }); }))
-      .addButton(button => button.setButtonText("返回分享设置").onClick(() => { connection.stop(); back(); }));
+      .addButton(button => { styleActionButton(button.buttonEl, "text"); return (button.setButtonText("返回分享设置").onClick(() => { connection.stop(); back(); })); });
   }
   if (connection.busy) body.createEl("progress", { attr: { "aria-label": "腾讯接入正在进行" } });
   if (connection.error || connection.message && (connection.busy || step !== 2 || !connection.projectCheckDone)) body.createEl("p", {

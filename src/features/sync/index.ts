@@ -1,4 +1,8 @@
-import { setActionIcon } from "../../shared/actionButton";
+import { createFileListLayout, fileListPanel, renderLayoutToggle, FileListLayout, renderFileTree, renderPathTree } from "./fileTree";
+import { remoteSnapshotRef } from "./directRemote";
+import { legacyScopeRules, readRootIgnore, rootIgnoreMatcher, organizedLocalIgnore } from "./localIgnore";
+import { inspectIgnoreTracking, applyIgnoreTracking, preserveRootIgnore, type IgnoreTrackingPlan } from "./nativeIgnore";
+import { setActionIcon, styleActionButton } from "../../shared/actionButton";
 import { compactSettingsSection } from "../../shared/settingsLayout";
 import { desktopProcess, type NodeFs, type NodePath, type NodeCommands, type NodeChildProcess } from "../../shared/desktopNode";
 import {
@@ -36,15 +40,15 @@ import { applyConflictResolutions, ConflictBlock, parseConflictBlocks } from "./
 import { describeGitIndexLockError, describeGitError, isMissingRemoteRefError, isTransientGitNetworkError, isUncertainGitAuthError } from "./gitError";
 import { LiveReview, ZoeySyncConflictPreviewModal } from "./conflictPreview";
 import { SetupDifferencesModal } from "./setupDifferences";
-import { GitSetup, OverlapChoice, SetupOverlapContent, SetupPreview, VerifiedRepo, setupGitIgnore, missingSetupIgnoreRules, pathBatches, explainSetupError, parseGithubRepoUrl } from "./onboarding";
+import { GitSetup, OverlapChoice, SetupOverlapContent, SetupPreview, VerifiedRepo, explainSetupError, parseGithubRepoUrl } from "./onboarding";
 import { preserveUntrackedFiles } from "./untrackedFiles";
 import { transferProgress } from "./transferProgress";
 import { hasCaseInsensitivePathCollisions, isInvalidGitPathError, repairRemoteFilenames } from "./remoteFilenameRepair";
-import { findNestedRepos, nestedGitIgnoreRules, nestedRepoFiles, rebuildNestedRepoTracking } from "./nestedRepos";
+import { findNestedRepos, nestedRepoFiles, rebuildNestedRepoTracking } from "./nestedRepos";
 
-import { DEFAULT_MOBILE_OPTIONS, MobileOptions, newPathRecords } from "./linkDiff";
-import { ConflictChoice, MobileGithub, RemoteSnapshot } from "./mobileGithub";
-import { MobileHost, MobileSyncModal, renderMobileSettings, renderMobileSyncRules, type MobileSyncFlow } from "./mobileUi";
+import { DEFAULT_MOBILE_OPTIONS, LocalSyncEdit, MobileOptions, newPathRecords } from "./linkDiff";
+import { ConflictChoice, MobileGithub, MobilePlan, VerifiedAccess } from "./mobileGithub";
+import { MobileHost, MobileSyncModal, renderMobileSettings, type MobileSyncFlow } from "./mobileUi";
 import { renderDownloadTask, renderPlanConfirmation, renderStrategy } from "./syncFlowUi";
 import type { SyncStrategy } from "./syncPlan";
 
@@ -59,10 +63,7 @@ interface DesktopCommitResult {
   committed: boolean;
 }
 
-interface FileTrackingPreview {
-  paths: string[];
-  missingRules: string[];
-}
+type FileTrackingPreview = IgnoreTrackingPlan;
 
 interface InterruptedGitOperation {
   ref: string;
@@ -114,10 +115,12 @@ interface ErrorLogEntry {
   timestamp: number;
   context: string;
   message: string;
-  status?: "success" | "error";
+  status?: "success" | "error" | "pending";
+  timings?: Array<{ title: string; message: string }>;
 }
 
 interface PluginSettings {
+  recordSyncPerformance: boolean;
   legacyMigrationPending: boolean;
   mobile: MobileOptions;
   lightweightGuideProgress?: { step: number; complete: boolean; repoUrl: string; branch: string; login: string };
@@ -162,6 +165,7 @@ interface PluginSettings {
 }
 
 const DEFAULT_SETTINGS: PluginSettings = {
+  recordSyncPerformance: false,
   enabled: false,
   legacyMigrationPending: false,
   boundRepoUrl: "",
@@ -265,7 +269,9 @@ function base64ToArrayBuffer(value: string): ArrayBuffer {
 }
 
 function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  // Errors from other windows or hosts do not share this realm’s Error constructor.
+  return error && typeof error === "object" && "message" in error && typeof error.message === "string"
+    ? error.message : String(error);
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -337,7 +343,9 @@ export default class SyncFeature extends Component {
   private setupChoices: Record<string, OverlapChoice> = {};
   private setupTrackingChoice?: "keep" | "rebuild";
   private mobileGithub?: MobileGithub;
+  private lightweightPlan?: MobilePlan;
   private switchingSyncMode = false;
+  private mobileAutomationGeneration = 0;
 
   async initialize(): Promise<void> {
     await migrateLinkFiles(this.app.vault.adapter, this.app.vault.configDir, this.manifest.id, !legacySyncRunning(this.app), SHARED_SETTING_KEYS);
@@ -366,6 +374,7 @@ export default class SyncFeature extends Component {
   }
 
   async setFeatureEnabled(enabled: boolean): Promise<void> {
+    if (this.switchingSyncMode) { new Notice("请等待同步模式切换完成。"); return; }
     if (enabled && legacySyncRunning(this.app)) { new Notice("请先关闭旧 Simple Link 的同步，避免两套引擎同时操作笔记库。"); return; }
     if (!enabled && this.syncing) { new Notice("请等待当前同步完成后再关闭。"); return; }
     if (enabled && this.settings.legacyMigrationPending) {
@@ -393,41 +402,67 @@ export default class SyncFeature extends Component {
 
   async setLightweightSyncEnabled(enabled: boolean): Promise<void> {
     if (!Platform.isMobile) { await this.setDesktopSyncMode(enabled ? "lightweight" : "off"); return; }
-    if (this.syncing || this.switchingSyncMode) { new Notice("请等待当前同步完成。"); return; }
-    if (enabled) await this.getMobileGithub().load();
-    this.deactivateFeature();
-    this.settings.mobileSyncEnabled = enabled;
-    if (enabled) {
-      this.settings.mobile.mode = "github";
-      this.settings.desktopGitEnabled = false;
-      this.settings.desktopLightweightEnabled = false;
-    }
-    await this.saveSettings();
-    if (this.settings.enabled) this.activateFeature();
+    await this.changeSyncMode(enabled, () => {
+      this.settings.mobileSyncEnabled = enabled;
+      if (enabled) {
+        this.settings.mobile.mode = "github";
+        this.settings.desktopGitEnabled = false;
+        this.settings.desktopLightweightEnabled = false;
+      }
+    });
   }
 
   async setDesktopSyncMode(mode: "git" | "lightweight" | "off"): Promise<void> {
     if (Platform.isMobile) return;
-    if (this.syncing || this.switchingSyncMode) { new Notice("请等待当前同步或模式切换完成。"); return; }
-    if (mode === "lightweight") await this.getMobileGithub().load();
-    this.switchingSyncMode = true;
-    try {
-    this.deactivateFeature();
-    this.settings.desktopGitEnabled = false;
-    this.settings.desktopLightweightEnabled = false;
-    await this.desktopGitQueue;
-    if (mode === "lightweight") {
-      await this.getMobileGithub().load();
-      this.settings.mobile.mode = "github";
-      this.settings.desktopLightweightEnabled = true;
-    } else {
+    await this.changeSyncMode(mode === "lightweight", () => {
       this.settings.desktopGitEnabled = mode === "git";
-      if (mode === "git") this.settings.mobile.mode = "github";
+      this.settings.desktopLightweightEnabled = mode === "lightweight";
+      if (mode !== "off") this.settings.mobile.mode = "github";
+    });
+  }
+
+  private async changeSyncMode(loadLightweight: boolean, apply: () => void): Promise<void> {
+    if (this.syncing || this.switchingSyncMode) { new Notice("请等待当前同步或模式切换完成。"); return; }
+    this.switchingSyncMode = true;
+    const previous = {
+      desktopGitEnabled: this.settings.desktopGitEnabled,
+      desktopLightweightEnabled: this.settings.desktopLightweightEnabled,
+      mobileSyncEnabled: this.settings.mobileSyncEnabled
+    };
+    const previousMobileMode = this.settings.mobile.mode;
+    const previousStartupPullScheduled = this.startupPullScheduled;
+    let saveAttempted = false;
+    try {
+      this.deactivateFeature();
+      // Keep the running Git task's settings intact until it safely finishes.
+      await this.desktopGitQueue;
+      this.clearDesktopTimeouts();
+      if (loadLightweight) await this.getMobileGithub().load();
+      apply();
+      this.startupPullScheduled = false;
+      saveAttempted = true;
+      await this.saveSettings();
+      if (this.settings.enabled) this.activateFeature();
+    } catch (error) {
+      this.deactivateFeature();
+      Object.assign(this.settings, previous);
+      this.settings.mobile.mode = previousMobileMode;
+      this.startupPullScheduled = previousStartupPullScheduled;
+      try {
+        if (saveAttempted) await this.saveSettings();
+        if (this.settings.enabled) this.activateFeature();
+      } catch (restoreError) {
+        this.deactivateFeature();
+        this.settings.enabled = false;
+        const failure = new Error(`同步模式切换失败：${messageOf(error)}；恢复旧模式失败：${messageOf(restoreError)}。同步已停止，请检查设置后重新启用。`);
+        this.setStatus(failure.message);
+        throw failure;
+      }
+      throw error;
+    } finally {
+      this.switchingSyncMode = false;
+      await this.refreshSyncView();
     }
-    this.startupPullScheduled = false;
-    await this.saveSettings();
-    if (this.settings.enabled) this.activateFeature();
-    } finally { this.switchingSyncMode = false; }
   }
 
   getMobileGithub(): MobileGithub {
@@ -437,7 +472,8 @@ export default class SyncFeature extends Component {
         (message) => {
           if (this.syncing) this.setSyncActivity(message, "checking");
           else this.setStatus(message);
-        });
+        }, (context, status, message) => this.recordOperationLog(context, status, message),
+        () => this.settings.recordSyncPerformance === true);
       this.register(this.mobileGithub.onRemainingChange(() => {
         for (const leaf of this.app.workspace.getLeavesOfType(ZoeySyncView.type)) {
           if (leaf.view instanceof ZoeySyncView) leaf.view.updateQuota();
@@ -462,82 +498,88 @@ export default class SyncFeature extends Component {
     } finally { this.switchingSyncMode = false; }
   }
 
-  async completeLightweightGuide(options: MobileOptions): Promise<void> {
+  async completeLightweightGuide(options: MobileOptions, onProgress?: (message: string) => void): Promise<void> {
     if (this.host.share?.busy) throw new Error("请等待笔记分享发布完成。");
     if (legacySyncRunning(this.app)) throw new Error("请先关闭旧 Simple Link 的同步，再完成新入口的接入。");
-    if (this.syncing || this.switchingSyncMode) throw new Error("请等待当前同步或模式切换完成后重试。");
-    if (this.getMobileGithub().downloadTask) { await this.openDownloadTask(); return; }
+    if (this.syncing || this.switchingSyncMode || this.desktopTaskActive) throw new Error("请等待当前同步或模式切换完成后重试。");
     this.switchingSyncMode = true;
-    this.syncing = true;
     this.deactivateFeature();
     const previous = { mobile: this.settings.mobile, boundRepoUrl: this.settings.boundRepoUrl,
       desktopGitEnabled: this.settings.desktopGitEnabled, desktopLightweightEnabled: this.settings.desktopLightweightEnabled,
-      mobileSyncEnabled: this.settings.mobileSyncEnabled };
-    let bound = false;
+      mobileSyncEnabled: this.settings.mobileSyncEnabled, enabled: this.settings.enabled,
+      lightweightGuideProgress: this.settings.lightweightGuideProgress };
+    const candidate = { ...options, plugins: [...options.plugins], ignorePatterns: [...options.ignorePatterns], mode: "github" as const, bound: false };
+    let engine: MobileGithub | undefined;
+    let previousState: MobileGithub["state"] | undefined;
+    let complete = false;
+    const current = () => { if (this.settings.mobile !== candidate) throw new Error("接入配置已变化，请重新核验仓库。"); };
     try {
       await this.desktopGitQueue;
       if (this.settings.legacyMigrationPending) {
         await migrateLinkFiles(this.app.vault.adapter, this.app.vault.configDir, this.manifest.id, true, SHARED_SETTING_KEYS);
-        this.settings.legacyMigrationPending = false;
-        this.mobileGithub = undefined;
+        this.settings.legacyMigrationPending = false; this.mobileGithub = undefined;
       }
-      const engine = this.getMobileGithub();
+      engine = this.getMobileGithub();
       await engine.load();
-      this.settings.mobile = { ...options, plugins: [...options.plugins], ignorePatterns: [...options.ignorePatterns], mode: "github", bound: false };
-      const verified = await engine.verifyAccess();
-      const remote = await engine.bind(verified);
-      bound = true;
-      this.settings.mobile.branch = remote.branch;
-      this.settings.mobile.bound = true;
-      this.settings.boundRepoUrl = this.settings.mobile.repoUrl;
+      if (engine.state.pending || engine.state.downloadVerification) throw new Error("还有未完成的同步或下载验证，请先用原连接恢复或重新检查接入；本机规则尚未改写。");
+      previousState = engine.state;
+      this.settings.mobile = candidate;
+      onProgress?.("正在核验仓库…");
+      const verified = await engine.verifyAccess(); current();
+      candidate.branch = verified.branch;
+      onProgress?.("正在准备本机规则…");
+      await engine.prepareLocalRules(); current();
+      onProgress?.("正在保存接入配置…");
+      await engine.bind(verified); current();
+      candidate.bound = true;
+      this.settings.boundRepoUrl = candidate.repoUrl;
       this.settings.desktopGitEnabled = false;
       this.settings.desktopLightweightEnabled = !Platform.isMobile;
       this.settings.mobileSyncEnabled = Platform.isMobile;
       this.settings.enabled = true;
-      await this.saveSettings();
-      await this.mobileHost().save();
-      // Capture edits and moves during the review, while syncing suppresses automation.
-      this.activateFeature();
-      this.setStatus("正在检查首次同步差异…");
-      const plan = await engine.preview();
-      if (!await new MobileSyncModal(this.app, engine, plan, live => this.reviewLightweightDifferences(live), this.lightweightFlow()).wait()) {
-        if (engine.downloadTask) { this.setStatus("云端更新已确认 · 下载待办已保存，请从红色提醒继续"); return; }
-        this.setStatus("首次同步未完成，请继续接入或手动同步");
-        throw new Error("已保存连接，但同步已取消，接入尚未完成；请重试并确认同步以建立共同基线。");
-      }
-      if (!engine.state.baseCommitSha) throw new Error("同步未建立共同基线，请重新预览同步。");
-      this.settings.lastSyncAt = Date.now();
-      this.settings.lightweightGuideProgress = { step: 4, complete: true, repoUrl: this.settings.mobile.repoUrl, branch: this.settings.mobile.branch,
-        login: this.settings.lightweightGuideProgress?.login || "" };
-      await this.saveSettings();
-      this.setStatus("GitHub API · 两端已对齐");
-      await this.recordSuccess("轻量首次同步", "已完成同步，保存共同基线与本地哈希缓存。");
+      this.settings.lightweightGuideProgress = { step: 4, complete: true, repoUrl: candidate.repoUrl, branch: candidate.branch, login: verified.login };
+      await this.saveSettings(); current();
+      complete = true;
+      this.setStatus("接入完成 · 请在侧边栏手动同步");
+      onProgress?.("接入完成");
+      try { await this.recordSuccess("轻量接入", "账号、仓库权限、本机规则与绑定配置已准备；尚未执行同步。"); }
+      catch { /* Optional log failures do not invalidate a completed connection. */ }
     } catch (error) {
-      // After a successful bind, retain the matching options rather than restore a stale binding.
-      if (!bound) Object.assign(this.settings, previous);
+      if (!complete && this.settings.mobile === candidate) {
+        Object.assign(this.settings, previous);
+        if (engine && previousState) {
+          engine.state = previousState;
+          try { await engine.save(); } catch { /* Preserve the original failure; the next attempt rechecks persisted state. */ }
+        }
+        try { await this.saveSettings(); } catch { /* Do not report success after a failed local save. */ }
+      }
       throw error;
     } finally {
-      this.syncing = false;
       this.switchingSyncMode = false;
       this.clearSyncActivity();
       if (this.settings.enabled) this.activateFeature();
-      await this.refreshSyncView();
+      if (complete) this.setStatus("接入完成 · 请在侧边栏手动同步");
+      await this.refreshSyncView(true);
     }
   }
 
   restartMobileAutomation(): void {
+    const generation = ++this.mobileAutomationGeneration;
     if (!this.useLightweightSync() || !this.featureActive) return;
     for (const interval of this.featureIntervals) window.clearInterval(interval);
     this.featureIntervals = [];
     const options = this.settings.mobile;
+    const mode = options.mode;
+    const current = () => generation === this.mobileAutomationGeneration && this.featureActive && this.settings.enabled &&
+      !this.switchingSyncMode && this.useLightweightSync() && this.settings.mobile === options && options.mode === mode;
     if (options.mode === "server") {
-      this.addFeatureInterval(window.setInterval(() => void this.pollCommands(), Math.max(15, this.settings.commandPollSeconds) * 1000));
+      this.addFeatureInterval(window.setInterval(() => { if (current()) void this.pollCommands(); }, Math.max(15, this.settings.commandPollSeconds) * 1000));
       if (this.settings.mobileAutoSyncMinutes > 0) this.addFeatureInterval(window.setInterval(
-        () => void this.syncNow(false), Math.max(1, this.settings.mobileAutoSyncMinutes) * 60000));
+        () => { if (current()) void this.syncNow(false); }, Math.max(1, this.settings.mobileAutoSyncMinutes) * 60000));
       return;
     }
     if (options.autoSyncMinutes > 0) this.addFeatureInterval(window.setInterval(
-      () => { if (options.bound) void this.syncNow(false); }, Math.max(1, options.autoSyncMinutes) * 60000));
+      () => { if (current() && options.bound && this.getMobileGithub().state.baseCommitSha) void this.syncNow(false); }, Math.max(1, options.autoSyncMinutes) * 60000));
   }
 
   mobileHost(): MobileHost {
@@ -570,7 +612,7 @@ export default class SyncFeature extends Component {
 
   async calibrateMobileHashes(): Promise<void> {
     if (!this.useLightweightSync()) { new Notice("请先启用轻量 GitHub API 同步。"); return; }
-    if (this.syncing) { new Notice("同步期间不能重新校验。"); return; }
+    if (this.syncing || this.switchingSyncMode) { new Notice("同步或模式切换期间不能重新校验。"); return; }
     try {
       const result = await this.getMobileGithub().refreshCache(true);
       new Notice(`已校验 ${result.files} 个同步文件，用时 ${result.seconds.toFixed(2)} 秒；共同基准未改变。`);
@@ -588,7 +630,12 @@ export default class SyncFeature extends Component {
       this.restartMobileAutomation();
       this.setStatus(Platform.isMobile ? "移动端 · 等待同步" : "电脑端 · 轻量 API 模式");
       if (this.settings.mobile.mode === "server") {
-        window.setTimeout(() => void this.registerMobile().catch((error) => this.recordError("手机连接", error)), 1000);
+        const generation = this.mobileAutomationGeneration;
+        window.setTimeout(() => {
+          if (generation === this.mobileAutomationGeneration && this.featureActive && !this.switchingSyncMode && this.useLightweightSync()) {
+            void this.registerMobile().catch((error) => this.recordError("手机连接", error));
+          }
+        }, 1000);
       }
     } else if (this.nativeGitEnabled()) {
       this.configureDesktopAutomation();
@@ -598,6 +645,7 @@ export default class SyncFeature extends Component {
   }
 
   private deactivateFeature(): void {
+    this.mobileAutomationGeneration++;
     this.featureActive = false;
     for (const ref of this.featureEvents) this.app.vault.offref(ref);
     this.featureEvents = [];
@@ -796,15 +844,33 @@ export default class SyncFeature extends Component {
     await this.recordLog(context, "success", message);
   }
 
-  private async recordLog(context: string, status: "success" | "error", message = ""): Promise<void> {
+  private syncLog?: { context: string; timings: NonNullable<ErrorLogEntry["timings"]>; recorded: boolean };
+
+  async recordOperationLog(context: string, status: "success" | "error", message: string): Promise<void> {
+    if (context.startsWith("轻量") && context.endsWith("耗时")) {
+      if (!this.settings.recordSyncPerformance) return;
+      if (this.syncLog) {
+        this.syncLog.timings.push({ title: context.replace(/耗时$/, ""), message });
+        return;
+      }
+      await this.recordLog("轻量检查", status, status === "error" ? "检查失败" : "检查完成",
+        [{ title: context.replace(/耗时$/, ""), message }]);
+      return;
+    }
+    await this.recordLog(context, status, message);
+  }
+
+  private async recordLog(context: string, status: "success" | "error" | "pending", message = "", timings?: ErrorLogEntry["timings"]): Promise<void> {
     try {
       this.pruneErrorLogs();
       this.settings.errorLogs.push({
         timestamp: Date.now(),
         context,
         message,
-        status
+        status,
+        ...(timings ? { timings } : this.syncLog?.context === context ? { timings: this.syncLog.timings } : {})
       });
+      if (this.syncLog?.context === context) this.syncLog.recorded = true;
       this.settings.errorLogs = this.settings.errorLogs.slice(-MAX_ERROR_LOGS);
       await this.saveSettings();
     } catch (saveError) {
@@ -818,16 +884,23 @@ export default class SyncFeature extends Component {
   }
 
   getActiveSyncError(): ErrorLogEntry | undefined {
-    const logs = this.getRecentErrorLogs();
-    const latestFetch = logs.find((entry) => /Fetch|Pull|Push|同步/.test(entry.context));
-    const latestPush = logs.find((entry) => /Push|同步/.test(entry.context));
-    return [latestFetch, latestPush]
+    const recent = this.getRecentErrorLogs();
+    const connected = recent.findIndex(entry => entry.context === "轻量接入" && entry.status === "success");
+    const logs = recent.filter((entry, index) => !(connected >= 0 && index > connected &&
+      entry.status === "error" && /请先完成(?:手机端|轻量同步).*引导/.test(entry.message)));
+    const latestFetch = logs.find((entry) => entry.status !== "pending" && /Fetch|Pull|Push|同步/.test(entry.context));
+    const latestPush = logs.find((entry) => entry.status !== "pending" && /Push|同步/.test(entry.context));
+    // A successful Fetch also resolves an earlier generic sync/setup error.
+    // An explicit Push failure still needs a successful Push or full sync.
+    return [latestFetch, latestPush && /Push/.test(latestPush.context) ? latestPush : undefined]
       .filter((entry): entry is ErrorLogEntry => !!entry && entry.status === "error")
       .sort((a, b) => b.timestamp - a.timestamp)[0];
   }
 
-  async clearErrorLogs(): Promise<void> {
-    this.settings.errorLogs = [];
+  openShareLogs(): void { new ErrorLogModal(this.app, this, "分享").open(); }
+
+  async clearErrorLogs(contextPrefix = ""): Promise<void> {
+    this.settings.errorLogs = contextPrefix ? this.settings.errorLogs.filter(entry => !entry.context.startsWith(contextPrefix)) : [];
     await this.saveSettings();
     await this.refreshSyncView();
   }
@@ -965,9 +1038,11 @@ export default class SyncFeature extends Component {
   }
 
   private enqueueSetupGit<T>(task: () => Promise<T>): Promise<T> {
+    if (this.switchingSyncMode) return Promise.reject(new SyncDeferredError("同步模式切换中，请稍后重试"));
     this.setupGitPaused = true;
     this.clearDesktopTimeouts();
     const run = this.desktopGitQueue.then(async () => {
+      if (this.switchingSyncMode) throw new SyncDeferredError("同步模式切换中，请稍后重试");
       if (this.host.share?.busy || legacySyncRunning(this.app)) throw new Error("请先等待分享完成或关闭旧 Simple Link 同步");
       this.desktopTaskActive = true;
       try { return await task(); } finally { this.desktopTaskActive = false; }
@@ -977,10 +1052,12 @@ export default class SyncFeature extends Component {
   }
 
   private enqueueDesktopGit(task: () => Promise<void | boolean>, errorContext?: string): Promise<void> {
+    if (this.switchingSyncMode) return Promise.reject(new SyncDeferredError("同步模式切换中，请稍后重试"));
     if (this.setupGitPaused) return Promise.reject(new SyncDeferredError("接入引导中，后台 Git 同步已暂停"));
     if (!this.nativeGitEnabled()) return Promise.reject(new SyncDeferredError("电脑端原生 Git 同步已关闭"));
     if (!this.settings.setupComplete) return Promise.reject(new Error("请先完成首次使用引导"));
     const trackedTask = async (): Promise<void> => {
+      if (this.switchingSyncMode) throw new SyncDeferredError("同步模式切换中，请稍后重试");
       if (this.setupGitPaused) throw new SyncDeferredError("接入引导中，后台 Git 同步已暂停");
       if (this.host.share?.busy) throw new SyncDeferredError("笔记分享正在发布，主库自动同步暂缓。");
       if (legacySyncRunning(this.app)) throw new SyncDeferredError("旧 Simple Link 仍在运行，已暂停新入口的 Git 操作");
@@ -990,9 +1067,9 @@ export default class SyncFeature extends Component {
       try {
       const isFetchTask = !!errorContext && (errorContext.includes("Fetch") || errorContext.includes("Pull"));
       const isPushTask = !!errorContext && (errorContext.includes("Push") || errorContext.includes("同步"));
-      this.desktopGitTrace = isFetchTask || isPushTask
+      this.desktopGitTrace = this.settings.recordSyncPerformance && (isFetchTask || isPushTask)
         ? [
-            `远端：origin/${this.settings.gitBranch}`,
+            `远端：${this.settings.gitRemoteUrl} · ${this.settings.gitBranch}`,
             "凭据路径：GitHub CLI"
           ]
         : [];
@@ -1003,11 +1080,15 @@ export default class SyncFeature extends Component {
           : isFetchTask
             ? meaningfulChange === false ? "GitHub 连接成功；无需合并" : "GitHub 连接成功；检查或合并完成"
             : "本机操作完成；未执行 GitHub 远端连接检查";
-        const detail = [resultMessage, ...this.desktopGitTrace].filter(Boolean).join("\n");
-        await this.recordSuccess(errorContext, detail);
+        await this.recordLog(`完整同步 · ${errorContext}`, "success", resultMessage,
+          this.settings.recordSyncPerformance && this.desktopGitTrace.length
+            ? [{ title: "完整同步执行", message: this.desktopGitTrace.join("\n") }] : undefined);
       }
       this.clearSyncActivity();
       } finally {
+        if (this.settings.recordSyncPerformance && this.syncLog && !this.useLightweightSync() && this.desktopGitTrace.length) {
+          this.syncLog.timings.push({ title: "完整同步执行", message: this.desktopGitTrace.join("\n") });
+        }
         this.desktopTaskActive = false;
         await this.refreshSyncView();
       }
@@ -1022,7 +1103,9 @@ export default class SyncFeature extends Component {
       }
       console.error("同步 desktop task", error);
       if (errorContext) {
-        await this.recordError(errorContext, [...this.desktopGitTrace, describeGitError(error)].join("\n"));
+        await this.recordLog(`完整同步 · ${errorContext}`, "error", describeGitError(error),
+          this.settings.recordSyncPerformance && this.desktopGitTrace.length
+            ? [{ title: "完整同步执行", message: this.desktopGitTrace.join("\n") }] : undefined);
         if (errorContext.includes("Push") || errorContext.includes("同步")) {
           await this.scheduleDesktopPushRetry();
         } else if (errorContext.includes("Fetch") || errorContext.includes("Pull")) {
@@ -1035,13 +1118,14 @@ export default class SyncFeature extends Component {
   }
 
   private async traceDesktopGitStep<T>(label: string, action: () => Promise<T>): Promise<T> {
+    if (!this.settings.recordSyncPerformance) return action();
     const startedAt = Date.now();
     try {
       const result = await action();
-      this.desktopGitTrace.push(`${label}：成功（${Date.now() - startedAt} ms）`);
+      this.desktopGitTrace.push(`${label}：${((Date.now() - startedAt) / 1000).toFixed(2)} 秒`);
       return result;
     } catch (error) {
-      this.desktopGitTrace.push(`${label}：失败（${Date.now() - startedAt} ms）`);
+      this.desktopGitTrace.push(`${label}：失败 · ${((Date.now() - startedAt) / 1000).toFixed(2)} 秒`);
       throw error;
     }
   }
@@ -1076,12 +1160,17 @@ export default class SyncFeature extends Component {
     if (worktrees.split(/\r?\n/).filter((line) => line.startsWith("worktree ")).length !== 1) {
       throw new Error("仓库存在其他工作树，暂不能清理本地历史");
     }
-    const allowedRefs = new Set([`refs/heads/${branch}`, `refs/remotes/origin/${branch}`, "refs/remotes/origin/HEAD"]);
+    const allowedRefs = new Set([`refs/heads/${branch}`, await remoteSnapshotRef(this.settings.gitRemoteUrl, branch)]);
+    // Existing user tracking refs remain untouched; only tolerate history already in HEAD.
+    for (const ref of [`refs/remotes/origin/${branch}`, "refs/remotes/origin/HEAD"]) {
+      try { await this.git(["merge-base", "--is-ancestor", ref, "HEAD"]); allowedRefs.add(ref); }
+      catch { /* Unrelated references still block history cleanup. */ }
+    }
     const refs = (await this.gitRaw(["for-each-ref", "--format=%(refname)"])).split(/\r?\n/).filter(Boolean);
     const extraRefs = refs.filter((ref) => !allowedRefs.has(ref));
     if (extraRefs.length) throw new Error(`仓库还存在其他分支、标签或暂存引用（如 ${extraRefs[0]}），请先处理后再清理`);
     const head = await this.git(["rev-parse", "HEAD"]);
-    const remoteLine = await this.git(["ls-remote", "--exit-code", "origin", `refs/heads/${branch}`], true);
+    const remoteLine = await this.git(["ls-remote", "--exit-code", "--", this.settings.gitRemoteUrl, `refs/heads/${branch}`], true);
     const remoteHead = remoteLine.split(/\s+/)[0];
     if (!/^[a-f0-9]{40,64}$/i.test(remoteHead) || remoteHead !== head) {
       throw new Error("GitHub 分支与本机 HEAD 不一致；请先完成 Fetch、Merge 和 Push，再重新检查");
@@ -1103,8 +1192,8 @@ export default class SyncFeature extends Component {
         result = { before, after: before };
         return false;
       }
-      await this.git(["fetch", `--shallow-since=${before.cutoff}`, "--no-tags", "origin", `refs/heads/${before.branch}`], true);
-      const remoteLine = await this.git(["ls-remote", "--exit-code", "origin", `refs/heads/${before.branch}`], true);
+      await this.git(["fetch", `--shallow-since=${before.cutoff}`, "--no-tags", "--refmap=", "--", this.settings.gitRemoteUrl, `+refs/heads/${before.branch}:${await remoteSnapshotRef(this.settings.gitRemoteUrl, before.branch)}`], true);
+      const remoteLine = await this.git(["ls-remote", "--exit-code", "--", this.settings.gitRemoteUrl, `refs/heads/${before.branch}`], true);
       if (remoteLine.split(/\s+/)[0] !== before.head) {
         throw new Error("清理期间 GitHub 分支发生变化，已停止删除旧对象；请先同步后重试");
       }
@@ -1119,7 +1208,7 @@ export default class SyncFeature extends Component {
 
   private async getUnpushedCommitWindow(): Promise<{ oldestAt: number; latestAt: number } | null> {
     if (!(await this.hasDesktopHead())) return null;
-    const remoteRef = `refs/remotes/origin/${this.settings.gitBranch}`;
+    const remoteRef = await remoteSnapshotRef(this.settings.gitRemoteUrl, this.settings.gitBranch);
     let range = "HEAD";
     try {
       await this.git(["show-ref", "--verify", "--quiet", remoteRef]);
@@ -1391,8 +1480,18 @@ export default class SyncFeature extends Component {
     return {
       strategy: async plan => (await this.lightweightView()).chooseStrategy(plan),
       confirm: async plan => (await this.lightweightView()).confirmLightweightPlan(plan),
-      transfer: () => this.openDownloadTask()
+      transfer: () => this.openDownloadTask(),
+      ready: plan => this.showLightweightPlan(plan)
     };
+  }
+
+  getLightweightPlan(): MobilePlan | undefined {
+    return this.syncing && this.useLightweightSync() && this.settings.mobile.mode === "github" ? this.lightweightPlan : undefined;
+  }
+
+  private async showLightweightPlan(plan: MobilePlan): Promise<void> {
+    this.lightweightPlan = plan;
+    await this.refreshSyncView(true);
   }
 
   async openDownloadTask(): Promise<void> {
@@ -1404,21 +1503,26 @@ export default class SyncFeature extends Component {
     if (this.syncing || this.switchingSyncMode || this.host.share?.busy) throw new Error("请等待当前同步或发布结束再处理下载待办。");
     const engine = this.getMobileGithub();
     this.syncing = true;
+    this.syncLog = { context: "轻量同步 · 手动继续下载", timings: [], recorded: false };
     const expectedCommit = engine.state.pending?.commit;
     try {
       await action();
-      if (!engine.downloadTask && engine.state.baseCommitSha === expectedCommit) {
+      const rechecked = engine.needsLocalRecheck;
+      if (rechecked && !await this.runLightweightCycle(engine, true, 1)) return;
+      if (!engine.downloadTask && !engine.needsLocalRecheck && (engine.state.baseCommitSha === expectedCommit || rechecked && engine.state.baseCommitSha)) {
         this.settings.lastSyncAt = Date.now();
         this.settings.lightweightGuideProgress = { step: 4, complete: true, repoUrl: this.settings.mobile.repoUrl,
           branch: this.settings.mobile.branch, login: this.settings.lightweightGuideProgress?.login || "" };
         await this.saveSettings();
         this.setStatus("GitHub API · 两端已对齐");
-        await this.recordSuccess("下载待办", "文件已应用并验证，共同基准已确认。");
+        await this.recordSuccess("轻量同步 · 手动继续下载", "文件已应用并验证，共同基准已确认。");
       }
     } catch (error) {
-      await this.recordError("下载待办", error);
+      await this.recordError("轻量同步 · 手动继续下载", error);
       throw error;
     } finally {
+      if (this.syncLog && !this.syncLog.recorded) await this.recordLog(this.syncLog.context, "pending", "下载待办已重新检查，请重新预览同步。");
+      this.syncLog = undefined;
       this.syncing = false;
       this.clearSyncActivity();
       await this.refreshSyncView();
@@ -1445,12 +1549,13 @@ export default class SyncFeature extends Component {
 
   needsLightweightBaseline(): boolean {
     return this.useLightweightSync() && this.settings.mobile.mode === "github" &&
-      this.settings.mobile.bound && !this.getMobileGithub().state.baseCommitSha;
+      this.settings.mobile.bound && !this.getMobileGithub().state.baseCommitSha && !this.getMobileGithub().needsLocalRecheck;
   }
 
   getLightweightPendingStatus(): ViewStatusState | undefined {
     if (!this.useLightweightSync() || this.settings.mobile.mode !== "github") return undefined;
     if (!this.settings.mobile.bound) return { tone: "pending", text: "轻量同步尚未接入" };
+    if (this.mobileGithub?.needsLocalRecheck) return { tone: "pending", text: "同步期间的新修改已保留 · 安全文件已处理 · 待继续核对" };
     if (this.mobileGithub?.downloadTask) return { tone: "pending", text: "下载待办未完成 · 点击上方红色提醒继续" };
     const verification = this.mobileGithub?.state.downloadVerification;
     if (verification) return { tone: "pending", text: `下载${verification.phase === "verifying" ? "验证" : "同步"}未完成 · 保留原基准 · 点击同步继续恢复` };
@@ -1496,7 +1601,7 @@ export default class SyncFeature extends Component {
   }
 
   private async getPendingUploadChanges(): Promise<ChangeItem[]> {
-    const remoteRef = `refs/remotes/origin/${this.settings.gitBranch}`;
+    const remoteRef = await remoteSnapshotRef(this.settings.gitRemoteUrl, this.settings.gitBranch);
     let hasRemoteRef = false;
     try {
       await this.git(["show-ref", "--verify", "--quiet", remoteRef]);
@@ -1530,7 +1635,7 @@ export default class SyncFeature extends Component {
   }
 
   isSyncing(): boolean {
-    return this.syncing || this.desktopTaskActive;
+    return this.syncing || this.desktopTaskActive || this.switchingSyncMode;
   }
 
   private registerMobileEvents(): void {
@@ -1619,6 +1724,7 @@ export default class SyncFeature extends Component {
   }
 
   async registerMobile(): Promise<void> {
+    if (this.switchingSyncMode) return;
     if (this.settings.mobile.mode !== "server") return;
     if (!this.settings.enabled || !Platform.isMobile || !this.settings.serverUrl || !this.settings.serverPassword) return;
     await this.serverRequest<{ currentVersion: number }>("POST", "/v1/devices/register", {
@@ -1630,6 +1736,7 @@ export default class SyncFeature extends Component {
   }
 
   async testConnection(showNotice: boolean): Promise<void> {
+    if (this.switchingSyncMode) { if (showNotice) new Notice("请等待同步模式切换完成。"); return; }
     try {
       if (this.useLightweightSync()) {
         if (this.settings.mobile.mode === "github") await this.getMobileGithub().verify();
@@ -1646,7 +1753,28 @@ export default class SyncFeature extends Component {
     }
   }
 
+  private async runLightweightCycle(engine: MobileGithub, interactive: boolean, attempts = 2): Promise<boolean> {
+    const scope = await engine.recheckScope?.();
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        const plan = await engine.preview();
+        if (interactive) {
+          if (!await new MobileSyncModal(this.app, engine, plan, live => this.reviewLightweightDifferences(live), this.lightweightFlow()).wait()) return false;
+        } else {
+          if ((!engine.state.baseCommitSha && !engine.needsLocalRecheck) || plan.conflicts.length) throw new SyncDeferredError("有首次配对或冲突待确认，请手动同步。");
+          await this.showLightweightPlan(plan); await engine.execute(plan);
+        }
+        if (!engine.needsLocalRecheck) return true;
+      } catch (error) { if (!(error instanceof LocalSyncEdit)) throw error; }
+      await engine.recheckScope?.(scope);
+      this.setSyncActivity("检测到同步期间的新修改，正在重新核对…", "checking");
+    }
+    this.setStatus("安全文件已处理，持续修改留待下次同步");
+    return false;
+  }
+
   async syncNow(showNotice: boolean): Promise<void> {
+    if (this.switchingSyncMode) { if (showNotice) new Notice("请等待同步模式切换完成。"); return; }
     if (this.host.share?.busy) { if (showNotice) new Notice("笔记分享正在发布，请稍后同步主库。"); return; }
     if (legacySyncRunning(this.app)) { if (showNotice) new Notice("请先关闭旧 Simple Link 的同步。"); return; }
     if (!this.useLightweightSync() && !this.nativeGitEnabled()) { if (showNotice) new Notice("当前设备同步已关闭"); return; }
@@ -1664,6 +1792,8 @@ export default class SyncFeature extends Component {
     }
     this.syncing = true;
     this.setStatus(this.useLightweightSync() ? "正在同步…" : "准备检查本机修改…");
+    const logContext = `${this.useLightweightSync() ? "轻量同步" : "完整同步"} · ${showNotice ? "手动" : "自动"}`;
+    this.syncLog = { context: logContext, timings: [], recorded: false };
     try {
       if (this.useLightweightSync()) {
         if (this.settings.mobile.mode === "github") {
@@ -1674,15 +1804,7 @@ export default class SyncFeature extends Component {
             if (showNotice) await this.openDownloadTask();
             return;
           }
-          const plan = await engine.preview();
-          if (showNotice) {
-            if (!await new MobileSyncModal(this.app, engine, plan, live => this.reviewLightweightDifferences(live), this.lightweightFlow()).wait()) return;
-          } else {
-            if (!engine.state.baseCommitSha || plan.conflicts.length || plan.localDeletes.length || plan.remoteDeletes.length) {
-              throw new SyncDeferredError("有首次配对、冲突或删除待确认，请手动预览同步。");
-            }
-            await engine.execute(plan);
-          }
+          if (!await this.runLightweightCycle(engine, showNotice)) return;
         } else await this.mobileSync();
         this.settings.lastSyncAt = Date.now();
         await this.saveSettings();
@@ -1691,7 +1813,7 @@ export default class SyncFeature extends Component {
         await this.enqueueDesktopGit(() => this.desktopGitSync());
         this.setStatus("同步检查完成");
       }
-      await this.recordSuccess(showNotice ? "手动同步" : "自动同步", "同步检查完成");
+      await this.recordSuccess(logContext, "同步检查完成");
       if (showNotice) new Notice("同步：同步完成");
     } catch (error) {
       if (error instanceof SyncDeferredError) {
@@ -1700,11 +1822,14 @@ export default class SyncFeature extends Component {
         return;
       }
       if (!this.useLightweightSync()) await this.scheduleDesktopPushRetry();
-      await this.recordError(showNotice ? "手动同步" : "自动同步", error);
+      await this.recordError(logContext, error);
       this.setStatus(this.useLightweightSync() ? "同步失败" : "同步失败 · 5 分钟后重试");
       if (showNotice) new Notice(`同步：${messageOf(error)}`, 10000);
       else console.error("同步", error);
     } finally {
+      if (this.syncLog && !this.syncLog.recorded) await this.recordLog(logContext, "pending", "同步检查结束，尚未确认完成");
+      this.syncLog = undefined;
+      this.lightweightPlan = undefined;
       this.syncing = false;
       this.clearSyncActivity();
       await this.refreshSyncView();
@@ -1712,6 +1837,7 @@ export default class SyncFeature extends Component {
   }
 
   async commitNow(showNotice: boolean): Promise<void> {
+    if (this.switchingSyncMode) { if (showNotice) new Notice("请等待同步模式切换完成。"); return; }
     if (legacySyncRunning(this.app)) { if (showNotice) new Notice("请先关闭旧 Simple Link 的同步。"); return; }
     if (this.nativeGitEnabled() && !this.settings.setupComplete) {
       if (showNotice) new Notice("请先完成「从零开始的 Git 同步引导」");
@@ -1772,6 +1898,7 @@ export default class SyncFeature extends Component {
   }
 
   private async mobileSync(): Promise<void> {
+    const generation = this.mobileAutomationGeneration;
     await this.registerMobile();
     if (this.settings.inFlight.length === 0 && this.settings.dirty.length > 0) {
       this.settings.inFlight = this.settings.dirty;
@@ -1814,7 +1941,9 @@ export default class SyncFeature extends Component {
     await this.saveSettings();
     const triggerSync = await this.handleCommands(response.commands ?? []);
     if (response.gitWarning) new Notice(`同步：GitHub 暂时不可用，本地服务器同步已完成`, 7000);
-    if (triggerSync) window.setTimeout(() => void this.syncNow(false), 250);
+    if (triggerSync) window.setTimeout(() => {
+      if (generation === this.mobileAutomationGeneration && this.featureActive && this.useLightweightSync() && this.settings.mobile.mode === "server") void this.syncNow(false);
+    }, 250);
   }
 
   private async ensureParent(path: string): Promise<void> {
@@ -1848,14 +1977,17 @@ export default class SyncFeature extends Component {
   }
 
   private async pollCommands(): Promise<void> {
+    if (this.switchingSyncMode || !this.featureActive || !this.useLightweightSync() || this.settings.mobile.mode !== "server") return;
     if (!Platform.isMobile || !this.settings.serverUrl || !this.settings.serverPassword) return;
+    const generation = this.mobileAutomationGeneration;
     try {
       const result = await this.serverRequest<{ commands: ServerCommand[] }>(
         "GET",
         `/v1/commands?deviceId=${encodeURIComponent(this.settings.deviceId)}`
       );
+      if (generation !== this.mobileAutomationGeneration || this.switchingSyncMode || !this.featureActive) return;
       const triggerSync = await this.handleCommands(result.commands);
-      if (triggerSync) void this.syncNow(false);
+      if (triggerSync && generation === this.mobileAutomationGeneration && !this.switchingSyncMode && this.featureActive) void this.syncNow(false);
     } catch (error) {
       console.error("同步 command poll", error);
       await this.recordError("指令检查", error);
@@ -1909,6 +2041,11 @@ export default class SyncFeature extends Component {
     return this.setup().readOverlap(this.setupPreview, path);
   }
 
+  async readSetupImage(path: string, side: "local" | "remote") {
+    if (!this.settings.setupVerified || !this.setupPreview) throw new Error("请先检查本地与远端文件");
+    return this.setup().readOverlapImage(this.setupPreview, path, side);
+  }
+
   private setup(): GitSetup {
     return new GitSetup(this.vaultBasePath(), (program, args, timeoutMs, onOutput, stdinText, signal) =>
       this.exec(program, args, program === "git", true, timeoutMs, onOutput, stdinText, signal), this.app.vault.configDir);
@@ -1919,45 +2056,31 @@ export default class SyncFeature extends Component {
     const nodeRequire = (window as unknown as { require?: (name: string) => unknown }).require;
     if (!nodeRequire) throw new Error("文件追踪检查仅支持电脑端");
     const fs = (nodeRequire("fs") as NodeFs).promises;
-    const path = nodeRequire("path") as NodePath;
     const vaultPath = this.vaultBasePath();
     const root = (await this.gitRaw(["rev-parse", "--show-toplevel"])).trim();
     if ((await fs.realpath(root)).toLowerCase() !== (await fs.realpath(vaultPath)).toLowerCase()) {
       throw new Error("当前 Vault 不是独立的 Git 仓库，无法修复文件追踪");
     }
     await this.ensureNormalGitState();
-    let existingIgnore = "";
-    try { existingIgnore = await fs.readFile(path.join(vaultPath, ".gitignore"), "utf8"); }
-    catch (error) { if ((error as { code?: string }).code !== "ENOENT") throw error; }
-    const tracked = (await this.gitRaw(["ls-files", "--cached", "-z"])).split("\0").filter(Boolean);
-    const ignored = (await this.gitRaw(["ls-files", "-ci", "--exclude-standard", "-z"])).split("\0").filter(Boolean);
     const nestedRepos = await findNestedRepos(vaultPath, this.app.vault.configDir);
-    const nestedData = new Set((await nestedRepoFiles(vaultPath, nestedRepos, (args) => this.gitRaw(args), this.app.vault.configDir))
-      .filter((name) => nestedRepos.some((repo) => name === `${repo.directory}/data.json`)));
-    const paths = [...new Set([
-      ...ignored.filter((file) => !nestedData.has(file)),
-      ...tracked.filter((file) => shouldIgnore(file, setupGitIgnore(this.app.vault.configDir), this.app.vault.configDir))
-    ])].filter((file) => file !== ".gitignore").sort();
-    return { paths, missingRules: missingSetupIgnoreRules(existingIgnore, this.app.vault.configDir) };
+    const nested = await nestedRepoFiles(vaultPath, nestedRepos, args => this.gitRaw(args), this.app.vault.configDir);
+    const legacy = [...this.settings.ignorePatterns, ...legacyScopeRules(this.settings.mobile)]
+      .map(line => line.split("{config}").join(this.app.vault.configDir));
+    return inspectIgnoreTracking(this.app.vault.adapter, this.app.vault.configDir, args => this.gitRaw(args), legacy, nested);
   }
 
   async repairFileTracking(preview: FileTrackingPreview): Promise<number> {
-    let repaired = 0;
     await this.enqueueDesktopGit(async () => {
       const current = await this.inspectFileTracking();
       if (JSON.stringify(current) !== JSON.stringify(preview)) throw new Error("文件追踪状态已变化，请重新检查后再修复");
-      await this.setup().appendIgnore([]);
-      const ignored = (await this.gitRaw(["ls-files", "-ci", "--exclude-standard", "-z"])).split("\0").filter((file) => file && file !== ".gitignore");
-      if (preview.paths.some((file) => !ignored.includes(file))) throw new Error("部分文件仍未被 .gitignore 排除，已停止移除 Git 跟踪");
-      for (const batch of pathBatches(preview.paths)) await this.git(["rm", "-f", "--cached", "--", ...batch]);
-      repaired = preview.paths.length;
-      return repaired > 0 || preview.missingRules.length > 0;
-    }, "修复文件追踪");
-    return repaired;
+      await applyIgnoreTracking(this.app.vault.adapter, this.app.vault.configDir, args => this.gitRaw(args), preview);
+      return preview.paths.length > 0 || preview.addPaths.length > 0 || preview.missingRules.length > 0;
+    }, "重建忽略规则与修复文件追踪");
+    return preview.paths.length;
   }
 
   async beginSetup(): Promise<void> {
-    if (this.syncing) throw new Error("当前有同步任务正在运行，请稍后重试");
+    if (this.syncing || this.switchingSyncMode) throw new Error("当前有同步或模式切换任务正在运行，请稍后重试");
     this.setupGitPaused = true;
     this.clearDesktopTimeouts();
     await this.desktopGitQueue;
@@ -2051,14 +2174,14 @@ export default class SyncFeature extends Component {
       const setup = this.setup();
       const verified = await setup.verifyRepository(repoUrl);
       this.settings.setupVerified = verified;
-      onProgress?.("正在提交本机可提交的改动…");
-      const commitSummary = await setup.commitForInspection();
+      onProgress?.("只读核对本机文件与忽略规则…");
+      const commitSummary = "检查阶段不提交、不解除追踪";
       this.setupPreview = await setup.preview(verified, onProgress);
       this.setupPreview.commitSummary = commitSummary;
     });
     if (!this.settings.setupComplete) {
       this.setupChoices = {};
-      this.setupTrackingChoice = this.setupPreview!.trackedExcludedLocal.length || this.setupPreview!.trackedExcludedRemote.length ? "rebuild" : undefined;
+      this.setupTrackingChoice = undefined;
       this.settings.setupStep = 3;
       await this.saveSettings();
     }
@@ -2242,18 +2365,23 @@ export default class SyncFeature extends Component {
     }
     await this.git(["config", "user.name", this.settings.gitAuthorName]);
     await this.git(["config", "user.email", this.settings.gitAuthorEmail]);
-    const remotes = await this.git(["remote"]);
-    if (remotes.split(/\s+/).includes("origin")) {
-      await this.git(["remote", "set-url", "origin", this.settings.gitRemoteUrl]);
-    } else {
-      await this.git(["remote", "add", "origin", this.settings.gitRemoteUrl]);
+
+  }
+
+  private async requireLocalIgnoreReady(): Promise<void> {
+    const text = await readRootIgnore(this.app.vault.adapter);
+    if (!text.includes("# >>> simple-one:fixed") || organizedLocalIgnore(text, this.app.vault.configDir) !== text) {
+      throw new SyncDeferredError("请先在故障排查中「重建忽略规则与修复文件追踪」，确认本机规则迁移；未执行同步。");
     }
+    const ignored = rootIgnoreMatcher(text, this.app.vault.configDir);
+    const tracked = (await this.gitRaw(["ls-files", "--cached", "-z"])).split("\0").filter(Boolean).filter(ignored);
+    if (tracked.length) throw new SyncDeferredError(`还有 ${tracked.length} 个排除文件受到 Git 追踪。请先预览并修复文件追踪；未拉取、覆盖或删除本机文件。`);
   }
 
   private async testDesktopGit(): Promise<void> {
     await this.exec("git", ["--version"]);
     await this.ensureDesktopGit();
-    await this.git(["ls-remote", "--heads", "origin", this.settings.gitBranch], true);
+    await this.git(["ls-remote", "--heads", "--", this.settings.gitRemoteUrl, this.settings.gitBranch], true);
   }
 
   private async desktopGitSync(): Promise<void> {
@@ -2272,22 +2400,29 @@ export default class SyncFeature extends Component {
   }
 
   private async desktopStartupSync(): Promise<boolean> {
-    const merged = this.settings.pullOnStartup || this.settings.backupOnStartup
-      ? await this.desktopFetchAndMerge() : false;
-    if (!this.settings.backupOnStartup) return merged;
-    const result = await this.desktopCommitOnly();
-    const pushed = await this.desktopPushOnly(false);
-    if (await this.hasDesktopChanges()) this.scheduleDesktopCommit();
-    return result.committed || merged || pushed;
+    if (!this.settings.pullOnStartup && !this.settings.backupOnStartup) return false;
+    let changed = await this.desktopFetchAndMerge();
+    if (this.settings.backupOnStartup) {
+      const result = await this.desktopCommitOnly();
+      const pushed = await this.desktopPushOnly(false);
+      if (await this.hasDesktopChanges()) this.scheduleDesktopCommit();
+      changed = result.committed || changed || pushed;
+    }
+    // A successful startup check counts even when no files needed transferring.
+    this.settings.lastSyncAt = Date.now();
+    await this.saveSettings();
+    return changed;
   }
 
   private async desktopCommitOnly(): Promise<DesktopCommitResult> {
     this.setSyncActivity("正在检查本机修改…", "checking");
+    await this.requireLocalIgnoreReady();
     await this.ensureDesktopGit();
     await this.ensureNormalGitState();
     assertNoPrivateSyncFiles((await this.gitRaw(["ls-files", "--cached", "--others", "--exclude-standard", "-z"])).split("\0").filter(Boolean), this.app.vault.configDir);
     await this.prepareNestedRepositories();
     const changes = parseGitStatus(await this.gitRaw(["status", "--porcelain=v1", "-z"]));
+    if (this.settings.recordSyncPerformance) this.desktopGitTrace.push(`本机改动：${changes.length} 个文件`);
     if (changes.length === 0) {
       this.setStatus("本机没有待同步修改");
       await this.refreshSyncView();
@@ -2312,35 +2447,24 @@ export default class SyncFeature extends Component {
     const vaultPath = this.vaultBasePath();
     const repos = await findNestedRepos(vaultPath, this.app.vault.configDir);
     if (!repos.length) return;
-    const nodeRequire = (window as unknown as { require?: (name: string) => unknown }).require;
-    if (!nodeRequire) throw new Error("内嵌仓库同步仅支持桌面端");
-    const fs = (nodeRequire("fs") as NodeFs).promises;
-    const path = nodeRequire("path") as NodePath;
-    const ignorePath = path.join(vaultPath, ".gitignore");
-    let existing = "";
-    try { existing = await fs.readFile(ignorePath, "utf8"); }
-    catch (error) { if ((error as { code?: string }).code !== "ENOENT") throw error; }
-    const missing = nestedGitIgnoreRules(repos).filter((rule) => !existing.split(/\r?\n/).includes(rule));
-    if (missing.length) {
-      const eol = existing.includes("\r\n") ? "\r\n" : "\n";
-      const separator = existing ? `${existing.endsWith("\n") ? "" : eol}${eol}` : "";
-      await fs.writeFile(ignorePath, `${existing}${separator}# Embedded Git metadata stays local${eol}${missing.join(eol)}${eol}`, "utf8");
-    }
     await rebuildNestedRepoTracking(vaultPath, repos, (args) => this.gitRaw(args), this.app.vault.configDir);
   }
 
   private async desktopFetchAndMerge(pushAfterResolve = false, allowFilenameRepair = true): Promise<boolean> {
     this.setSyncActivity("正在检查云端更新…", "checking");
+    await this.requireLocalIgnoreReady();
     await this.ensureDesktopGit();
     await this.ensureNormalGitState();
+    const remoteRef = await remoteSnapshotRef(this.settings.gitRemoteUrl, this.settings.gitBranch);
     this.setSyncActivity("正在下载", "fetch");
     try {
       await this.traceDesktopGitStep("Git fetch（连接并下载远端分支）", () =>
-        this.exec("git", ["fetch", "--progress", "origin", this.settings.gitBranch], true, true, 120000,
+        this.exec("git", ["fetch", "--progress", "--no-tags", "--refmap=", "--", this.settings.gitRemoteUrl, `+refs/heads/${this.settings.gitBranch}:${remoteRef}`], true, true, 120000,
           transferProgress("下载", text => this.setSyncActivity(text, "fetch")))
       );
     } catch (error) {
       if (!isMissingRemoteRefError(error)) throw error;
+      await this.git(["update-ref", "-d", await remoteSnapshotRef(this.settings.gitRemoteUrl, this.settings.gitBranch)]);
       this.desktopGitTrace[this.desktopGitTrace.length - 1] = "Git fetch：远端分支不存在";
       this.setStatus("云端尚无分支 · 等待首次同步");
       return false;
@@ -2367,6 +2491,12 @@ export default class SyncFeature extends Component {
     const remoteChanges = parseGitNameStatus(
       await this.gitRaw(["diff", "--name-status", "-z", "--find-renames", mergeBase, "FETCH_HEAD"])
     );
+    const ignored = rootIgnoreMatcher(await readRootIgnore(this.app.vault.adapter), this.app.vault.configDir);
+    const headFiles = new Set((await this.gitRaw(["ls-tree", "-r", "--name-only", "-z", "HEAD"])).split("\0").filter(Boolean));
+    if (remoteChanges.some(change => (ignored(change.path) || (change.oldPath && ignored(change.oldPath))) &&
+      !(change.kind === "deleted" && !headFiles.has(change.path)))) {
+      throw new SyncDeferredError("远端更新涉及本机排除文件，已在合并前停止。请先在已接入设备修复远端追踪，或重新打开接入引导预览历史迁移；本机规则和状态文件未被覆盖。");
+    }
     const overlappingPaths = findRemoteChangeOverlaps(localChanges, remoteChanges);
     if (overlappingPaths.length > 0) {
       this.deferredMergePaths = overlappingPaths;
@@ -2379,7 +2509,7 @@ export default class SyncFeature extends Component {
     )) {
       this.setSyncActivity("正在修复云端大小写重名文件…", "checking");
       const repairedNames = await repairRemoteFilenames((args, authenticated = false, stdin) =>
-        this.exec("git", args, authenticated, false, 120000, undefined, stdin), this.settings.gitBranch);
+        this.exec("git", args, authenticated, false, 120000, undefined, stdin), this.settings.gitBranch, this.settings.gitRemoteUrl);
       this.desktopGitTrace.push(`已提交并推送云端文件名修复 · ${repairedNames.length} 项`, ...repairedNames);
       new Notice(`同步：已在云端提交 ${repairedNames.length} 项文件名修复，重试下载并合并`, 10000);
       return await this.desktopFetchAndMerge(pushAfterResolve, false);
@@ -2392,7 +2522,8 @@ export default class SyncFeature extends Component {
     }
     this.setSyncActivity("正在合并云端更新…", "merge");
     try {
-      await this.traceDesktopGitStep("Git merge（合并远端提交）", () => this.git(["merge", "--no-edit", "FETCH_HEAD"]));
+      await preserveRootIgnore(this.app.vault.adapter, args => this.gitRaw(args), () =>
+        this.traceDesktopGitStep("Git merge（合并远端提交）", () => this.git(["merge", "--no-edit", "FETCH_HEAD"])));
     } catch (error) {
       const conflicts = await this.getUnmergedPaths();
       if (conflicts.length === 0) {
@@ -2401,7 +2532,7 @@ export default class SyncFeature extends Component {
           await this.ensureNormalGitState();
           this.setSyncActivity("正在修复云端非法文件名…", "checking");
           const repairedNames = await repairRemoteFilenames((args, authenticated = false, stdin) =>
-            this.exec("git", args, authenticated, false, 120000, undefined, stdin), this.settings.gitBranch);
+            this.exec("git", args, authenticated, false, 120000, undefined, stdin), this.settings.gitBranch, this.settings.gitRemoteUrl);
           if (repairedNames.length) {
             this.desktopGitTrace.push(`已提交并推送云端文件名修复 · ${repairedNames.length} 项`, ...repairedNames);
             new Notice(`同步：已在云端提交 ${repairedNames.length} 项文件名修复，重试下载并合并`, 10000);
@@ -2427,6 +2558,7 @@ export default class SyncFeature extends Component {
   }
 
   private async desktopPushOnly(fetchBeforePush = true): Promise<boolean> {
+    await this.requireLocalIgnoreReady();
     await this.ensureDesktopGit();
     await this.ensureNormalGitState();
     if (fetchBeforePush) await this.desktopFetchAndMerge(true);
@@ -2440,10 +2572,12 @@ export default class SyncFeature extends Component {
     }
     this.desktopGitTrace.push("上传检查：存在待上传 Commit");
     this.setSyncActivity("正在上传", "push");
+    const pushedHead = await this.git(["rev-parse", "HEAD"]);
     await this.traceDesktopGitStep("Git push（上传本机提交）", () =>
-      this.exec("git", ["push", "--progress", "-u", "origin", `HEAD:${this.settings.gitBranch}`], true, true, 120000,
+      this.exec("git", ["push", "--progress", "--no-follow-tags", "--", this.settings.gitRemoteUrl, `${pushedHead}:refs/heads/${this.settings.gitBranch}`], true, true, 120000,
         transferProgress("上传", text => this.setSyncActivity(text, "push")))
     );
+    await this.git(["update-ref", await remoteSnapshotRef(this.settings.gitRemoteUrl, this.settings.gitBranch), pushedHead]);
     this.clearDesktopPushRetry();
     this.settings.pendingMergePushAfterResolve = false;
     this.settings.lastSyncAt = Date.now();
@@ -2564,30 +2698,37 @@ class FileTrackingModal extends Modal {
     this.modalEl.addClass("simple-one-sync-tracking-modal");
     const body = this.contentEl;
     body.empty();
-    body.createEl("h2", { text: "检查并修复文件追踪", cls: "simple-one-sync-tracking-title" });
-    body.createEl("p", { text: `待补充 ${this.preview.missingRules.length} 条忽略规则；${this.preview.paths.length} 个已追踪文件应改为仅本机保留。`, cls: "simple-one-sync-tracking-summary" });
-    body.createEl("p", { text: "修复只调整这些文件的 Git 跟踪，并补齐缺少的 .gitignore 规则。本机文件和 Git 历史都会保留；下一次 commit、push 后，文件会从远端当前版本退出。", cls: "simple-one-sync-tracking-description" });
-    if (this.preview.missingRules.length) {
-      const rules = body.createEl("details", { cls: "simple-one-sync-tracking-details" });
-      rules.createEl("summary", { text: `查看待补充的规则（${this.preview.missingRules.length}）` });
-      rules.createEl("pre", { text: this.preview.missingRules.join("\n"), cls: "simple-one-sync-tracking-preview" });
-    }
+    body.createEl("h2", { text: "重建忽略规则与 Git 追踪", cls: "simple-one-sync-tracking-title" });
+    body.createEl("p", { text: `.gitignore ${this.preview.originalIgnore === this.preview.nextIgnore ? "无需更改" : "将更新"} · 取消追踪 ${this.preview.paths.length} 个 · 新增追踪 ${this.preview.addPaths.length} 个`, cls: "simple-one-sync-tracking-summary" });
+    body.createEl("p", { text: "仅暂存差异，不提交或推送。", cls: "simple-one-sync-tracking-description" });
+    const layout = fileListPanel(body, this.plugin.settings, () => this.plugin.saveSettings());
     if (this.preview.paths.length) {
       const files = body.createEl("details", { cls: "simple-one-sync-tracking-details" });
-      files.createEl("summary", { text: `查看将停止追踪的文件（${this.preview.paths.length}）` });
-      files.createEl("pre", { text: this.preview.paths.join("\n"), cls: "simple-one-sync-tracking-preview" });
+      files.createEl("summary", { text: `按忽略规则取消追踪（${this.preview.paths.length}）` });
+      renderPathTree(files, this.preview.paths, "−", layout);
     }
-    const actions = body.createDiv({ cls: "modal-button-container" });
-    actions.createEl("button", { text: "关闭" }).addEventListener("click", () => this.close());
-    const apply = actions.createEl("button", { text: "应用修复", cls: "mod-cta" });
-    apply.disabled = this.preview.paths.length === 0 && this.preview.missingRules.length === 0;
+    if (this.preview.addPaths.length) {
+      const files = body.createEl("details", { cls: "simple-one-sync-tracking-details" });
+      files.createEl("summary", { text: `新增追踪（${this.preview.addPaths.length}）` });
+      renderPathTree(files, this.preview.addPaths, "+", layout);
+    }
+    const consent = body.createEl("label", { cls: "simple-one-sync-tracking-consent" });
+    const acknowledgement = consent.createEl("input", { attr: { type: "checkbox" } });
+    consent.createSpan({ text: "我已确认：取消追踪的文件保留在本机，推送后从云端移除。" });
+    consent.hidden = this.preview.paths.length === 0;
+    const actions = body.createDiv({ cls: "modal-button-container simple-one-sync-tracking-actions" });
+    const apply = styleActionButton(actions.createEl("button", { text: "应用修复", cls: "mod-cta" }), "text");
+    styleActionButton(actions.createEl("button", { text: "关闭" }), "text").addEventListener("click", () => this.close());
+    const empty = this.preview.paths.length === 0 && this.preview.addPaths.length === 0 && this.preview.missingRules.length === 0;
+    apply.disabled = empty || (this.preview.paths.length > 0 && !acknowledgement.checked);
+    acknowledgement.addEventListener("change", () => { apply.disabled = empty || (this.preview.paths.length > 0 && !acknowledgement.checked); });
     apply.addEventListener("click", () => {
-      if (this.running) return;
+      if (this.running || apply.disabled) return;
       this.running = true;
       apply.disabled = true;
       apply.setText("正在修复…");
       void this.plugin.repairFileTracking(this.preview).then((count) => {
-        new Notice(`同步：已让 ${count} 个文件退出 Git 跟踪；本机文件已保留`);
+        new Notice(`同步：已按忽略规则取消追踪 ${count} 个本机文件`);
         this.close();
       }).catch((error) => {
         new Notice(`同步：修复失败。${messageOf(error)}`, 10000);
@@ -2625,9 +2766,9 @@ class GitRepairModal extends Modal {
     });
 
     const actions = container.createDiv({ cls: "modal-button-container" });
-    const cancel = actions.createEl("button", { text: "取消" });
+    const cancel = styleActionButton(actions.createEl("button", { text: "取消" }), "text");
     cancel.addEventListener("click", () => this.close());
-    const repair = actions.createEl("button", { text: lockOnly ? "确认清理" : "确认修复", cls: "mod-warning" });
+    const repair = styleActionButton(actions.createEl("button", { text: lockOnly ? "确认清理" : "确认修复", cls: "mod-warning" }), "text");
     repair.addEventListener("click", () => {
       if (this.repairing) return;
       this.repairing = true;
@@ -2666,6 +2807,7 @@ class LocalHistorySlimModal extends Modal {
   }
 
   onOpen(): void {
+    this.modalEl.addClass("simple-one-modal");
     const body = this.contentEl;
     body.empty();
     body.createEl("h2", { text: "本地 Git 历史瘦身" });
@@ -2678,8 +2820,8 @@ class LocalHistorySlimModal extends Modal {
       cls: "simple-one-sync-conflict__warning"
     });
     const actions = body.createDiv({ cls: "modal-button-container" });
-    actions.createEl("button", { text: "取消" }).addEventListener("click", () => this.close());
-    const confirm = actions.createEl("button", { text: "清理本机旧历史", cls: "mod-cta" });
+    styleActionButton(actions.createEl("button", { text: "取消" }), "text").addEventListener("click", () => this.close());
+    const confirm = styleActionButton(actions.createEl("button", { text: "清理本机旧历史", cls: "mod-cta" }), "text");
     confirm.disabled = this.preview.oldCommits === 0;
     confirm.addEventListener("click", () => {
       if (this.running) return;
@@ -2826,10 +2968,10 @@ class ZoeySyncConflictView extends ItemView {
       });
     });
 
-    applyButton = container.createEl("button", {
+    applyButton = styleActionButton(container.createEl("button", {
       text: this.paths.length === 1 ? "应用并继续同步" : "应用并处理下一个文件",
       cls: "mod-cta simple-one-sync-conflict__continue"
-    });
+    }), "text");
     applyButton.disabled = true;
     applyButton.addEventListener("click", asyncAction(async () => {
       if (resolutions.some((item) => item === undefined)) return;
@@ -2857,7 +2999,7 @@ class ZoeySyncConflictView extends ItemView {
     action: () => void | Promise<void>,
     cta = false
   ): HTMLButtonElement {
-    const button = container.createEl("button", { text: label, cls: cta ? "mod-cta" : undefined });
+    const button = styleActionButton(container.createEl("button", { text: label, cls: cta ? "mod-cta" : undefined }), "text");
     button.addEventListener("click", () => void action());
     return button;
   }
@@ -2895,7 +3037,7 @@ class ZoeySyncConflictView extends ItemView {
 }
 
 class ErrorLogModal extends Modal {
-  constructor(app: App, private plugin: SyncFeature) {
+  constructor(app: App, private plugin: SyncFeature, private contextPrefix = "") {
     super(app);
   }
 
@@ -2905,17 +3047,18 @@ class ErrorLogModal extends Modal {
   }
 
   private async render(): Promise<void> {
-    const lastCommitAt = await this.plugin.getLatestCommitAt();
+    const lastCommitAt = this.contextPrefix ? 0 : await this.plugin.getLatestCommitAt();
     const container = this.contentEl;
     container.empty();
     const overview = container.createDiv({ cls: "simple-one-sync-error-modal__overview" });
     const heading = overview.createDiv();
-    heading.createEl("h2", { text: "最近同步日志" });
+    heading.createEl("h2", { text: this.contextPrefix ? "最近分享日志" : "最近同步与分享日志" });
     heading.createEl("p", {
-      text: "仅保留最近 24 小时的备份、同步和连接记录。",
+      text: this.contextPrefix ? "最近 24 小时的分享变更及部署结果；开启分享性能详情后可查看分步耗时。" : "保留最近 24 小时的备份、同步、分享和连接记录。开启性能详情后可查看分步耗时。",
       cls: "simple-one-sync-error-modal__intro"
     });
     const lastTimes = overview.createDiv({ cls: "simple-one-sync-error-modal__last-times" });
+    lastTimes.hidden = !!this.contextPrefix;
     const formatTime = (timestamp: number): string => {
       if (!timestamp) return "暂无记录";
       const absolute = new Date(timestamp).toLocaleString("zh-CN", { hour12: false });
@@ -2933,13 +3076,13 @@ class ErrorLogModal extends Modal {
       row.createEl("time", { text: formatTime(timestamp) });
     }
 
-    const logs = this.plugin.getRecentErrorLogs();
+    const logs = this.plugin.getRecentErrorLogs().filter(entry => !this.contextPrefix || entry.context.startsWith(this.contextPrefix));
     if (logs.length === 0) {
-      container.createDiv({ text: "最近 24 小时没有同步记录。", cls: "simple-one-sync-error-modal__empty" });
+      container.createDiv({ text: this.contextPrefix ? "最近 24 小时没有分享记录。" : "最近 24 小时没有同步或分享记录。", cls: "simple-one-sync-error-modal__empty" });
     } else {
       const list = container.createDiv({ cls: "simple-one-sync-error-modal__list" });
       for (const entry of logs) {
-        const isError = entry.status !== "success";
+        const isError = entry.status === "error" || !entry.status;
         const item = list.createEl("details", {
           cls: `simple-one-sync-error-modal__item ${isError ? "is-error" : "is-success"}`
         });
@@ -2950,18 +3093,23 @@ class ErrorLogModal extends Modal {
           cls: "simple-one-sync-error-modal__time"
         });
         item.createEl("pre", { text: entry.message || "这条旧记录未保存执行详情。" });
+        for (const timing of entry.timings ?? []) {
+          const detail = item.createDiv({ cls: "simple-one-sync-error-modal__timing" });
+          detail.createEl("h4", { text: timing.title });
+          detail.createEl("pre", { text: timing.message });
+        }
       }
     }
 
     const actions = container.createDiv({ cls: "simple-one-sync-error-modal__actions" });
     if (logs.length > 0) {
-      const clearButton = actions.createEl("button", { text: "清空日志" });
+      const clearButton = styleActionButton(actions.createEl("button", { text: "清空日志" }), "text");
       clearButton.addEventListener("click", asyncAction(async () => {
-        await this.plugin.clearErrorLogs();
+        await this.plugin.clearErrorLogs(this.contextPrefix);
         await this.render();
       }));
     }
-    const closeButton = actions.createEl("button", { text: "关闭", cls: "mod-cta" });
+    const closeButton = styleActionButton(actions.createEl("button", { text: "关闭", cls: "mod-cta" }), "text");
     closeButton.addEventListener("click", () => this.close());
   }
 }
@@ -2977,6 +3125,7 @@ class ZoeySyncView extends ItemView {
   private changesSnapshot?: ChangeItem[];
   private snapshotError?: unknown;
   private refreshing = false;
+  private fileLayout?: FileListLayout;
   private lastRefreshAt = 0;
   private promptCancel?: () => void;
   private downloadPage = false;
@@ -3017,7 +3166,7 @@ class ZoeySyncView extends ItemView {
     if (this.review) throw new Error("已有轻量同步差异正在确认");
     ++this.renderGeneration;
     const container = this.containerEl.children[1] as HTMLElement;
-    const review = new ZoeySyncConflictPreviewModal(this.app, live);
+    const review = new ZoeySyncConflictPreviewModal(this.app, { ...live, layout: createFileListLayout(this.plugin.settings, () => this.plugin.saveSettings()) });
     this.review = review;
     try { return await review.waitIn(container); }
     finally {
@@ -3055,7 +3204,7 @@ class ZoeySyncView extends ItemView {
   }
 
   async confirmLightweightPlan(plan: import("./mobileGithub").MobilePlan): Promise<boolean> {
-    return this.waitForChoice((root, resolve) => renderPlanConfirmation(root, plan, resolve), false);
+    return this.waitForChoice((root, resolve) => renderPlanConfirmation(root, plan, resolve, createFileListLayout(this.plugin.settings, () => this.plugin.saveSettings())), false);
   }
 
   async showDownloadTask(): Promise<void> {
@@ -3093,7 +3242,7 @@ class ZoeySyncView extends ItemView {
       return;
     }
     const remaining = this.plugin.getMobileGithub().remaining;
-    quota.setText(remaining === null ? "GitHub 额度待查询" : `当前窗口剩余 ${remaining.toLocaleString()} 次`);
+    quota.setText(remaining === null ? "API 额度待查询" : `API 剩余 ${remaining.toLocaleString()} 次`);
     quota.setAttr("title", "以最近一次 GitHub 响应为准；下一次请求会更新额度，同账号其他设备可能共享额度。");
   }
 
@@ -3106,11 +3255,12 @@ class ZoeySyncView extends ItemView {
       container.empty();
       container.addClass("simple-one-sync-view");
       container.createEl("p", { text: "同步已关闭，可在同步设置中启用。" });
-      container.createEl("button", { text: "打开同步设置", attr: { type: "button" } })
+      styleActionButton(container.createEl("button", { text: "打开同步设置", attr: { type: "button" } }), "text")
         .addEventListener("click", () => this.plugin.openPluginSettings());
       return;
     }
 
+    const verifiedPlan = this.plugin.getLightweightPlan?.();
     let changes: ChangeItem[] = [];
     let changesError: unknown;
     const pendingConflictPaths = await this.plugin.getPendingConflictPaths();
@@ -3121,6 +3271,12 @@ class ZoeySyncView extends ItemView {
     } catch (error) {
       changesError = error;
     }
+    if (verifiedPlan) {
+      const paths = new Set([...verifiedPlan.uploads, ...verifiedPlan.downloads, ...verifiedPlan.localDeletes, ...verifiedPlan.remoteDeletes]);
+      changes = [...paths].sort().map(path => ({ path, kind: !verifiedPlan.desired[path] ? "deleted"
+        : verifiedPlan.local[path] && verifiedPlan.remote.files[path] ? "modified" : "added" }));
+      changesError = undefined;
+    }
     let statusState = await this.getStatusState(changes, changesError);
     if (pendingConflictPaths.length > 0) {
       statusState = { tone: "error", text: `有 ${pendingConflictPaths.length} 个合并冲突等待处理` };
@@ -3128,23 +3284,18 @@ class ZoeySyncView extends ItemView {
       statusState = { tone: "error", text: `同步暂缓 · ${deferredMergePaths.length} 个文件仍在修改` };
     }
     if (generation !== this.renderGeneration) return;
-    if (!changesError) this.changesSnapshot = changes;
+    if (!changesError && !verifiedPlan) this.changesSnapshot = changes;
     this.snapshotError = changesError;
     if (this.refreshing && !changesError) this.lastRefreshAt = Date.now();
     container.empty();
     container.addClass("simple-one-sync-view");
     const recentLogs = this.plugin.getRecentErrorLogs();
-    const hasActiveError = !!this.plugin.getActiveSyncError() || recentLogs[0]?.status === "error";
+    const hasActiveError = !!this.plugin.getActiveSyncError();
 
     const header = container.createDiv({ cls: "simple-one-sync-view__header" });
     const actions = header.createDiv({ cls: "simple-one-sync-view__actions" });
-    const layoutButton = actions.createDiv({ cls: "clickable-icon nav-action-button" });
-    layoutButton.setAttr("role", "button");
-    layoutButton.setAttr("tabindex", "0");
-    setTooltip(layoutButton, "切换文件视图");
-    layoutButton.setAttr("aria-label", "切换文件视图");
-    setIcon(layoutButton, this.plugin.settings.viewLayout === "tree" ? "folder-tree" : "list");
-    layoutButton.addEventListener("click", asyncAction(() => this.plugin.toggleViewLayout()));
+    this.fileLayout = createFileListLayout(this.plugin.settings, () => this.plugin.saveSettings());
+    renderLayoutToggle(actions, this.fileLayout);
     const refreshButton = actions.createDiv({ cls: "clickable-icon nav-action-button" });
     actions.prepend(refreshButton);
     refreshButton.setAttr("role", "button");
@@ -3167,9 +3318,9 @@ class ZoeySyncView extends ItemView {
       });
       errorButton.setAttr("role", "button");
       errorButton.setAttr("tabindex", "0");
-      errorButton.setAttr("aria-label", `查看最近同步日志，共 ${recentLogs.length} 条`);
+      errorButton.setAttr("aria-label", `查看最近同步与分享日志，共 ${recentLogs.length} 条`);
       setIcon(errorButton, hasActiveError ? "triangle-alert" : "history");
-      setTooltip(errorButton, `查看最近同步日志（${recentLogs.length}）`);
+      setTooltip(errorButton, `查看最近同步与分享日志（${recentLogs.length}）`);
       errorButton.addEventListener("click", () => new ErrorLogModal(this.app, this.plugin).open());
     }
     const settingsButton = actions.createDiv({ cls: "clickable-icon nav-action-button" });
@@ -3181,8 +3332,8 @@ class ZoeySyncView extends ItemView {
     settingsButton.addEventListener("click", () => this.plugin.openPluginSettings());
     const downloadEngine = this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github" ? this.plugin.getMobileGithub() : undefined;
     if (downloadEngine?.downloadTask) {
-      const reminder = actions.createEl("button", { cls: "clickable-icon nav-action-button simple-one-sync-download-alert",
-        attr: { type: "button", "aria-label": "下载待办尚未完成", title: "继续逐文件下载" } });
+      const reminder = styleActionButton(actions.createEl("button", { cls: "clickable-icon nav-action-button simple-one-sync-download-alert",
+        attr: { type: "button", "aria-label": "下载待办尚未完成", title: "继续逐文件下载" } }), "bordered");
       setIcon(reminder, "triangle-alert");
       reminder.addEventListener("click", () => void this.showDownloadTask());
     }
@@ -3193,6 +3344,11 @@ class ZoeySyncView extends ItemView {
     status.createSpan({ cls: "simple-one-sync-view__status-dot" });
     const statusCopy = status.createDiv({ cls: "simple-one-sync-view__status-copy" });
     const statusText = statusCopy.createSpan({ text: statusState.text, cls: "simple-one-sync-view__status-text" });
+    if (this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github") {
+      setTooltip(statusText, verifiedPlan
+        ? "正在执行本次已核验计划；范围、文件和云端状态变化时会停止并要求重新核对。"
+        : "候选文件仅反映本机变化；同步时核验内容并检查云端，实际传输数量可能不同。");
+    }
     if (this.plugin.nativeGitEnabled()) {
       statusText.setAttr("role", "button");
       statusText.setAttr("tabindex", "0");
@@ -3211,20 +3367,32 @@ class ZoeySyncView extends ItemView {
         }
       });
     }
-    if (this.lastRefreshAt) statusCopy.createSpan({ text: `列表已刷新 · ${formatRelativeTime(this.lastRefreshAt)}`, cls: "simple-one-sync-view__refresh-time" });
-    if (this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github") {
-      statusCopy.createSpan({ cls: "simple-one-sync-view__quota" });
+    const errors = new Map<string, Set<string>>();
+    const addError = (context: string, error: unknown): void => {
+      const message = messageOf(error).replace(/^(?:Error:\s*)+/, "").trim() || "未知错误";
+      const contexts = errors.get(message) ?? new Set<string>(); contexts.add(context); errors.set(message, contexts);
+    };
+    if (changesError) addError("无法读取更改", changesError);
+    const activeError = this.plugin.getActiveSyncError();
+    if (activeError) addError(activeError.context || "同步", activeError.message);
+    if (this.downloadPage && this.transferError) addError("下载恢复", this.transferError);
+    for (const [message, contexts] of errors) statusCopy.createDiv({
+      text: [...contexts].join(" / ") + "：" + message, cls: "simple-one-sync-view__error-detail", attr: { role: "alert" }
+    });
+    if (changesError) statusCopy.createSpan({ text: this.changesSnapshot?.length
+      ? "暂时保留上次文件列表，请重新刷新。" : "暂无可显示的文件列表，请重新刷新。", cls: "simple-one-sync-view__refresh-time" });
+    const statusMeta = statusCopy.createDiv({ cls: "simple-one-sync-view__status-meta" });
+    if (this.lastRefreshAt) statusMeta.createSpan({ text: `列表已刷新 · ${formatRelativeTime(this.lastRefreshAt)}`, cls: "simple-one-sync-view__refresh-time" });
+    if (this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github" && this.plugin.settings.lastSyncAt) {
+      statusMeta.createSpan({ text: `上次同步 ${formatRelativeTime(this.plugin.settings.lastSyncAt)}`, cls: "simple-one-sync-view__refresh-time" });
+    }
+    if (downloadEngine) {
+      statusMeta.createSpan({ cls: "simple-one-sync-view__quota" });
       this.updateQuota();
     }
 
     if (this.downloadPage && downloadEngine?.downloadTask) {
-      renderDownloadTask(container, downloadEngine, action => this.runTransferAction(action), () => {
-        if (this.transferBusy) return;
-        this.downloadPage = false;
-        void this.render();
-      });
-      const feedback = container.querySelector<HTMLElement>(".simple-one-sync-transfer__feedback");
-      if (this.transferError) feedback?.createSpan({ text: this.transferError, cls: "simple-one-sync-transfer__error" });
+      renderDownloadTask(container, downloadEngine, action => this.runTransferAction(action));
       if (this.transferBusy) container.querySelectorAll<HTMLButtonElement>(".simple-one-sync-transfer button").forEach(button => { button.disabled = true; });
       return;
     }
@@ -3239,7 +3407,7 @@ class ZoeySyncView extends ItemView {
         text: `${pendingConflictPaths.length} 个异常文件等待确认；已能合并的内容会保留，不会被回滚。`,
         cls: "simple-one-sync-view__conflict-reminder-desc"
       });
-      const continueButton = reminder.createEl("button", { text: "继续处理", cls: "mod-cta" });
+      const continueButton = styleActionButton(reminder.createEl("button", { text: "继续处理", cls: "mod-cta" }), "text");
       continueButton.addEventListener("click", () => void this.plugin.continuePendingMergeConflicts());
     } else if (deferredMergePaths.length > 0) {
       const reminder = container.createDiv({
@@ -3270,6 +3438,9 @@ class ZoeySyncView extends ItemView {
       "aria-label",
       "下载远端更新并上传本机更改"
     );
+    setTooltip(actionButton, this.plugin.useLightweightSync()
+      ? "核验本机候选变化与云端文件后同步；能够确定的变更自动同步；首次对齐或无法自动判断的差异需要确认。"
+      : "下载远端更新并上传本机更改");
     actionButton.addEventListener("click", asyncAction(async () => {
       actionButton.disabled = true;
       actionButton.addClass("is-loading");
@@ -3283,43 +3454,39 @@ class ZoeySyncView extends ItemView {
       }
     }));
 
+    if (verifiedPlan) section.createDiv({ text: `本次同步变更 · 上传 ${verifiedPlan.uploads.length} · 下载 ${verifiedPlan.downloads.length} · 删除本机 ${verifiedPlan.localDeletes.length} · 删除云端 ${verifiedPlan.remoteDeletes.length}`, cls: "simple-one-sync-view__refresh-time" });
     if (!changesError) {
-      if (this.plugin.useLightweightSync() && this.plugin.isSyncing()) {
+      if (this.plugin.useLightweightSync() && this.plugin.isSyncing() && !verifiedPlan) {
         // Keep the list empty until the sync plan is ready for display.
       } else if (this.plugin.getLightweightPendingStatus()) {
-        section.createDiv({ text: "尚未完成轻量同步首次对齐。点击同步核对实际差异；没有基准时，空列表不代表没有变化。", cls: "simple-one-sync-view__empty" });
+        section.createDiv({ text: "已接入。点击同步，完成首次文件对齐。", cls: "simple-one-sync-view__empty" });
       } else if (changes.length === 0) {
         const empty = section.createDiv({ cls: "simple-one-sync-view__empty" });
         setIcon(empty.createSpan(), "check-circle-2");
-        empty.createSpan({ text: this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github" ? "本机暂未发现候选变化，云端状态将在同步时核对" : "没有待同步文件" });
+        empty.createSpan({ text: verifiedPlan ? "两端没有需要同步的变更" : "本机暂无变更" });
       } else {
-        const lightweight = this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github";
         let visible = changes;
-        if (lightweight) {
-          section.createDiv({ text: "候选变化；同步时检查哈希并核对云端后确定实际传输数量。" });
+        {
           const pages = Math.ceil(changes.length / 100);
           this.lightweightPage = Math.min(this.lightweightPage, pages - 1);
           visible = changes.slice(this.lightweightPage * 100, (this.lightweightPage + 1) * 100);
           if (pages > 1) {
             const paging = section.createDiv();
-            const prev = paging.createEl("button", { text: "上一页" });
+            const prev = styleActionButton(paging.createEl("button", { text: "上一页" }), "text");
             prev.disabled = this.lightweightPage === 0;
-            prev.addEventListener("click", () => { this.lightweightPage--; void this.render(); });
-            paging.createSpan({ text: " 第 " + (this.lightweightPage + 1) + " / " + pages + " 页 " });
-            const next = paging.createEl("button", { text: "下一页" });
+            prev.addEventListener("click", () => { this.lightweightPage--; void this.render(true); });
+            paging.createSpan({ text: " 第 " + (this.lightweightPage + 1) + " / " + pages + " 页 · 本页 " + visible.length + "/" + changes.length + " 个 " });
+            const next = styleActionButton(paging.createEl("button", { text: "下一页" }), "text");
             next.disabled = this.lightweightPage === pages - 1;
-            next.addEventListener("click", () => { this.lightweightPage++; void this.render(); });
+            next.addEventListener("click", () => { this.lightweightPage++; void this.render(true); });
           }
         }
-        if (this.plugin.settings.viewLayout === "tree") this.renderTree(section, visible);
-        else for (const change of visible) this.renderChange(section, change, true);
+        this.renderTree(section, visible);
       }
     } else {
-      section.createDiv({ text: `无法读取更改：${messageOf(changesError)}`, cls: "simple-one-sync-view__empty is-error" });
       if (this.changesSnapshot?.length) {
-        section.createDiv({ text: "暂时保留上次文件列表，请重新刷新。", cls: "simple-one-sync-view__empty" });
-        if (this.plugin.settings.viewLayout === "tree") this.renderTree(section, this.changesSnapshot);
-        else for (const change of this.changesSnapshot) this.renderChange(section, change, true);
+        const visible = this.changesSnapshot.slice(this.lightweightPage * 100, (this.lightweightPage + 1) * 100);
+        this.renderTree(section, visible);
       }
     }
   }
@@ -3339,7 +3506,7 @@ class ZoeySyncView extends ItemView {
       return { tone: "checking", text: "正在整理同步结果…" };
     }
     if (changesError) {
-      return { tone: "error", text: `读取状态失败 · ${formatStatusError(messageOf(changesError))}` };
+      return { tone: "error", text: "刷新失败" };
     }
 
     const lightweightPending = this.plugin.getLightweightPendingStatus();
@@ -3352,53 +3519,31 @@ class ZoeySyncView extends ItemView {
       : lastSyncAt ? `上次同步 ${formatRelativeTime(lastSyncAt)}` : "尚未同步";
     const activeError = this.plugin.getActiveSyncError();
     if (activeError) {
-      const detail = `${activeError.context}：${formatStatusError(activeError.message)}`;
-      return { tone: "error", text: `同步异常 · ${detail} · ${formatRelativeTime(activeError.timestamp)}` };
+      return { tone: "error", text: `同步失败 · ${formatRelativeTime(activeError.timestamp)}` };
     }
     if (changes.length > 0) {
-      return { tone: "pending", text: `${this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github" ? "待同步（候选）" : "待同步"} · ${changes.length} 个文件 · ${lastSyncText}` };
+      return { tone: "pending", text: this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github"
+        ? `本机变更 · ${changes.length} 个文件` : `本机变更 · ${changes.length} 个文件 · ${lastSyncText}` };
     }
     return {
       tone: "success",
       text: this.plugin.useLightweightSync()
-        ? lastSyncAt
-          ? `本机无候选变化 · 上次同步 ${formatRelativeTime(lastSyncAt)}`
-          : "本机无候选变化 · 尚无同步记录"
-        : `本机无待同步文件 · ${lastSyncText}`
+        ? "本机暂无变更"
+        : `本机暂无变更 · ${lastSyncText}`
     };
   }
 
   private renderTree(parent: HTMLElement, changes: ChangeItem[]): void {
-    const groups = new Map<string, ChangeItem[]>();
-    for (const change of changes) {
-      const slash = change.path.indexOf("/");
-      const group = slash === -1 ? "Vault 根目录" : change.path.slice(0, slash);
-      const current = groups.get(group) ?? [];
-      current.push(change);
-      groups.set(group, current);
-    }
-    for (const [group, items] of [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-      const groupEl = parent.createEl("details", { cls: "simple-one-sync-view__group" });
-      groupEl.open = !this.collapsedFolders.has(group);
-      groupEl.addEventListener("toggle", () => {
-        if (groupEl.open) this.collapsedFolders.delete(group);
-        else this.collapsedFolders.add(group);
-      });
-      const label = groupEl.createEl("summary", { cls: "simple-one-sync-view__group-label" });
-      setIcon(label.createSpan({ cls: "simple-one-sync-view__group-chevron" }), "chevron-right");
-      setIcon(label.createSpan(), "folder-closed");
-      label.createSpan({ text: group });
-      label.createSpan({ text: String(items.length), cls: "simple-one-sync-view__group-count" });
-      for (const change of items) this.renderChange(groupEl, change, false);
-    }
+    renderFileTree(parent, changes, change => change.path, (folder, change, fullPath) => this.renderChange(folder, change, fullPath), { collapsed: this.collapsedFolders, layout: this.fileLayout });
   }
 
   private renderChange(parent: HTMLElement, change: ChangeItem, fullPath: boolean): void {
     const row = parent.createDiv({ cls: "simple-one-sync-view__change" });
     row.setAttr("data-kind", change.kind);
+    row.setAttr("title", change.path);
     row.createSpan({ text: this.changeMark(change.kind), cls: "simple-one-sync-view__mark" });
     const text = row.createDiv({ cls: "simple-one-sync-view__change-text" });
-    const label = fullPath ? change.path : change.path.split("/").slice(1).join("/") || change.path;
+    const label = fullPath ? change.path : change.path.split("/").pop() || change.path;
     text.createDiv({ text: label, cls: "simple-one-sync-view__path" });
     if (change.kind === "moved" && change.oldPath) {
       text.createDiv({ text: `从 ${change.oldPath}`, cls: "simple-one-sync-view__old-path" });
@@ -3430,7 +3575,7 @@ export class SyncSettingsTab extends PluginSettingTab {
   private lightweightGuideStep = 1;
   private lightweightGuideDraft?: MobileOptions;
   private lightweightGuideLogin = "";
-  private lightweightGuideVerified?: RemoteSnapshot;
+  private lightweightGuideVerified?: VerifiedAccess;
   private lightweightGuideRepoMode: "existing" | "create" = "existing";
   private lightweightGuideTokenMode: "acquire" | "existing" = "acquire";
   private lightweightGuideRepoName = "";
@@ -3647,7 +3792,7 @@ export class SyncSettingsTab extends PluginSettingTab {
   }
 
   private addSettingsArrow(parent: HTMLElement, page: "desktop-settings" | "mobile" | "server", title: string): void {
-    const arrow = parent.createEl("button", { cls: "clickable-icon simple-one-sync-entry-arrow", attr: { type: "button", "aria-label": `打开${title}`, title: `打开${title}` } });
+    const arrow = styleActionButton(parent.createEl("button", { cls: "clickable-icon simple-one-sync-entry-arrow", attr: { type: "button", "aria-label": `打开${title}`, title: `打开${title}` } }), "bordered");
     setIcon(arrow, "chevron-right");
     parent.tabIndex = 0;
     parent.setAttribute("role", "link");
@@ -3690,7 +3835,7 @@ export class SyncSettingsTab extends PluginSettingTab {
   private displayBeginnerMobile(containerEl: HTMLElement): void {
     containerEl.addClass("simple-one-sync-setup-page");
     const page = containerEl.createDiv({ cls: "simple-one-sync-setup-layout" });
-    this.displayDevicePreview(page, "轻量同步引导", "按四步获取并核验 Token、选择私人仓库、设置同步规则。首次同步前需确认文件预览。");
+    this.displayDevicePreview(page, "轻量同步引导", "核验账号与私人仓库，准备本机配置即可完成接入。文件比对与同步在侧边栏单独执行。");
     if (!this.lightweightGuideDraft) {
       const options = this.plugin.settings.mobile;
       const progress = this.plugin.settings.lightweightGuideProgress;
@@ -3710,14 +3855,15 @@ export class SyncSettingsTab extends PluginSettingTab {
     let completed = false;
     try {
       const repo = parseGithubRepoUrl(options.repoUrl);
-      completed = options.mode === "github" && options.bound && !!engine.state.baseCommitSha && engine.state.binding === `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}#${options.branch}`;
+      completed = options.mode === "github" && options.bound && !!this.plugin.settings.lightweightGuideProgress?.complete && this.plugin.settings.lightweightGuideProgress.repoUrl === options.repoUrl && this.plugin.settings.lightweightGuideProgress.branch === options.branch && engine.state.binding === `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}#${options.branch}`;
     } catch { /* An incomplete repository address remains an unfinished setup. */ }
     const connectionStatus = page.createDiv({ cls: `simple-one-sync-setup-status is-${completed ? "success" : "disconnected"}`, attr: { role: "status" } });
     setIcon(connectionStatus.createSpan({ cls: "simple-one-sync-setup-status__icon" }), completed ? "check" : "unplug");
     const connectionCopy = connectionStatus.createDiv({ cls: "simple-one-sync-setup-status__copy" });
-    connectionCopy.createEl("strong", { text: completed ? "首次接入已完成" : options.bound ? "仓库已绑定，首次同步待核验" : "首次接入尚未完成" });
-    connectionCopy.createEl("p", { text: this.lightweightGuideStateError || (completed ? "轻量同步已建立共同基线；可重新检查授权、仓库和同步规则。" : "按下方步骤核验授权与仓库，确认首次同步后完成接入。") });
+    connectionCopy.createEl("strong", { text: completed ? "首次接入已完成" : options.bound ? "接入配置待核验" : "首次接入尚未完成" });
+    connectionCopy.createEl("p", { text: this.lightweightGuideStateError || (completed ? "账号与本机配置已接入。文件尚未同步时没有共同基线，这是正常状态。" : "核验授权与仓库并准备本机规则；接入不会扫描、上传或下载文件。") });
     const restart = connectionStatus.createEl("button", { text: "重新检查或修复接入", attr: { type: "button" } });
+    styleActionButton(restart, "text");
     restart.disabled = this.lightweightGuideBusy || this.plugin.isSyncing();
     restart.addEventListener("click", () => { void (async () => {
       if (restart.disabled) return;
@@ -3739,7 +3885,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     const progress = this.plugin.settings.lightweightGuideProgress;
     const finished = completed || !!progress?.complete;
     const available = Math.max(finished ? 4 : progress?.step || 2, this.lightweightGuideVerified ? 4 : this.lightweightGuideLogin ? 3 : 2);
-    ["获取 Token", "核验 Token", "选择仓库", "同步规则"].forEach((label, index) => {
+    ["获取 Token", "核验 Token", "选择仓库", "完成接入"].forEach((label, index) => {
       const step = index + 1;
       const done = finished || step < (progress?.step || 1) || (step === 1 ? !!(this.lightweightGuideToken || this.lightweightGuideLogin) : step === 2 ? !!this.lightweightGuideLogin : step === 3 && !!this.lightweightGuideVerified);
       const button = nav.createEl("button", { cls: `simple-one-sync-setup-nav__step${step === this.lightweightGuideStep ? " is-active" : ""}${done ? " is-done" : ""}`,
@@ -3767,6 +3913,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     if (this.lightweightGuideTokenMode === "existing") {
       card.createEl("p", { text: "将已保存的 GitHub token 填入下一步。token 仅保存在本机，不写入共享配置。" });
       const next = card.createEl("button", { text: "填入并核验 token", cls: "mod-cta", attr: { type: "button" } });
+      styleActionButton(next, "text");
       next.addEventListener("click", () => { this.lightweightGuideStep = 2; this.renderSettings(); });
       return;
     }
@@ -3779,6 +3926,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     const loginTitle = loginCopy.createEl("strong", { text: "正在检查本机登录状态…" });
     const loginDescription = loginCopy.createEl("p", { text: "检查 Git 与 GitHub CLI。" });
     const prerequisites = loginStatus.createEl("button", { text: "安装与登录帮助", attr: { type: "button" } });
+    styleActionButton(prerequisites, "text");
     prerequisites.hidden = true;
     prerequisites.addEventListener("click", () => {
       this.setupViewStep = 1;
@@ -3786,6 +3934,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     });
     const actions = card.createDiv({ cls: "simple-one-sync-mobile-guide__actions" });
     const acquire = actions.createEl("button", { text: "一键获取 token（pc 端）", cls: Platform.isMobile ? "" : "mod-cta", attr: { type: "button" } });
+    styleActionButton(acquire, "text");
     let loginReady = false;
     let acquiring = false;
     acquire.disabled = true;
@@ -3874,6 +4023,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     if (ready) {
       const footer = card.createDiv({ cls: "simple-one-sync-setup-footer" });
       const next = footer.createEl("button", { text: "我已保存好 token", cls: "mod-cta", attr: { type: "button", title: "继续配置轻量同步" } });
+      styleActionButton(next, "text");
       next.addEventListener("click", () => { this.lightweightGuideStep = 2; this.renderSettings(); });
     }
   }
@@ -3882,10 +4032,11 @@ export class SyncSettingsTab extends PluginSettingTab {
     const options = this.lightweightGuideDraft!;
     const previous = this.plugin.settings.lightweightGuideProgress;
     const sameRepo = previous?.repoUrl === options.repoUrl && previous.branch === options.branch;
-    this.plugin.settings.lightweightGuideProgress = { step: Math.max(step, sameRepo ? previous.step : 1), complete: sameRepo && previous.complete,
+    const next = { step: Math.max(step, sameRepo ? previous.step : 1), complete: sameRepo && previous.complete,
       repoUrl: options.repoUrl, branch: options.branch, login: this.lightweightGuideLogin || previous?.login || "" };
+    this.plugin.settings.lightweightGuideProgress = next;
     try { await this.plugin.saveSettings(); }
-    catch (error) { this.plugin.settings.lightweightGuideProgress = previous; throw error; }
+    catch (error) { if (this.plugin.settings.lightweightGuideProgress === next) this.plugin.settings.lightweightGuideProgress = previous; throw error; }
   }
 
   private displayLightweightGuideStep(page: HTMLElement): void {
@@ -3900,7 +4051,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     const status = body.createEl("p", { cls: "simple-one-sync-mobile-guide__result", attr: { role: "status", "aria-live": "polite" } });
     const report = (text: string, error = false) => {
       if (!valid()) return;
-      status.setText(text); status.toggleClass("simple-one-sync-setup-error", error); status.toggleClass("simple-one-sync-setup-done", !error);
+      status.setText(text); status.toggleClass("simple-one-sync-setup-error", error); status.toggleClass("simple-one-sync-setup-done", !error && (text.startsWith("✓") || text === "接入完成"));
     };
     const run = async (action: () => Promise<void>) => {
       if (this.lightweightGuideBusy) return;
@@ -3917,7 +4068,7 @@ export class SyncSettingsTab extends PluginSettingTab {
         if (!valid() && sameGuide()) this.renderSettings();
       }
     };
-    new Setting(body).setName(["核验 GitHub Token", "选择 GitHub 仓库", "设置同步规则"][step - 2]).setHeading();
+    new Setting(body).setName(["核验 GitHub Token", "选择 GitHub 仓库", "完成接入"][step - 2]).setHeading();
     if (step === 2) {
       body.createEl("p", { text: "填入 token 并核验 GitHub 连接；成功后自动进入选择仓库。token 仅保存在本机。", cls: "simple-one-sync-setup-step-desc" });
       const tokenSetting = new Setting(body).setName("GitHub token").addText((text) => {
@@ -3930,17 +4081,20 @@ export class SyncSettingsTab extends PluginSettingTab {
       });
       tokenSetting.settingEl.addClass("simple-one-sync-token-input");
       body.appendChild(status);
-      new Setting(body).addButton((button) => button.setButtonText("核验连接").setCta().onClick(() => void run(async () => {
-        this.lightweightGuideLogin = ""; this.lightweightGuideVerified = undefined;
-        report("正在核验 GitHub 连接…");
-        const login = await engine.verifyToken();
-        if (!valid()) return;
-        this.lightweightGuideLogin = login;
-        await this.saveLightweightGuideProgress(3);
-        if (!valid()) return;
-        this.lightweightGuideStep = 3;
-        this.renderSettings();
-      })));
+      new Setting(body).addButton((button) => {
+        styleActionButton(button.buttonEl, "text");
+        button.setButtonText("核验连接").setCta().onClick(() => void run(async () => {
+          this.lightweightGuideLogin = ""; this.lightweightGuideVerified = undefined;
+          report("正在核验 GitHub 连接…");
+          const login = await engine.verifyToken();
+          if (!valid()) return;
+          this.lightweightGuideLogin = login;
+          await this.saveLightweightGuideProgress(3);
+          if (!valid()) return;
+          this.lightweightGuideStep = 3;
+          this.renderSettings();
+        }));
+      });
       if (this.lightweightGuideLogin) report(`✓ Token 有效，当前账号：${this.lightweightGuideLogin}。`);
     } else if (step === 3) {
       body.addClass("simple-one-sync-setup-intro", "simple-one-sync-setup-repository", "simple-one-sync-setup-body");
@@ -3971,19 +4125,22 @@ export class SyncSettingsTab extends PluginSettingTab {
         new Setting(card).setName("新仓库名称").addText((text) => text.setPlaceholder("例如 my-Obsidian-vault").setValue(this.lightweightGuideRepoName)
           .onChange((value) => { this.lightweightGuideRepoName = value.trim(); })).settingEl.addClass("simple-one-sync-setup-repo-name");
         card.appendChild(status);
-        new Setting(card).addButton((button) => button.setButtonText("创建私人仓库").setCta().onClick(() => void run(async () => {
-          report("正在创建私人仓库…");
-          const repo = await engine.createPrivateRepository(this.lightweightGuideRepoName);
-          if (!valid()) return;
-          options.repoUrl = repo.url; options.branch = repo.branch;
-          this.lightweightGuideRepoMode = "existing";
-          try { await checkRepository(); }
-          catch (error) {
+        new Setting(card).addButton((button) => {
+          styleActionButton(button.buttonEl, "text");
+          button.setButtonText("创建私人仓库").setCta().onClick(() => void run(async () => {
+            report("正在创建私人仓库…");
+            const repo = await engine.createPrivateRepository(this.lightweightGuideRepoName);
             if (!valid()) return;
-            this.renderSettings();
-            new Notice(`私人仓库已创建，但核验未完成：${messageOf(error)}。请检查已有仓库后继续。`, 10000);
-          }
-        }))).settingEl.addClass("simple-one-sync-setup-action");
+            options.repoUrl = repo.url; options.branch = repo.branch;
+            this.lightweightGuideRepoMode = "existing";
+            try { await checkRepository(); }
+            catch (error) {
+              if (!valid()) return;
+              this.renderSettings();
+              new Notice(`私人仓库已创建，但核验未完成：${messageOf(error)}。请检查已有仓库后继续。`, 10000);
+            }
+          }));
+        }).settingEl.addClass("simple-one-sync-setup-action");
       } else {
         card.createEl("p", { text: "在已有仓库页面点击 code → copy，复制 HTTPS 地址并粘贴到下方输入框。", cls: "simple-one-sync-setup-helper" });
         const invalidate = () => { this.lightweightGuideVerified = undefined; status.empty(); updateNext(); };
@@ -3994,42 +4151,48 @@ export class SyncSettingsTab extends PluginSettingTab {
         });
         repoSetting.settingEl.addClass("simple-one-sync-setup-repo-url");
         card.appendChild(status);
-        new Setting(card).addButton((button) => button.setButtonText("检查仓库").setCta().onClick(() => void run(checkRepository)))
+        new Setting(card).addButton((button) => {
+          styleActionButton(button.buttonEl, "text");
+          button.setButtonText("检查仓库").setCta().onClick(() => void run(checkRepository));
+        })
           .settingEl.addClass("simple-one-sync-setup-action", "simple-one-sync-setup-check-action", "simple-one-sync-setup-auth-submit");
       }
     } else {
-      body.createEl("p", { text: "选择本机同步范围，完成后可在轻量 Git 同步设置中调整。", cls: "simple-one-sync-setup-step-desc" });
-      body.createEl("p", { text: `${options.repoUrl} · ${options.branch}` });
-      if (!this.lightweightGuideVerified) body.createEl("p", { text: "正在回看已保存的同步规则；如需重新接入，请先返回核验 token 和仓库。" });
-      const rulesPanel = body.createDiv({ cls: "simple-lightweight-sync-settings" });
-      const rules = rulesPanel.createEl("fieldset", { cls: "simple-preview-checkbox-group" });
-      rules.createEl("legend", { text: "同步规则" });
-      renderMobileSyncRules(rules, options, () => {}, () => engine.listCloudPlugins(), this.plugin.manifest.id, this.plugin.mobileHost());
-      body.createEl("p", { text: "完成后绑定并启用轻量同步；首次同步请查看文件预览，再确认执行。" });
+      body.createEl("p", { text: "只核验账号、仓库权限并准备本机配置。接入完成后，在侧边栏单独开始同步。", cls: "simple-one-sync-setup-step-desc" });
+      body.createEl("p", { text: options.repoUrl });
+      body.createEl("p", { text: "分支：" + options.branch });
     }
     let next: HTMLButtonElement | undefined;
     if (step === 4) {
       body.appendChild(status);
       const footer = body.createDiv({ cls: "simple-one-sync-setup-footer" });
-      next = footer.createEl("button", { text: "完成接入并启用同步", cls: "mod-cta", attr: { type: "button" } });
+      let connected = this.plugin.settings.mobile.bound && !!this.plugin.settings.lightweightGuideProgress?.complete && this.plugin.settings.mobile.repoUrl === options.repoUrl && this.plugin.settings.mobile.branch === options.branch;
+      next = footer.createEl("button", { text: connected ? "打开同步" : "准备接入", cls: "mod-cta", attr: { type: "button" } });
+      styleActionButton(next, "text");
+      if (connected) report("✓ 接入完成。请在侧边栏手动同步。尚未建立同步基准是正常状态。");
       next.addEventListener("click", () => {
         if (next?.disabled) return;
+        if (connected) { void this.plugin.openSyncView().catch(error => report(messageOf(error), true)); return; }
         void run(async () => {
-          report("正在接入仓库；接下来请审核并确认首次同步…");
-          await this.plugin.completeLightweightGuide(options);
-          if (!valid()) return;
-          report("✓ 接入已完成，两端已对齐，共同基线与本地哈希缓存已保存。");
-          page.querySelectorAll(".simple-one-sync-lightweight-nav button").forEach(button => button.addClass("is-done"));
-          await new Promise<void>(resolve => window.setTimeout(resolve, 650));
-          if (!valid()) return;
-          this.navigationParents = ["root"]; this.desktopPage = "mobile"; this.renderSettings();
+          next!.setText("正在准备…");
+          try {
+            await this.plugin.completeLightweightGuide({ ...options, plugins: [...options.plugins], ignorePatterns: [...options.ignorePatterns] }, message => report(message));
+            if (!valid()) return;
+            connected = true;
+            report("✓ 接入完成。请在侧边栏手动同步；这里没有执行文件同步。");
+            next!.setText("打开同步");
+            page.querySelectorAll(".simple-one-sync-lightweight-nav button").forEach(button => button.addClass("is-done"));
+            this.renderSettings();
+          } catch (error) { if (valid()) next!.setText("重试接入"); throw error; }
         });
       });
+      next.dataset.connected = connected ? "true" : "false";
     }
+
     const updateNext = () => {
-      if (next) next.disabled = this.lightweightGuideBusy || !this.lightweightGuideVerified;
+      if (next) next.disabled = this.lightweightGuideBusy || (!this.lightweightGuideVerified && !this.plugin.settings.lightweightGuideProgress?.complete);
       const progress = this.plugin.settings.lightweightGuideProgress;
-      const available = Math.max(progress?.step || (this.plugin.settings.mobile.bound && this.plugin.getMobileGithub().state.baseCommitSha ? 4 : 2), this.lightweightGuideVerified ? 4 : this.lightweightGuideLogin ? 3 : 2);
+      const available = Math.max(progress?.step || (this.plugin.settings.mobile.bound && this.plugin.settings.lightweightGuideProgress?.complete ? 4 : 2), this.lightweightGuideVerified ? 4 : this.lightweightGuideLogin ? 3 : 2);
       page.querySelectorAll<HTMLButtonElement>(".simple-one-sync-lightweight-nav button").forEach((button, index) => {
         button.disabled = this.lightweightGuideBusy || index + 1 > available;
       });
@@ -4092,6 +4255,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     this.displayDevicePreview(page, "轻量 Git 同步", "适用于安卓、iOS，也适用于电脑");
     const body = this.syncSettingsBody(page, this.plugin.useLightweightSync());
     renderMobileSettings(body, this.plugin.mobileHost(), false);
+    this.performanceSetting(compactSettingsSection(body, "故障排查"));
     if (this.plugin.settings.mobile.mode === "server") this.displayMobile(body);
   }
 
@@ -4308,18 +4472,18 @@ export class SyncSettingsTab extends PluginSettingTab {
     copy.createEl("strong", { text: title });
     copy.createEl("p", { text: description });
     if (guidedDone && this.plugin.settings.enabled) {
-      const restart = status.createEl("button", { text: "重新检查或修复接入", attr: { type: "button" } });
+      const restart = styleActionButton(status.createEl("button", { text: "重新检查或修复接入", attr: { type: "button" } }), "text");
       restart.addEventListener("click", () => {
         void this.runSetup(() => this.plugin.beginSetup(), "已暂停自动 Git 操作，请从第 1 步开始。");
       });
     } else if (this.plugin.settings.setupComplete && !guidedDone) {
-      const restart = status.createEl("button", { text: "从第一步重新检查接入", attr: { type: "button" } });
+      const restart = styleActionButton(status.createEl("button", { text: "从第一步重新检查接入", attr: { type: "button" } }), "text");
       restart.addEventListener("click", () => {
         void this.runSetup(() => this.plugin.beginSetup(), "已暂停自动 Git 操作，请从第 1 步开始。");
       });
     }
     if (!this.plugin.settings.setupComplete && this.plugin.settings.setupBackup && !this.plugin.settings.setupMutationStarted) {
-      const cancel = status.createEl("button", { text: "取消向导，恢复旧同步", attr: { type: "button", title: "退出向导并恢复之前已配置的自动同步" } });
+      const cancel = styleActionButton(status.createEl("button", { text: "取消向导，恢复旧同步", attr: { type: "button", title: "退出向导并恢复之前已配置的自动同步" } }), "text");
       cancel.disabled = this.setupBusy;
       cancel.addEventListener("click", () => void this.runSetup(() => this.plugin.cancelSetup(), "已恢复之前的同步配置。"));
     }
@@ -4430,8 +4594,8 @@ export class SyncSettingsTab extends PluginSettingTab {
         setTooltip(refresh, "刷新设备码");
         refresh.disabled = this.setupBusy;
         refresh.addEventListener("click", () => void this.startSetupBrowserAuthorization());
-        new Setting(authCard).addButton((button) => button.setButtonText("已填写设备码，验证授权").setCta().setDisabled(this.setupBusy || !this.setupDeviceCode).onClick(() =>
-          this.verifySetupAuthorization(() => this.plugin.checkSetupAuthorization(), "GitHub 授权已核验。")))
+        new Setting(authCard).addButton((button) => { styleActionButton(button.buttonEl, "text"); return (button.setButtonText("已填写设备码，验证授权").setCta().setDisabled(this.setupBusy || !this.setupDeviceCode).onClick(() =>
+          this.verifySetupAuthorization(() => this.plugin.checkSetupAuthorization(), "GitHub 授权已核验。"))); })
           .settingEl.addClass("simple-one-sync-setup-auth-action", "simple-one-sync-setup-auth-submit");
       } else if (this.setupAuthMode === "token") {
         authCard.createEl("p", { text: "本插件不在设置中保存 token；token 会交给本机 GitHub CLI 保存，用于登录与后续同步。" });
@@ -4448,7 +4612,7 @@ export class SyncSettingsTab extends PluginSettingTab {
         });
         tokenSetting.settingEl.addClass("simple-one-sync-setup-token-setting");
         this.setupLink(tokenSetting.descEl, "前往 GitHub 创建 Token ↗", "https://github.com/settings/tokens");
-        new Setting(authCard).addButton((button) => {
+        new Setting(authCard).addButton((button) => { styleActionButton(button.buttonEl, "text");
           tokenVerifyButton = button.buttonEl;
           button.setButtonText("已填写 token，验证授权").setCta().setDisabled(this.setupBusy || !this.setupTokenInput.trim()).onClick(() => {
             const token = this.setupTokenInput;
@@ -4459,11 +4623,11 @@ export class SyncSettingsTab extends PluginSettingTab {
       } else if (this.setupAuthMode === "verify") {
         authCard.createEl("p", { text: this.setupAuthVerified ? "当前 GitHub CLI 登录状态已核验。" : this.setupBusy ? "正在验证当前 GitHub CLI 登录状态…" : "选择后会自动验证当前 GitHub CLI 登录状态。", cls: this.setupAuthVerified || this.setupBusy ? "simple-one-sync-setup-feedback" : "" });
         if (this.setupFailure && !this.setupBusy) {
-          new Setting(authCard).addButton((button) => button.setButtonText("重新验证").setCta().onClick(() =>
+          new Setting(authCard).addButton((button) => { styleActionButton(button.buttonEl, "text"); return (button.setButtonText("重新验证").setCta().onClick(() =>
             this.verifySetupAuthorization(
               () => this.verifyExistingSetupAuthorization(),
               "已成功，GitHub 授权已核验。"
-            )))
+            ))); })
             .settingEl.addClass("simple-one-sync-setup-auth-action", "simple-one-sync-setup-auth-submit");
         }
       }
@@ -4489,19 +4653,19 @@ export class SyncSettingsTab extends PluginSettingTab {
       card.createEl("p", { text: "核验会检查仓库是否为私有，以及当前登录账号是否具有写入权限。", cls: "simple-one-sync-setup-helper" });
       const repoUrlSetting = new Setting(card).setName("GitHub 仓库地址").addText((text) => text.setPlaceholder("https://github.com/user/vault.git").setValue(this.setupRepoInput).onChange((value) => { this.setupRepoInput = value.trim(); }));
       repoUrlSetting.settingEl.addClass("simple-one-sync-setup-repo-url");
-      new Setting(card).addButton((button) => button.setButtonText("检查仓库").setCta().setDisabled(this.setupBusy).onClick(() => void this.runSetup(async () => {
+      new Setting(card).addButton((button) => { styleActionButton(button.buttonEl, "text"); return (button.setButtonText("检查仓库").setCta().setDisabled(this.setupBusy).onClick(() => void this.runSetup(async () => {
         await this.plugin.verifySetupRepository(this.setupRepoInput);
         await this.advanceSetupAfterCheck(2, () => this.setupRepoReady());
-      }, "", false)))
+      }, "", false))); })
         .settingEl.addClass("simple-one-sync-setup-action", "simple-one-sync-setup-check-action", "simple-one-sync-setup-auth-submit");
     } else {
       card.createEl("p", { text: "填写仓库名称后，插件会在当前 GitHub 账号下创建一个空的 private（私人）仓库。此时不会推送本地文件。" });
       new Setting(card).setName("新仓库名称").addText((text) => text.setPlaceholder("例如 my-Obsidian-vault").setValue(this.setupRepoNameInput).onChange((value) => { this.setupRepoNameInput = value.trim(); })).settingEl.addClass("simple-one-sync-setup-repo-name");
-      new Setting(card).addButton((button) => button.setButtonText("创建私人仓库").setCta().setDisabled(this.setupBusy).onClick(() => void this.runSetup(async () => {
+      new Setting(card).addButton((button) => { styleActionButton(button.buttonEl, "text"); return (button.setButtonText("创建私人仓库").setCta().setDisabled(this.setupBusy).onClick(() => void this.runSetup(async () => {
         try { await this.plugin.createSetupRepository(this.setupRepoNameInput); }
         finally { this.setupRepoInput = this.plugin.settings.setupRepoUrl; }
         await this.advanceSetupAfterCheck(2, () => this.setupRepoReady());
-      }, "", false)))
+      }, "", false))); })
         .settingEl.addClass("simple-one-sync-setup-action");
     }
     const feedback = card.createDiv({ cls: "simple-one-sync-setup-repo-feedback", attr: { role: "status", "aria-live": "polite" } });
@@ -4534,7 +4698,7 @@ export class SyncSettingsTab extends PluginSettingTab {
       const needsTrust = this.setupFailure && this.setupTrustRequired;
       const actionLabel = needsTrust ? "信任此笔记库并重试" : preview ? "重新检查两端" : "检查两端";
       const action = body.createDiv({ cls: "simple-one-sync-setup-file-check" });
-      const check = action.createEl("button", { text: this.setupBusy ? "正在检查…" : actionLabel, cls: "mod-cta", attr: { type: "button" } });
+      const check = styleActionButton(action.createEl("button", { text: this.setupBusy ? "正在检查…" : actionLabel, cls: "mod-cta", attr: { type: "button" } }), "text");
       check.disabled = this.setupBusy;
       check.toggleClass("simple-one-sync-trust-action", needsTrust && !this.setupBusy);
       check.addEventListener("click", () => void this.runSetup(async () => {
@@ -4562,9 +4726,21 @@ export class SyncSettingsTab extends PluginSettingTab {
     if (this.setupReviewPreview !== preview) {
       this.setupReviewPreview = preview;
       this.setupFileFilter = "changed";
-      const excluded = preview.trackedExcludedLocal.length + preview.trackedExcludedRemote.length;
-      this.plugin.setSetupTrackingChoice(excluded ? "rebuild" : undefined);
-      this.setupRebuildConfirmed = excluded > 0;
+      this.plugin.setSetupTrackingChoice(undefined);
+      this.setupRebuildConfirmed = false;
+    }
+    if (preview.trackedExcludedLocal.length + preview.trackedExcludedRemote.length) {
+      const consent = body.createEl("label", { cls: "simple-preview-checkbox-row" });
+      const check = consent.createEl("input", { attr: { type: "checkbox" } });
+      check.checked = this.setupRebuildConfirmed;
+      consent.createSpan({ text: "我已查看排除清单，确认仅让这些文件退出追踪：本机保留，接入并推送后远端当前版本删除（包括历史根 .gitignore）。" });
+      check.addEventListener("change", () => {
+        this.setupRebuildConfirmed = check.checked;
+        this.plugin.setSetupTrackingChoice(check.checked ? "rebuild" : undefined);
+        this.renderSettings();
+      });
+      this.setupFileList(body, "本机将退出追踪的文件", preview.trackedExcludedLocal);
+      this.setupFileList(body, "远端当前版本将移除的文件", preview.trackedExcludedRemote);
     }
     const summary = body.createDiv({ cls: "simple-one-sync-setup-detail" });
     new Setting(summary).setName("两端检查概况").setHeading();
@@ -4597,26 +4773,25 @@ export class SyncSettingsTab extends PluginSettingTab {
     const selectedPaths = this.setupFileFilter === "local" ? preview.localOnly : this.setupFileFilter === "remote" ? preview.remoteOnly : preview.relatedHistory ? (preview.changedFiles ?? []) : files;
     const selectedLabel = this.setupFileFilter === "local" ? "仅本机" : this.setupFileFilter === "remote" ? "仅 GitHub" : "文件变化";
     module.createEl("p", { text: selectedPaths.length ? `${selectedLabel} · ${selectedPaths.length} 个文件` : `${selectedLabel} · 无文件`, cls: "simple-one-sync-section-desc" });
-    for (const path of selectedPaths.slice(0, 200)) module.createDiv({ text: path, cls: "simple-one-sync-check-file" });
-    if (selectedPaths.length > 200) module.createEl("p", { text: `另有 ${selectedPaths.length - 200} 个文件。` });
+    renderPathTree(module, selectedPaths, this.setupFileFilter === "local" || this.setupFileFilter === "remote" ? "+" : "M", fileListPanel(module, this.plugin.settings, () => this.plugin.saveSettings()));
     const hasDifferences = (preview.changedFiles ?? []).length > 0 || preview.localOnly.length > 0 || preview.remoteOnly.length > 0 || files.length > 0;
     const bottom = body.createDiv({ cls: "simple-one-sync-check-bottom" });
     bottom.createEl("p", { text: !hasDifferences ? "当前两端没有文件差异。" : preview.relatedHistory ? "以上变化将由 Git 处理，遇到冲突时暂停。" : "请确认同名文件版本。", cls: "simple-one-sync-section-desc" });
     if (files.length && !this.plugin.settings.setupComplete) bottom.createEl("p", { text: `已选择 ${files.filter(path => !!choices[path]).length} / ${files.length} 个版本。` });
     const actions = bottom.createDiv({ cls: "simple-one-sync-check-actions" });
       if (files.length && !this.plugin.settings.setupComplete) {
-        const resolve = actions.createEl("button", { text: "对照并选择文件版本", attr: { type: "button" } });
+        const resolve = styleActionButton(actions.createEl("button", { text: "对照并选择文件版本", attr: { type: "button" } }), "text");
         resolve.disabled = this.setupBusy;
         resolve.addEventListener("click", () => {
           new SetupDifferencesModal(this.app, files, choices, path => this.plugin.readSetupOverlap(path), selected => {
             if (this.plugin.getSetupPreview() !== preview) return;
             for (const path of files) this.plugin.setSetupChoice(path, selected[path]);
             this.updateSetupPreviewSelection();
-          }).open();
+          }, createFileListLayout(this.plugin.settings, () => this.plugin.saveSettings()), (path, side) => this.plugin.readSetupImage(path, side)).open();
         });
       }
       {
-        const next = actions.createEl("button", { text: "下一步：完成接入", cls: "mod-cta", attr: { type: "button" } });
+        const next = styleActionButton(actions.createEl("button", { text: "下一步：完成接入", cls: "mod-cta", attr: { type: "button" } }), "text");
         next.disabled = this.setupBusy || !this.setupPreviewReady();
         next.addEventListener("click", () => void this.runSetup(() => this.advanceSetupAfterPreview(), "", false));
       }
@@ -4634,8 +4809,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     if (paths.length === 0) return;
     const details = body.createEl("details", { cls: "simple-one-sync-setup-files" });
     details.createEl("summary", { text: `${title}（${paths.length}）` });
-    for (const path of paths.slice(0, 200)) details.createDiv({ text: path });
-    if (paths.length > 200) details.createEl("p", { text: `还有 ${paths.length - 200} 个文件未在这里展开。` });
+    renderPathTree(details, paths, "M", fileListPanel(body, this.plugin.settings, () => this.plugin.saveSettings()));
   }
 
   private displaySetupFinish(body: HTMLElement): void {
@@ -4648,7 +4822,7 @@ export class SyncSettingsTab extends PluginSettingTab {
         : "本次打开后尚无检查结果，请返回第 3 步重新检查。" });
       return;
     }
-    const ignoreSummary = "将统一写入推荐规则、内嵌仓库规则和两端自有规则；推送后两端 .gitignore 一致。";
+    const ignoreSummary = "根 .gitignore 仅本机保留，接入前原规则保留在原规则区；不会合并云端规则。历史追踪迁移按已确认的删除清单处理。";
     body.createEl("p", { text: `将保留本地 ${preview.localFiles.length} 个文件，并接入远端 ${preview.remoteFiles.length} 个文件。${ignoreSummary}` });
     if (preview.nestedRepos.length) body.createEl("p", {
       text: `已识别 ${preview.nestedRepos.length} 个内嵌仓库；${this.plugin.settings.setupComplete ? "下次同步" : "完成接入"}时将重建主仓库对小库文件的追踪，并忽略小库的 .git 元数据。`,
@@ -4674,11 +4848,6 @@ export class SyncSettingsTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       }));
     authorEmailSetting.settingEl.addClass("simple-one-sync-setup-author-setting");
-    if (!this.plugin.settings.setupComplete && preview.missingIgnoreRules.length > 0) {
-      const rules = body.createEl("details", { cls: "simple-one-sync-setup-files" });
-      rules.createEl("summary", { text: `查看将补充的 ${preview.missingIgnoreRules.length} 条 .gitignore 规则` });
-      rules.createEl("pre", { text: preview.missingIgnoreRules.join("\n") });
-    }
     if (preview.overlaps.length) this.setupFileList(body, "已选择远端版本的同名文件", preview.overlaps.filter((path) => this.plugin.getSetupChoices()[path] === "remote"));
     const finished = this.setupFinishedPreview === preview;
     if (finished) {
@@ -4694,7 +4863,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     if (!finished) {
       const footer = body.createDiv({ cls: "simple-one-sync-setup-footer simple-one-sync-check-actions" });
       const needsTrust = this.setupFailure && this.setupTrustRequired;
-      const finish = footer.createEl("button", { text: this.setupBusy ? "正在完成接入…" : needsTrust ? "信任此笔记库并重试" : this.plugin.settings.setupComplete ? "应用接入设置" : "确认完成接入", cls: "mod-cta", attr: { type: "button" } });
+      const finish = styleActionButton(footer.createEl("button", { text: this.setupBusy ? "正在完成接入…" : needsTrust ? "信任此笔记库并重试" : this.plugin.settings.setupComplete ? "应用接入设置" : "确认完成接入", cls: "mod-cta", attr: { type: "button" } }), "text");
       finish.toggleClass("simple-one-sync-trust-action", needsTrust && !this.setupBusy);
       finish.disabled = this.setupBusy || (this.plugin.getSetupTrackingChoice() === "rebuild" && !this.setupRebuildConfirmed);
       finish.addEventListener("click", () => void this.runSetup(async () => { if (needsTrust) await this.plugin.trustSetupVault(); await this.plugin.finishSetup(this.setupRebuildConfirmed, (message, error) => {
@@ -4708,6 +4877,21 @@ export class SyncSettingsTab extends PluginSettingTab {
         }
       }); this.setupFinishedPreview = preview; }, "接入成功，同步进度与结果请查看右侧同步面板。"));
     }
+  }
+
+  private performanceSetting(container: HTMLElement): void {
+    const name = "记录同步性能详情";
+    const setting = new Setting(container).setName(name)
+      .setDesc("同时适用于轻量同步与完整同步。开启后记录各步骤耗时及文件数；关闭时只保存简单同步记录。");
+    setting.settingEl.addClass("simple-sync-checkbox-row");
+    const input = setting.settingEl.createEl("input", { type: "checkbox", attr: { "aria-label": name } });
+    input.checked = this.plugin.settings.recordSyncPerformance === true;
+    setting.settingEl.prepend(input);
+    setting.nameEl.addEventListener("click", () => input.click());
+    input.addEventListener("change", () => void (async () => {
+      this.plugin.settings.recordSyncPerformance = input.checked;
+      await this.plugin.saveSettings();
+    })().catch(error => new Notice(`保存性能记录设置失败：${messageOf(error)}`)));
   }
 
   private displayDesktopAdvanced(containerEl: HTMLElement): void {
@@ -4788,9 +4972,10 @@ export class SyncSettingsTab extends PluginSettingTab {
       );
 
     advancedBody = section("故障排查");
-    new Setting(advancedBody).setName("检查忽略规则与文件追踪")
-      .setDesc("先检查 .gitignore 和已追踪文件，再只让应忽略的文件退出 Git 跟踪。本机文件保留；不会立即 commit 或 push。若有未解决的合并冲突，请先处理。")
-      .addButton((button) => button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("play").setTooltip("检查忽略规则与文件追踪").setDisabled(preview).onClick(async () => {
+    this.performanceSetting(advancedBody);
+    new Setting(advancedBody).setName("重建忽略规则与 Git 追踪").setClass("mod-action").setClass("simple-setting-icon-action")
+      .setDesc("预览 .gitignore 的变化，以及由此取消或新增追踪的文件；已删除文件由正常同步处理。确认后只暂存差异，不提交或推送。")
+      .addButton((button) => button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("play").setTooltip("重建忽略规则与 Git 追踪").setDisabled(preview).onClick(async () => {
         button.setDisabled(true);
         button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("loader-circle").setTooltip("正在检查…");
         try {
@@ -4800,11 +4985,11 @@ export class SyncSettingsTab extends PluginSettingTab {
           new Notice(`同步：无法检查文件追踪。${messageOf(error)}`, 10000);
         } finally {
           button.setDisabled(false);
-          button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("play").setTooltip("检查忽略规则与文件追踪");
+          button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("play").setTooltip("重建忽略规则与 Git 追踪");
         }
       }));
     new Setting(advancedBody)
-      .setName("检查并修复未完成的 Git 操作")
+      .setName("检查并修复未完成的 Git 操作").setClass("mod-action").setClass("simple-setting-icon-action")
       .setDesc("清理索引锁或修复中断的 Git 操作。操作前会弹窗确认。")
       .addButton((button) =>
         button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("play").setTooltip("检查并修复未完成的 Git 操作").setDisabled(preview).onClick(async () => {
@@ -4826,7 +5011,7 @@ export class SyncSettingsTab extends PluginSettingTab {
         })
       );
     new Setting(advancedBody)
-      .setName("预览清理本地旧历史（保留近 30 天）")
+      .setName("预览清理本地旧历史（保留近 30 天）").setClass("mod-action").setClass("simple-setting-icon-action")
       .setDesc("默认保留最近 30 天的本地历史。先联网确认当前 commit 已上传，再清理本机旧历史；不会删除 GitHub 上的版本。")
       .addButton((button) =>
         button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("play").setTooltip("检查并预览旧历史清理").setDisabled(preview).onClick(async () => {
@@ -4845,15 +5030,15 @@ export class SyncSettingsTab extends PluginSettingTab {
       );
     const logs = this.plugin.getRecentErrorLogs();
     const errorCount = logs.filter((entry) => entry.status !== "success").length;
-    new Setting(advancedBody)
-      .setName(errorCount > 0 ? `同步日志（${errorCount} 条错误）` : "查看最近 24 小时同步日志")
+    new Setting(advancedBody).setClass("mod-action").setClass("simple-setting-icon-action")
+      .setName(errorCount > 0 ? `同步与分享日志（${errorCount} 条错误）` : "查看最近 24 小时同步与分享日志")
       .setDesc(
         errorCount > 0
           ? `最近 24 小时共 ${logs.length} 条记录，其中 ${errorCount} 条错误。`
           : `最近 24 小时共 ${logs.length} 条记录，没有错误。`
       )
       .addButton((button) =>
-        button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("play").setTooltip("查看同步日志").onClick(() => new ErrorLogModal(this.app, this.plugin).open())
+        button.setClass("simple-action-button").setClass("simple-action-button--bordered").setIcon("play").setTooltip("查看同步与分享日志").onClick(() => new ErrorLogModal(this.app, this.plugin).open())
       );
     for (const row of Array.from(containerEl.querySelectorAll<HTMLElement>(".simple-one-sync-advanced__body > .setting-item"))) {
       const description = row.querySelector<HTMLElement>(".setting-item-description");

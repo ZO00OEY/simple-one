@@ -355,7 +355,7 @@ export class EdgeOneConnection {
     await this.save(); this.report(result.text);
     return result;
   }
-  async initializeWebsite(forceFreshDeployment = false): Promise<void> {
+  async initializeWebsite(forceFreshDeployment = false, waitForDeployment = true): Promise<void> {
     this.stopped = false;
     if (!this.linked) throw new Error("请先关联腾讯项目。");
     const commit = await this.latestCommit();
@@ -380,6 +380,7 @@ export class EdgeOneConnection {
       const result = await this.checkDeployment(deploymentId);
       if (result.kind === "success") { this.state.step = 3; await this.save(); return; }
       if (result.kind === "error" || result.kind === "unknown") return;
+      if (!waitForDeployment) return;
       await new Promise<void>(resolve => window.setTimeout(resolve, 10000));
     }
     if (!this.stopped) this.report("腾讯仍在部署。进度已保留，可稍后点击「检查网站部署」。");

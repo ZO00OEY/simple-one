@@ -1,3 +1,4 @@
+import { styleActionButton } from "./actionButton";
 import { App, Modal, Setting } from "obsidian";
 
 export function confirmAction(app: App, message: string): Promise<boolean> {
@@ -6,14 +7,15 @@ export function confirmAction(app: App, message: string): Promise<boolean> {
       private accepted = false;
 
       onOpen(): void {
+        this.modalEl.addClass("simple-one-modal");
         this.titleEl.setText("确认操作");
         this.contentEl.createEl("p", { text: message });
         new Setting(this.contentEl)
           .addButton((button) => button.setButtonText("取消").onClick(() => this.close()))
-          .addButton((button) => button.setButtonText("确认").setCta().onClick(() => {
+          .addButton((button) => { styleActionButton(button.buttonEl, "text"); return (button.setButtonText("确认").setCta().onClick(() => {
             this.accepted = true;
             this.close();
-          }));
+          })); });
       }
 
       onClose(): void {

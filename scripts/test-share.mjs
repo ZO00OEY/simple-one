@@ -17,7 +17,7 @@ export class FileSystemAdapter { constructor(root) { this.root=root; } getBasePa
 export class TFolder {constructor(path){this.path=path;}}
 export const Platform={isMobile:false};
 export const requireApiVersion=()=>true; export const requestUrl=()=>{throw new Error('Unexpected live request in share test');};
-export class Component{};export class ItemView{constructor(leaf){this.app=leaf?.app;this.contentEl=leaf?.contentEl;}getState(){return {};}};export class MarkdownView{};export class Menu{};export class Modal{constructor(app){this.app=app;Object.assign(this,globalThis.shareModalElements?.());}open(){this.onOpen?.();}close(){this.onClose?.();}};export class FuzzySuggestModal{};export class Notice{constructor(message){this.messages=[message];globalThis.shareNotices?.push(this);}setMessage(message){this.messages.push(message);return this;}hide(){this.hidden=true;}};export class Setting{constructor(parent){if(globalThis.shareSetting)return globalThis.shareSetting(parent);}};export class WorkspaceLeaf{};export const addIcon=()=>{};export const setIcon=()=>{};export const setTooltip=()=>{};export const parseYaml=source=>({share_id:/^share_id: (.+)$/m.exec(source)?.[1]});`;
+export class Component{};export class ItemView{constructor(leaf){this.app=leaf?.app;this.contentEl=leaf?.contentEl;}getState(){return {};}registerDomEvent(target,type,callback){target.addEventListener(type,callback);}register(){}};export class MarkdownView{};export class Menu{};export class Modal{constructor(app){this.app=app;Object.assign(this,globalThis.shareModalElements?.());}open(){this.onOpen?.();}close(){this.onClose?.();}};export class FuzzySuggestModal{};export class Notice{constructor(message){this.messages=[message];globalThis.shareNotices?.push(this);}setMessage(message){this.messages.push(message);return this;}hide(){this.hidden=true;}};export class Setting{constructor(parent){if(globalThis.shareSetting)return globalThis.shareSetting(parent);}};export class WorkspaceLeaf{};export const addIcon=()=>{};export const setIcon=()=>{};export const setTooltip=()=>{};export const parseYaml=source=>({share_id:/^share_id: (.+)$/m.exec(source)?.[1]});`;
 const plugin = { name: "obsidian-fixture", setup(build) { build.onResolve({ filter: /^obsidian$/ }, () => ({ path: "obsidian", namespace: "fixture" })); build.onLoad({ filter: /.*/, namespace: "fixture" }, () => ({ contents: fixture, loader: "js" })); } };
 async function bundle(source, name) {
   const outfile = join(folder, `${name}.cjs`);
@@ -174,7 +174,7 @@ try {
   const root = join(folder, "vault");
   await mkdir(root); await writeFile(join(root, "private.md"), "private");
   // Share one fixture class between the host adapter and repository module.
-  await writeFile(join(folder, "entry.ts"), `export {FileSystemAdapter,TFile,TFolder,Platform} from "obsidian"; export {ShareRepository,websiteFiles} from ${JSON.stringify(resolve("src/features/share/repository.ts"))}; export {ApiShareRepository,FallbackShareRepository} from ${JSON.stringify(resolve("src/features/share/apiRepository.ts"))}; export {default as ShareFeature,ShareView,ShareDirectoryModal} from ${JSON.stringify(resolve("src/features/share/index.ts"))};`);
+  await writeFile(join(folder, "entry.ts"), `export {FileSystemAdapter,TFile,TFolder,Platform} from "obsidian"; export {ShareRepository,websiteFiles} from ${JSON.stringify(resolve("src/features/share/repository.ts"))}; export {ApiShareRepository,FallbackShareRepository} from ${JSON.stringify(resolve("src/features/share/apiRepository.ts"))}; export {default as ShareFeature,ShareView} from ${JSON.stringify(resolve("src/features/share/index.ts"))};`);
   const combined = await bundle(join(folder, "entry.ts"), "combined");
   {
     let probes = 0;
@@ -817,11 +817,41 @@ try {
     const view = new combined.ShareView({ app: panel.host.app, contentEl: rootEl }, panel);
     view.render();
     assert.equal(rootEl.querySelector('[aria-label="切换文件视图"]'), null, 'the sidebar has no layout switch');
+    let openedShareLogs = 0;
+    panel.host.sync.openShareLogs = () => { openedShareLogs++; };
+    const logButton = rootEl.querySelector('[aria-label="查看分享日志"]');
+    assert.equal(rootEl.querySelectorAll('.simple-share-header-icon')[1], logButton, 'share logs occupy the second toolbar position');
+    logButton.click(); assert.equal(openedShareLogs, 1, 'toolbar opens the shared log dialog');
+    let shareRefreshes = 0;
+    const refreshShareStatus = panel.refreshShareStatus;
+    panel.refreshShareStatus = async () => { shareRefreshes++; };
+    rootEl.querySelector('[aria-label="刷新分享状态"]').click();
+    assert.equal(shareRefreshes, 1, 'refresh control checks share changes and deployment');
+    assert(rootEl.querySelector('.simple-share-status-info').textContent.includes('最近推送：'));
+    panel.refreshShareStatus = refreshShareStatus;
+    {
+      const toggles = [], originalToggle = panel.toggleShareButton, originalMenu = panel.addCopyContentMenu;
+      let menus = 0, held;
+      panel.toggleShareButton = async key => { toggles.push(key); };
+      panel.addCopyContentMenu = async () => { menus++; };
+      const control = rootEl.querySelector('[aria-label="复制设置"]'), win = control.ownerDocument.defaultView;
+      const originalTimer = win.setTimeout, originalClear = win.clearTimeout;
+      win.setTimeout = callback => { held = callback; return 1; }; win.clearTimeout = () => {};
+      try {
+        control.click(); assert.deepEqual(toggles, ['showCopyButton'], 'short click toggles copy buttons');
+        control.dispatchEvent(new win.MouseEvent('pointerdown', { button: 0 })); held();
+        control.dispatchEvent(new win.MouseEvent('pointerup', { button: 0 })); control.click();
+        assert.equal(menus, 1, 'long press opens content settings');
+        assert.equal(toggles.length, 1, 'long press never also disables copying');
+      } finally { panel.toggleShareButton = originalToggle; panel.addCopyContentMenu = originalMenu; win.setTimeout = originalTimer; win.clearTimeout = originalClear; }
+    }
     const unchangedRow = rootEl.querySelector('.simple-share-note-row');
     panel.status = '正在上传变化文件：1/3'; panel.busy = true; panel.publishStartedAt = Date.now() - 2200;
     view.updateStatus();
     assert(rootEl.querySelector('.simple-share-progress').textContent.includes('已用 2 秒'));
-    assert(rootEl.querySelector('.simple-share-library-status').classList.contains('has-status'), 'progress replaces the library label in its dedicated row');
+    assert(rootEl.querySelector('.simple-share-library-status').classList.contains('has-status'), 'progress stays in its dedicated status row');
+    assert.equal(rootEl.querySelector('.simple-share-publish').nextElementSibling, rootEl.querySelector('.simple-share-library-button'), 'library selector immediately follows the publish button');
+    assert(!rootEl.querySelector('.simple-share-library-button').textContent.includes('当前分享库'), 'library selector only shows its name');
     assert(rootEl.querySelector('.simple-share-progress').classList.contains('is-working'));
     assert.equal(rootEl.querySelector('.simple-share-note-row'), unchangedRow, 'progress updates preserve the note list DOM');
     panel.status = '推送成功 · 网站正在构建新的发布版本'; panel.error = '测试构建检查提示'; panel.busy = false;
@@ -831,13 +861,27 @@ try {
     panel.status = ''; panel.error = ''; panel.publishStartedAt = 0;
     view.updateStatus();
     assert.equal(rootEl.querySelector('.simple-share-edit'), null, 'editing is entered by holding a row, not a toolbar button');
-    assert(!rootEl.querySelector('.simple-share-library-status').classList.contains('has-status'), 'idle restores the library label');
+    assert(!rootEl.querySelector('.simple-share-progress').hidden, 'idle still shows the main change summary');
+    assert(!rootEl.querySelector('.simple-share-status-info').textContent.includes('\n'), 'timestamps occupy a single auxiliary line');
+    assert(rootEl.querySelector('.simple-share-status-info').hidden, 'timestamps never reserve a second visible row');
+    panel.lastPushedAt = Date.now() - 19 * 60 * 1000;
+    panel.status = 'GitHub Pages 与腾讯 EdgeOne 均已部署成功'; view.updateStatus();
+    assert.equal(rootEl.querySelector('.simple-share-progress').textContent, '待发布：新增 1 · 上次推送 19 分钟前', 'pending changes take priority over an older deployment result');
+    const savedRows = panel.rows;
+    panel.rows = panel.rows.map(row => ({ ...row, state: '推送成功' })); view.updateStatus();
+    assert.equal(rootEl.querySelector('.simple-share-progress').textContent, 'GitHub / EdgeOne 已部署 · 上次推送 19 分钟前');
+    panel.rows = savedRows;
+    assert(rootEl.querySelector('.simple-share-progress').title.includes('最近检查：'), 'complete check information remains available on hover');
+    panel.status = ''; panel.lastPushedAt = 0; view.updateStatus();
     assert.equal(rootEl.querySelector('.simple-one-panel-switch'), null, 'sharing has no sync switch');
     assert.equal(view.getDisplayText(), '分享');
     assert.equal(view.getIcon(), 'share-2');
-    assert.equal(rootEl.querySelector('.simple-share-header').nextElementSibling.className, 'simple-share-library-status');
+    assert(rootEl.querySelector('.simple-share-header').nextElementSibling.classList.contains('simple-share-library-status'));
     assert.equal(rootEl.querySelector('.simple-share-library-status').nextElementSibling.className, 'setting-item simple-share-publish-row');
-    assert(rootEl.querySelector('.simple-share-library-label .simple-share-library-chevron'));
+    const sidebarLibrarySelect = rootEl.querySelector('select[aria-label="切换当前分享库"]');
+    assert(sidebarLibrarySelect, 'library picker uses a native dropdown');
+    assert.equal(sidebarLibrarySelect.multiple, false, 'library picker is single-select');
+    assert.equal(sidebarLibrarySelect.value, panel.libraryId);
     assert.equal(rootEl.querySelector('.simple-share-publish-row').nextElementSibling.className, 'setting-item simple-share-search');
     assert.equal(rootEl.querySelector('.simple-share-publish-row button').textContent, '推送新分享');
     assert(rootEl.querySelector('.simple-share-publish-row button').classList.contains('simple-share-new'));
@@ -968,7 +1012,7 @@ try {
     assert.equal(rootEl.querySelector('.simple-share-draft-folder'), null, 'Escape cancels the draft folder');
     const editEvents = {}, editDisposers = [];
     view.register = dispose => editDisposers.push(dispose);
-    view.registerDomEvent = (_target, type, callback) => { editEvents[type] = callback; };
+    view.registerDomEvent = (target, type, callback) => { if (target === rootEl.ownerDocument) editEvents[type] = callback; else target.addEventListener(type, callback); };
     await view.onOpen();
     view.editing = true;
     editEvents.pointerdown({ target: rootEl });
@@ -983,48 +1027,6 @@ try {
     editDisposers.forEach(dispose => dispose());
     assert(rootEl.querySelector('.simple-share-selection-bar').hidden);
     assert.equal(rootEl.querySelectorAll('.simple-share-selection').length, 0, 'leaving edit mode hides checkboxes');
-    const popup = dom.window.document.body.createDiv();
-    globalThis.shareModalElements = () => ({ titleEl: popup.createDiv(), contentEl: popup.createDiv() });
-    const destinations = { all: ['/', '/公开/旧/', '原库/甲', '公开/旧'], share: ['/', '/公开/旧/', '公开/旧'] }, moves = [], creations = [];
-    const directoryFeature = { host: { app: {} }, shareDirectories: async () => destinations,
-      moveShares: async (ids, directory) => moves.push({ ids, directory }),
-      createShareDirectory: async (parent, name) => { const path = `${parent}/${name}`; creations.push(path); destinations.share.push(path); return path; } };
-    const defaultPicker = new combined.ShareDirectoryModal(directoryFeature, [firstId, secondId], () => {});
-    defaultPicker.open(); await new Promise(resolve => setTimeout(resolve, 0));
-    assert.equal(defaultPicker.contentEl.querySelector('.simple-share-directory-feedback').textContent, '', 'legacy root slash must not cause recursive rendering');
-    assert.equal(defaultPicker.contentEl.querySelectorAll('[data-directory=""]').length, 1, 'root is rendered once');
-    assert(defaultPicker.contentEl.querySelector('[data-directory="公开/旧"]'), 'legacy paths are normalized before building the tree');
-    assert(defaultPicker.contentEl.textContent.includes('分享专用库') && !defaultPicker.contentEl.textContent.includes('专门分享库'));
-    assert(!defaultPicker.contentEl.querySelector('[data-directory="原库/甲"]'), 'private vault directories are not shown');
-    defaultPicker.contentEl.querySelector('.simple-share-directory-footer .mod-cta').click();
-    await new Promise(resolve => setTimeout(resolve, 0));
-    assert.equal(moves[0].directory, undefined, 'moving without a destination uses each source directory');
-    const picker = new combined.ShareDirectoryModal(directoryFeature, [firstId], () => {});
-    picker.open(); await new Promise(resolve => setTimeout(resolve, 0));
-    const directorySearch = picker.contentEl.querySelector('.simple-share-directory-search');
-    directorySearch.value = '不存在'; directorySearch.dispatchEvent(new dom.window.Event('input'));
-    assert(!picker.contentEl.querySelector('[data-directory="公开/旧"]'));
-    directorySearch.value = '旧'; directorySearch.dispatchEvent(new dom.window.Event('input'));
-    picker.contentEl.querySelector('[data-directory="公开/旧"]').click();
-    picker.contentEl.querySelector('.simple-share-directory-breadcrumb button').click();
-    assert.equal(creations.length, 0, 'new folder remains a draft until its name is saved');
-    const inlineEditor = picker.contentEl.querySelector('.simple-share-directory-create');
-    assert(inlineEditor.parentElement.classList.contains('simple-share-directory-row'), 'editor replaces the directory label in its original row');
-    assert.equal(inlineEditor.dataset.directory, '公开/旧/新建文件夹');
-    assert.equal(dom.window.document.activeElement, inlineEditor.querySelector('input'));
-    assert.equal(inlineEditor.querySelector('input').selectionEnd, '新建文件夹'.length);
-    inlineEditor.querySelector('input').dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape' }));
-    assert.equal(creations.length, 0, 'canceling a draft creates no directory');
-    picker.contentEl.querySelector('.simple-share-directory-breadcrumb button').click();
-    picker.contentEl.querySelector('.simple-share-directory-create input').dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter' }));
-    await new Promise(resolve => setTimeout(resolve, 0));
-    assert.deepEqual(creations, ['公开/旧/新建文件夹']);
-    assert(picker.contentEl.querySelector('[data-directory="公开/旧/新建文件夹"]'));
-    assert(picker.contentEl.querySelector('.simple-share-directory-breadcrumb').textContent.includes('公开/旧/新建文件夹'));
-    picker.contentEl.querySelector('.simple-share-directory-footer .mod-cta').click();
-    await new Promise(resolve => setTimeout(resolve, 0));
-    assert.equal(moves[1].directory, '公开/旧/新建文件夹');
-    delete globalThis.shareModalElements; popup.remove();
     ui.manifest.enabled = false; ui.renderSettings(rootEl, false, false);
     assert.deepEqual([...rootEl.querySelectorAll("fieldset > legend")].map(title => title.textContent), ["分享设置", "分享库管理"]);
     assert.equal(rootEl.querySelectorAll('button[title^="管理分享库："]').length, 1);
@@ -1038,7 +1040,7 @@ try {
     assert(!rootEl.querySelector(".simple-share-preview-area"));
     assert(!rootEl.textContent.includes("分享预览"));
     const templatePopup = dom.window.document.body.createDiv();
-    globalThis.shareModalElements = () => ({ titleEl: templatePopup.createDiv(), contentEl: templatePopup.createDiv() });
+    globalThis.shareModalElements = () => ({ modalEl: templatePopup, titleEl: templatePopup.createDiv(), contentEl: templatePopup.createDiv() });
     rootEl.querySelector('button[title="管理分享模板"]').click();
     assert.deepEqual([...templatePopup.querySelectorAll('button')].map(button => button.dataset.icon), ['download', 'upload', 'rotate-ccw']);
     assert([...templatePopup.querySelectorAll('button')].every(button => button.disabled), 'template mutations stay disabled while sharing is off');
@@ -1119,7 +1121,7 @@ try {
     assert(!rootEl.querySelector('.simple-share-library-detail').textContent.includes('删除记录只移除'), 'the provider card contains only share-site details');
     assert(!detailCalls.some(call => call.method === 'PATCH'), 'opening details never changes repository visibility');
     const confirmation = dom.window.document.createElement('div'); dom.window.document.body.append(confirmation);
-    globalThis.shareModalElements = () => ({ titleEl: confirmation.createDiv(), contentEl: confirmation.createDiv() });
+    globalThis.shareModalElements = () => ({ modalEl: confirmation, titleEl: confirmation.createDiv(), contentEl: confirmation.createDiv() });
     let privateRepo = true;
     ui.github = async (path, method, request) => {
       detailCalls.push({ path, method, request });
@@ -1289,7 +1291,7 @@ try {
     ui.manifest.copyContent.title = false;
     const multipleLinks = await ui.shareCopyText('abcdefghijkl', '实际笔记');
     assert(multipleLinks.includes('新站名：https://mine.example.com/#/notes/abcdefghijkl'));
-    assert(multipleLinks.includes('EdgeOne 自定义域名链接（notes.example.com）：'), 'multiple selected links include their channel names');
+    assert(multipleLinks.includes('EdgeOne 链接（notes.example.com）：'), 'multiple selected links include their concise channel names');
     ui.manifest.customDomains = priorCustomChannels;
     ui.change = priorCopyChange;
     ui.manifest.copyContent = { title: true, github: true, pageOne: false };
@@ -1352,7 +1354,7 @@ try {
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(ui.checkingDeployment, true);
     finishDeployment(JSON.stringify({ commit: "fixture-commit", status: "built" })); await check;
-    assert.equal(ui.status, "推送成功 · 网站已更新");
+    assert.equal(ui.status, "推送已确认\nGitHub Pages：网站已更新\n腾讯 EdgeOne：尚未关联项目");
     assert.deepEqual(deploymentCalls, [["auth", "token", "--hostname", "github.com"], ["api", "repos/fixture/notes-share/pages/builds/latest"]], "deployment reads local credentials, then only requests build status");
   } finally { delete globalThis.shareSetting; dom.window.close(); }
   console.log("Share authorization UI: method selection, token handoff, device code cancellation and shared title preservation passed.");
@@ -1412,7 +1414,7 @@ try {
     try {
       monitor.status = '推送成功 · 已推送，网站部署中';
       monitor.scheduleDeploymentCheck('published-commit');
-      assert.equal(delay, 10000, 'deployment polling uses a bounded background interval');
+      assert.equal(delay, 1000, 'deployment polling checks every second');
       scheduled(); await new Promise(resolve => originalSchedule(resolve, 0));
       assert.equal(checks, 1);
       monitor.status = '推送成功 · 已推送，网站部署中';
@@ -1470,7 +1472,7 @@ try {
     };
     queued.manifest.site.hosting = 'edgeone';
     const websiteChoices = await queued.shareWebsites();
-    assert.deepEqual(websiteChoices.map(item => item.name), ['GitHub 链接', 'EdgeOne Makers 链接']);
+    assert.deepEqual(websiteChoices.map(item => item.name), ['GitHub 链接', 'EdgeOne 链接']);
     assert.equal(websiteChoices[0].url, 'https://fixture.github.io/notes-share/', 'website choices are independent of the bound hosting platform');
     savedWebsite.visibility = true;
     assert.equal((await queued.shareWebsites())[0].url, '', 'private repositories do not produce invented Pages links');

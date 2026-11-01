@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import "./test-action-buttons.mjs";
 import "./test-attachment-actions.mjs";
+import "./test-attachment-automation.mjs";
+import "./test-attachment-reference-jump.mjs";
 import "./test-mermaid-viewer.mjs";
 import { build } from "esbuild";
 
@@ -47,6 +49,9 @@ popout.open();
 assert.ok(popout.opened, "the original modal open must still run with its receiver");
 assert.deepEqual(applied, { x: -1920, y: 0, width: 1000, height: 800 });
 applied = undefined;
+popout.nativeWindow.getBounds = () => ({ x: -1800, y: -150, width: 1000, height: 800 });
+popout.open();
+assert.equal(applied, undefined, "reopening the same native window preserves a user-positioned negative coordinate");
 plugin.settings.enableWindowPositionOptimization = false;
 popout.open();
 assert.equal(applied, undefined, "disabled optimization must not move windows");
@@ -71,8 +76,10 @@ assert.deepEqual(settings.enhancements.quickFormat.visibleModes, ["h1", "quote"]
 applySwitchStates(settings, { "/enabled": false });
 assert.equal(settings.enabled, false);
 const stub = `
+export function setIcon() {}
 export class Notice { constructor(message) { globalThis.__simpleTest.notices.push(message); } }
 export class Modal {
+  modalEl = { addClass() {} };
   titleEl = { setText() {} };
   contentEl = { createEl() {}, empty() {}, buttons: [] };
   open() { globalThis.__simpleTest.modal = this; this.onOpen(); }
@@ -81,7 +88,7 @@ export class Modal {
 export class Setting {
   constructor(el) { this.el = el; }
   addButton(fn) {
-    const button = { setButtonText(text) { this.text = text; return this; }, setCta() { return this; }, onClick(handler) { this.handler = handler; return this; } };
+    const button = { buttonEl: { classList: { add() {}, remove() {} } }, setButtonText(text) { this.text = text; return this; }, setCta() { return this; }, onClick(handler) { this.handler = handler; return this; } };
     fn(button); this.el.buttons.push(button); return this;
   }
 }`;
@@ -167,6 +174,7 @@ const organizerFiles = [
 const organizerFolder = new TFolder(organizerFiles.filter(file => file.path.startsWith('Attachments/')));
 let organizerLocation = 'Attachments';
 const organizerPlugin = {
+  settings: { imageAttachmentFolderMode: 'category', attachmentFolderMode: 'note' },
   getTemplateFolder: () => 'Templates',
   app: {
     vault: {
@@ -175,21 +183,49 @@ const organizerPlugin = {
       getMarkdownFiles: () => organizerFiles.filter(file => file.extension === 'md'),
       getAbstractFileByPath: path => path === 'Attachments' ? organizerFolder : organizerFiles.find(file => file.path === path),
     },
-    metadataCache: { resolvedLinks: {
+    metadataCache: { getFileCache: () => ({}), resolvedLinks: {
       'Notes/Example.md': { 'IMG_4439.jpeg': 1, 'Diagram.png': 1, 'data.pdf': 1, 'Notes/IMG_9999.png': 1, 'Attachments/IMG_1111.png': 1 },
       'Templates/Example.md': { 'template.png': 1 },
     } },
   },
 };
+organizer.registerAttachmentCleanupGuard(organizerPlugin, () => true);
 await organizer.planAttachmentImageRename(organizerPlugin);
 let plans = globalThis.__attachmentTest.modal.plans;
 assert.deepEqual(plans.map(plan => plan.file.path).sort(), ['Attachments/IMG_1111.png', 'Diagram.png', 'IMG_4439.jpeg'].sort());
-assert.equal(plans.find(plan => plan.file.path === 'IMG_4439.jpeg').targetPath, 'Attachments/Notes/Example 2.jpeg', 'existing image names must reserve numbered targets');
-assert.equal(plans.find(plan => plan.file.path === 'Diagram.png').targetPath, 'Attachments/Notes/Diagram.png', 'meaningful root image names must be preserved');
+assert.equal(plans.find(plan => plan.file.path === 'IMG_4439.jpeg').targetPath, 'Attachments/Notes/Example 2.jpeg', 'category mode reserves existing numbered names');
+assert.equal(plans.find(plan => plan.file.path === 'Attachments/IMG_1111.png').targetPath, 'Attachments/Notes/Example 1.png');
+assert.equal(plans.find(plan => plan.file.path === 'Diagram.png').targetPath, 'Attachments/Notes/Diagram.png', 'meaningful names are preserved when moving');
+organizerPlugin.settings.imageAttachmentFolderMode = 'note';
+await organizer.planAttachmentImageRename(organizerPlugin);
+plans = globalThis.__attachmentTest.modal.plans;
+assert.equal(plans.find(plan => plan.file.path === 'IMG_4439.jpeg').targetPath, 'Attachments/Notes/Example/Example 1.jpeg');
+const nestedNote = new TFile('Writing/Ideas/Story.md');
+const nestedImage = new TFile('Attachments/Pasted image 20261031.png');
+organizerFiles.push(nestedNote, nestedImage);
+organizerFolder.children.push(nestedImage);
+organizerPlugin.app.metadataCache.resolvedLinks[nestedNote.path] = { [nestedImage.path]: 1 };
+await organizer.planAttachmentImageRename(organizerPlugin);
+assert.equal(globalThis.__attachmentTest.modal.plans.find(plan => plan.file === nestedImage).targetPath, 'Attachments/Writing/Ideas/Story/Ideas-Story 1.png', 'note mode preserves the full note directory hierarchy');
+organizerPlugin.settings.imageAttachmentFolderMode = 'category';
+await organizer.planAttachmentImageRename(organizerPlugin);
+assert.equal(globalThis.__attachmentTest.modal.plans.find(plan => plan.file === nestedImage).targetPath, 'Attachments/Writing/Ideas/Ideas-Story 1.png', 'parent mode preserves the full parent hierarchy without a note directory');
+const nestedAttachment = new TFile('Attachments/202610310001.json');
+organizerFiles.push(nestedAttachment);
+organizerFolder.children.push(nestedAttachment);
+organizerPlugin.app.metadataCache.resolvedLinks[nestedNote.path][nestedAttachment.path] = 1;
+await organizer.planAttachmentOrganization(organizerPlugin);
+assert.equal(globalThis.__attachmentTest.modal.plans.find(plan => plan.file === nestedAttachment).targetPath, 'Attachments/Writing/Ideas/Story/202610310001.json', 'attachment classification preserves automatically generated names');
+organizerPlugin.settings.attachmentFolderMode = 'category';
+await organizer.planAttachmentOrganization(organizerPlugin);
+assert.equal(globalThis.__attachmentTest.modal.plans.find(plan => plan.file === nestedAttachment).targetPath, 'Attachments/Writing/Ideas/202610310001.json', 'attachments also support the parent directory option');
+organizerPlugin.settings.attachmentFolderMode = 'note';
+delete organizerPlugin.app.metadataCache.resolvedLinks[nestedNote.path];
+organizerPlugin.settings.imageAttachmentFolderMode = 'category';
 await organizer.planAttachmentOrganization(organizerPlugin);
 plans = globalThis.__attachmentTest.modal.plans;
-assert.deepEqual(plans.map(plan => plan.file.path), ['data.pdf']);
-assert.equal(plans[0].targetPath, 'Attachments/Notes/Example/data.pdf');
+assert.deepEqual(plans.map(plan => plan.file.path), ['data.pdf'], 'the attachment action excludes images handled by the image action');
+assert.equal(plans.find(plan => plan.file.path === 'data.pdf').targetPath, 'Attachments/Notes/Example/data.pdf');
 await organizer.checkUnusedAttachments(organizerPlugin);
 const unused = globalThis.__attachmentTest.modal.items;
 assert.equal(unused.find(item => item.file.path === 'orphan.png').checked, false);
@@ -197,9 +233,12 @@ assert.equal(unused.find(item => item.file.path === 'Attachments/orphan.png').ch
 assert.ok(!unused.some(item => ['IMG_4439.jpeg', 'standalone.json', 'Root.md', 'Root.canvas', 'Root.base', 'Notes/IMG_9999.png'].includes(item.file.path)));
 organizerLocation = '.';
 await organizer.planAttachmentImageRename(organizerPlugin);
-assert.deepEqual(globalThis.__attachmentTest.modal.plans.map(plan => plan.file.path), ['Notes/IMG_9999.png'], 'same-folder behavior must remain scoped to the source note folder');
+assert.deepEqual(globalThis.__attachmentTest.modal.plans.map(plan => plan.file.path), ['Notes/IMG_9999.png']);
+assert.equal(globalThis.__attachmentTest.modal.plans[0].targetPath, 'Notes/Example 1.png');
+await organizer.planAttachmentOrganization(organizerPlugin);
+assert.match(globalThis.__attachmentTest.notices.at(-1), /已禁用/);
 organizerLocation = '/';
-await organizer.planAttachmentImageRename(organizerPlugin);
+await organizer.planAttachmentOrganization(organizerPlugin);
 assert.match(globalThis.__attachmentTest.notices.at(-1), /已禁用/);
 organizerLocation = 'Attachments';
 const inlineNote = new TFile('Notes/Inline.md');
@@ -207,12 +246,17 @@ organizerFiles.push(inlineNote);
 const originalInline = 'before ![](data:image/png;base64,AA==) after';
 let currentInline = originalInline;
 let createdInline = 0;
+organizerPlugin.app.fileManager = { getAvailablePathForAttachment: async (filename, sourcePath) => {
+  assert.equal(sourcePath, inlineNote.path);
+  return `Attachments/${filename}`;
+} };
 organizerPlugin.app.vault.cachedRead = async file => file === inlineNote ? currentInline : '';
 organizerPlugin.app.vault.read = async () => currentInline;
 organizerPlugin.app.vault.createBinary = async () => { createdInline++; };
 await organizer.planInlineImageExtraction(organizerPlugin);
 const inlineModal = globalThis.__attachmentTest.modal;
 assert.equal(inlineModal.plans.length, 1);
+assert.equal(inlineModal.plans[0].targetPath, 'Attachments/Inline 1.png', 'inline conversion uses the Obsidian attachment path without extra classification');
 currentInline = `edited ${originalInline}`;
 const applyInline = inlineModal.applyPlans();
 await Promise.resolve();
@@ -221,5 +265,28 @@ globalThis.__attachmentTest.modal.onClose();
 await applyInline;
 assert.equal(createdInline, 0, 'changed notes must be rejected before creating attachments');
 assert.equal(currentInline, `edited ${originalInline}`, 'changed notes must remain untouched');
+const noticeCount = globalThis.__attachmentTest.notices.length;
+const numericNote = new TFile('Notes/123456789.md');
+const numericImage = new TFile('Attachments/Pasted image 202610319999.png');
+organizerFiles.push(numericNote, numericImage);
+organizerFolder.children.push(numericImage);
+organizerPlugin.app.metadataCache.resolvedLinks[numericNote.path] = { [numericImage.path]: 1 };
+let autoMoves = 0;
+organizerPlugin.app.vault.createFolder = async () => {};
+organizerPlugin.app.fileManager.renameFile = async (file, path) => {
+  const old = file.path;
+  Object.assign(file, new TFile(path));
+  for (const links of Object.values(organizerPlugin.app.metadataCache.resolvedLinks)) {
+    if (links[old]) { links[path] = links[old]; delete links[old]; }
+  }
+  autoMoves++;
+};
+await organizer.planAttachmentImageRename(organizerPlugin, { active: () => false, paths: new Set([numericImage.path]) });
+assert.equal(autoMoves, 0, 'disabled automatic jobs cannot move files');
+await organizer.planAttachmentImageRename(organizerPlugin, { active: () => true, paths: new Set([numericImage.path]) });
+assert.equal(autoMoves, 1);
+await organizer.planAttachmentImageRename(organizerPlugin, { active: () => true, paths: new Set([numericImage.path]) });
+assert.equal(autoMoves, 1, 'generated numeric names must not be renamed repeatedly by background events');
+assert.equal(globalThis.__attachmentTest.notices.length, noticeCount, 'automatic moves produce no notices');
 delete globalThis.__attachmentTest;
 console.log("Smoke checks passed: formatting, window hooks, platform settings, confirmation, async errors, attachment checks and changed-note protection.");

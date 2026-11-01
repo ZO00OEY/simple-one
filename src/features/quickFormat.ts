@@ -1,3 +1,4 @@
+import { headingFontFloorPatch } from "../shared/typography";
 import { Menu, Notice, setIcon, setTooltip, type Editor, type MenuItem } from "obsidian";
 import type SimplePlugin from "../main";
 import {
@@ -42,6 +43,44 @@ const MODES: QuickFormatMode[] = [
   "quote",
   ...QUICK_FORMAT_CALLOUTS.map(({ type }) => `callout-${type}` as QuickFormatMode),
 ];
+
+const headingFloorContexts = new WeakMap<SimplePlugin, { body?: number; active: boolean }>();
+
+/** Called at load/theme changes and when the effective body size changes, not on every save. */
+export async function repairHeadingFontSizes(plugin: SimplePlugin, themeChanged = false): Promise<boolean> {
+  if (!document.body?.isConnected || document.win.closed) return false;
+  const host = document.body.createDiv({ cls: "workspace-leaf-content simple-font-size-probe", attr: { "data-type": "markdown", "aria-hidden": "true" } });
+  let body: number; const rendered = {} as Record<QuickFormatHeadingLevel, number>;
+  try {
+    const preview = host.createDiv({ cls: "markdown-preview-view markdown-rendered" });
+    body = Number.parseFloat(document.win.getComputedStyle(preview.createEl("p", { text: "正文" })).fontSize);
+    for (const level of ["h1", "h2", "h3", "h4", "h5", "h6"] as QuickFormatHeadingLevel[]) {
+      rendered[level] = Number.parseFloat(document.win.getComputedStyle(preview.createEl(level, { text: "标题" })).fontSize);
+    }
+  } finally { host.remove(); }
+  let context = headingFloorContexts.get(plugin);
+  if (!context) {
+    context = { active: true }; headingFloorContexts.set(plugin, context);
+    const owned = context;
+    plugin.register(() => { owned.active = false; headingFloorContexts.delete(plugin); });
+  }
+  if (!context.active || !themeChanged && context.body === body) return false;
+  context.body = body;
+  const target = plugin.settings.enhancements.quickFormat;
+  const patch = headingFontFloorPatch(target.headingSizes, body, rendered);
+  const levels = Object.keys(patch) as QuickFormatHeadingLevel[];
+  if (!levels.length) return false;
+  const previous = { ...target.headingSizes };
+  Object.assign(target.headingSizes, patch);
+  try { await plugin.saveSettings(); }
+  catch (error) {
+    for (const level of levels) if (target.headingSizes[level] === patch[level]) target.headingSizes[level] = previous[level];
+    context.body = undefined;
+    throw error;
+  }
+  if (context.active && document.body?.isConnected && !document.win.closed) applyQuickFormatStyles(plugin);
+  return true;
+}
 
 export function applyQuickFormatStyles(plugin: SimplePlugin, extraDoc?: Document): void {
   const quickFormat = plugin.settings.enhancements.quickFormat;

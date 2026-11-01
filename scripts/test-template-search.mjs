@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { build } from "esbuild";
 import { JSDOM } from "jsdom";
+import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 
 // Run the browser bundle without Node globals to cover mobile-compatible encoding.
 const output = await build({
@@ -45,3 +47,45 @@ assert.equal(items[0].querySelector(rule.resultUrl).getAttribute("href"), "/book
 assert.equal(new RegExp(rule.nextPage.regex).exec(html)[1], `/search/index/page/2?kw=${encoded}`);
 assert.equal(new RegExp(rule.nextPage.regex).exec('<p class="pagination">\u4e0b\u4e00\u9875;<a href="/page/1">1</a><strong>2</strong><a href="/page/1">\u4e0a\u4e00\u9875</a></p>'), null);
 console.log("Template search tests passed");
+
+// Exercise the production helper with out-of-order responses and one failed fetch.
+const nodeRequire = createRequire(import.meta.url);
+let hydrationActive = 0, hydrationPeak = 0, hydrationCalls = 0;
+const completionOrder = [];
+const hydrationObsidian = new Proxy({
+  ItemView: class {}, Modal: class {}, AbstractInputSuggest: class {}, addIcon() {},
+  requestUrl: async ({ url }) => {
+    const index = Number(url.split('/').pop());
+    hydrationCalls++; hydrationActive++; hydrationPeak = Math.max(hydrationPeak, hydrationActive);
+    try {
+      await new Promise(resolve => setTimeout(resolve, index === 0 ? 30 : 2));
+      completionOrder.push(index);
+      if (index === 5) throw Error('fixture fetch failure');
+      return { text: '<title>hydrated-' + index + '</title>', arrayBuffer: new ArrayBuffer(0), headers: { 'content-type': 'text/html' } };
+    } finally { hydrationActive--; }
+  }
+}, { get: (target, key) => key in target ? target[key] : class {} });
+const hydrationBundle = await build({ entryPoints: ['src/features/templateFill.ts'], bundle: true, platform: 'node', format: 'cjs', write: false, external: ['obsidian'],
+  plugins: [{ name: 'expose-real-hydration', setup(builder) {
+    builder.onLoad({ filter: /features[\\/]templateFill\.ts$/ }, async args => ({
+      contents: (await readFile(args.path, 'utf8')) + '\nexport { hydrateSearchCandidates };', loader: 'ts'
+    }));
+  } }]
+});
+const hydrationContext = vm.createContext({ module: { exports: {} }, require: name => name === 'obsidian' ? hydrationObsidian : nodeRequire(name),
+  TextEncoder, TextDecoder, console, setTimeout, clearTimeout, window: {} });
+vm.runInContext(hydrationBundle.outputFiles[0].text, hydrationContext);
+const hydrate = hydrationContext.module.exports.hydrateSearchCandidates;
+assert.equal((await hydrate([])).length, 0); assert.equal(hydrationCalls, 0);
+const hydrationCandidates = Array.from({ length: 20 }, (_, index) => ({ url: 'https://fixture.invalid/' + index, title: 'original-' + index,
+  hydrated: false, siteRule: { fields: [{ id: 'title', fieldName: '书名', source: 'title', regex: '', replaceWith: '' }] } }));
+const hydrated = await hydrate(hydrationCandidates);
+assert.equal(hydrationCalls, 20); assert.equal(hydrationPeak, 3, 'one search page must not start one request per candidate');
+assert.notEqual(completionOrder[0], 0, 'fixture completes requests out of order');
+assert.deepEqual(Array.from(hydrated, item => item.url), hydrationCandidates.map(item => item.url), 'visible search order stays stable');
+assert.equal(hydrated[5], hydrationCandidates[5], 'failed fetch preserves the original candidate');
+assert.equal(hydrated[5].title, 'original-5');
+for (const [index, item] of hydrated.entries()) if (index !== 5) {
+  assert.equal(item.title, 'hydrated-' + index); assert.equal(item.hydrated, true);
+}
+console.log('Search hydration: 20 candidates, maximum three requests, stable order, partial failure and empty input passed.');

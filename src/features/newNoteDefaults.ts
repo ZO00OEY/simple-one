@@ -8,6 +8,7 @@ import {
   parseYaml,
 } from "obsidian";
 import type SimplePlugin from "../main";
+import { styleActionButton } from "../shared/actionButton";
 import { nextId, type NewNoteDatabaseRule } from "../types";
 
 export function registerNewNoteDefaults(plugin: SimplePlugin): void {
@@ -151,19 +152,22 @@ class BaseChoiceModal extends Modal {
 
   onOpen(): void {
     this.titleEl.setText("选择新笔记参考数据库");
+    this.modalEl.addClass("simple-one-modal");
     this.contentEl.createEl("p", { text: `当前目录存在多个数据库文件：${this.folder}` });
     for (const base of this.bases) {
       new Setting(this.contentEl)
         .setName(base.basename)
         .setDesc(base.path)
-        .addButton((button) => button
-          .setButtonText("使用")
+        .addButton((button) => {
+          styleActionButton(button.buttonEl, "text");
+          button.setButtonText("使用")
           .setCta()
           .onClick(async () => {
             this.close();
             await this.onChoose(base);
             new Notice(`已记录参考数据库：${base.basename}`);
-          }));
+          });
+        });
     }
   }
 }

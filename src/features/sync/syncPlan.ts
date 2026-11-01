@@ -1,21 +1,24 @@
 import { sameContent, type Manifest } from "./linkDiff";
 import type { ConflictChoice, MobilePlan } from "./mobileGithub";
 
-export type SyncStrategy = "merge" | "remote" | "local" | "custom";
+export type SyncStrategy = "merge" | "merge-remote" | "merge-local" | "remote" | "local";
 
 export function strategyChoices(plan: MobilePlan, strategy: SyncStrategy): Record<string, ConflictChoice> {
   const choices = { ...plan.pendingChoices };
-  if (strategy !== "merge") return choices;
+  if (strategy === "local" || strategy === "remote") return choices;
   for (const conflict of plan.conflicts) {
     if (conflict.kind === "duplicate") choices[conflict.id] = { choice: "both" };
     else if (conflict.kind === "unpaired" || conflict.kind === "delete") {
       choices[conflict.id] = { choice: conflict.local ? "local" : "remote" };
     }
+    else if (strategy === "merge-remote" || strategy === "merge-local") {
+      choices[conflict.id] = { choice: strategy === "merge-remote" ? "remote" : "local" };
+    }
   }
   return choices;
 }
 
-/** A strict mirror still goes through the final counts/deletion confirmation and execute guards. */
+/** A strict mirror retains the preview snapshot and all execute-time guards. */
 export function mirrorPlan(plan: MobilePlan, strategy: "remote" | "local"): MobilePlan {
   const desired: Manifest = Object.fromEntries(Object.entries(strategy === "remote" ? plan.remote.files : plan.local)
     .map(([path, entry]) => [path, { sha: sameContent(entry, plan.remote.files[path]) ? plan.remote.files[path].sha : entry.sha, mode: entry.mode }]));

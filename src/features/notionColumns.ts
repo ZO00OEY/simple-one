@@ -1,3 +1,4 @@
+import { styleActionButton } from "../shared/actionButton";
 import { EditorState, Range, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView, ViewPlugin, WidgetType, keymap } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -297,7 +298,7 @@ class ColumnsSurface {
     this.root.addClass("simple-columns");
     const toolbar = this.root.createDiv({ cls: "simple-columns-toolbar" });
     const atColumnLimit = this.draft.content.length >= 4;
-    const addColumn = toolbar.createEl("button", { cls: "simple-columns-add-column", attr: { title: atColumnLimit ? "最多四列" : "在右侧添加一列", "aria-label": atColumnLimit ? "最多四列" : "在右侧添加一列" } });
+    const addColumn = styleActionButton(toolbar.createEl("button", { cls: "simple-columns-add-column", attr: { title: atColumnLimit ? "最多四列" : "在右侧添加一列", "aria-label": atColumnLimit ? "最多四列" : "在右侧添加一列" } }), "bordered");
     setIcon(addColumn, "plus");
     addColumn.classList.toggle("is-at-limit", atColumnLimit);
     addColumn.addEventListener("pointerdown", (event) => event.preventDefault());
@@ -767,11 +768,11 @@ class ColumnsSurface {
       this.addImagePreview(holder, source);
       const actions = holder.createDiv({ cls: "simple-columns-image-actions" });
       if (this.plugin.settings.enableImageZoom) {
-        const zoom = actions.createEl("button", { cls: "simple-columns-image-zoom", attr: { title: "放大图片", "aria-label": "放大图片" } });
+        const zoom = styleActionButton(actions.createEl("button", { cls: "simple-columns-image-zoom", attr: { title: "放大图片", "aria-label": "放大图片" } }), "bordered");
         setIcon(zoom, "zoom-in");
         zoom.addEventListener("pointerdown", (event) => event.stopPropagation());
       }
-      const edit = actions.createEl("button", { cls: "simple-columns-image-edit", attr: { title: "编辑这个区块", "aria-label": "编辑这个区块" } });
+      const edit = styleActionButton(actions.createEl("button", { cls: "simple-columns-image-edit", attr: { title: "编辑这个区块", "aria-label": "编辑这个区块" } }), "bordered");
       setIcon(edit, "code-2");
       edit.addEventListener("pointerdown", (event) => event.stopPropagation());
       return;

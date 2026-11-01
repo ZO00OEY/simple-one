@@ -58,7 +58,9 @@ try {
       const body = request.body ? JSON.parse(request.body) : undefined;
       calls.push({ path, method: request.method, body });
       let json;
-      if (path === "") json = { default_branch: "main", permissions: { push: true } };
+      if (path === '/user') json = { login: 'fixture-user' };
+      else if (path === "") json = { private: true, default_branch: "main", permissions: { push: true } };
+      else if (path === '/branches/main') json = { protected: false };
       else if (path === "/commits/main") json = { sha: head, commit: { tree: { sha: root } } };
       else if (path === "/git/ref/heads/main") json = { object: { sha: head } };
       else if (path.startsWith("/compare/")) {
@@ -98,7 +100,9 @@ try {
       syncImages: true, syncPlugins: false, plugins: [], ignorePatterns: [], cacheEnabled: true, trackPaths: true };
     const progress = [];
     const engine = new MobileGithub(adapter, ".obsidian", "simple-link", () => options, message => progress.push(message));
+    await engine.prepareLocalRules();
     await engine.bind();
+    calls.length = 0;
     return { engine, adapter, local, calls, options, progress, remote: () => trees.get(root), head: () => head, root: () => root,
       fail: path => { failWrite = path; },
       move: (from, to) => { local.set(to, local.get(from)); local.delete(from); engine.event("rename", to, from); },
@@ -122,7 +126,10 @@ try {
   const changed = await fixture({}, {'remote.md':'cloud'});
   let injected=false;const originalStat=changed.adapter.stat;
   changed.adapter.stat=async path=>{if(path==='remote.md'&&changed.engine.state.cache[path]&&!injected){injected=true;await changed.adapter.write(path,'user edit');changed.engine.event('modify',path);}return originalStat(path);};
-  await assert.rejects(changed.engine.execute(await reviewedPreview(changed)),/验证期间/);
+  await changed.engine.execute(await reviewedPreview(changed));
   assert.equal(changed.local.get('remote.md').bytes.toString(),'user edit');assert.equal(changed.engine.state.baseCommitSha,null);
+  assert.equal(changed.engine.needsLocalRecheck, true);
+  assert.equal(changed.engine.state.pending, undefined);
+  assert.equal(changed.engine.state.localRecheck.receipts['remote.md'].applied, true, 'accepted download remains the per-file baseline for a later edit');
   console.log('Download cache, interrupted recovery and edit-during-verification passed');
 } finally { await rm(folder,{recursive:true,force:true}); }

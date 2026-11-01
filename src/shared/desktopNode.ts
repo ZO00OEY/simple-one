@@ -17,8 +17,6 @@ export interface NodeFiles {
 }
 export interface NodeFs { promises: NodeFiles; createReadStream(path: string): AsyncIterable<unknown> }
 export interface NodePath { sep: string; dirname(path: string): string; join(...parts: string[]): string; resolve(...parts: string[]): string; relative(from: string, to: string): string; isAbsolute(path: string): boolean }
-interface NodeHash { update(value: string | Uint8Array): NodeHash; digest(encoding: "hex"): string }
-export interface NodeCrypto { createHash(algorithm: string): NodeHash }
 interface OutputStream { on(event: "data", callback: (chunk: unknown) => void): void }
 interface InputStream { on(event: "error", callback: () => void): void; end(value: string): void }
 export interface NodeChildProcess {

@@ -18,10 +18,6 @@ export function settingsHeading(parent: HTMLElement, title: string | DocumentFra
   return heading;
 }
 
-export function settingsCard(parent: HTMLElement, render: (card: HTMLElement) => void): void {
-  render(parent.createDiv({ cls: "simple-card" }));
-}
-
 export function settingsGroup(parent: HTMLElement, title: string, render: (card: HTMLElement) => void): void {
   render(settingsSection(parent, title));
 }

@@ -28,7 +28,8 @@ try {
       { id: legacyId, title: '旧版路径', category: '/' },
       { id: invalidId, title: '异常路径', category: '444 人工智障管理处/001 AI渠道与账号/其他', path: `notes/../${invalidId}.md` }
     ] }));
-    return fallbackFetch(path);
+    const response = await fallbackFetch(path);
+    return new Response(await response.text() + '\n\n```simple-translation\n<!-- simple-translation-original:source -->\n原文\n\n译文 **加粗**\n```\n\n<span style="color: #e60f61;">彩色文字</span>\n');
   };
   const { files } = await buildReaderFiles();
   assert(!/\bimport\s*\(/.test(files["reader/app.js"]), "standalone reader must not load JavaScript chunks");
@@ -45,7 +46,7 @@ try {
   const standalone = new JSDOM(defaultTemplate);
   assert.equal(standalone.window.document.querySelectorAll("script[src],link[rel=stylesheet]").length, 0, "default HTML needs no reader assets");
   assert.equal(standalone.window.document.querySelectorAll("script[data-simple-reader]").length, 1, "script text must not break the HTML boundary");
-  assert(standalone.window.document.querySelector("style[data-simple-reader-style]").textContent.includes("data:font"));
+  assert(!standalone.window.document.querySelector("style[data-simple-reader-style]").textContent.includes("data:font"), "reader does not embed fonts");
   const themed = templates.templateAppearance(defaultTemplate, ":root{--share-image-max-height:320px}");
   const custom = defaultTemplate.replace('<title>分享笔记</title>', '<title>自定义外观</title>')
     .replace('</head>', '<style data-custom>main{color:purple}</style></head>')
@@ -61,20 +62,29 @@ try {
   assert(themed.includes("320px"));
   standalone.window.close();
   createRequire(import.meta.url)(output);
-  const fontSelect = document.querySelector('.reader-font-control select');
-  assert.deepEqual(Array.from(fontSelect.options, option => option.textContent), ['默认', '微软雅黑', '仓耳今楷']);
-  assert.equal(document.querySelectorAll('.accent-colors button').length, 3, 'font control retains the three theme colors');
-  fontSelect.value = 'jinkai'; fontSelect.dispatchEvent(new dom.window.Event('change'));
-  assert(document.documentElement.style.getPropertyValue('--reader-font').includes('仓耳今楷01'));
-  assert.equal(window.localStorage.getItem('simple-reader-font'), 'jinkai');
+  assert.equal(document.querySelector('.reader-font-control select'), null, 'theme settings do not offer font selection');
+  assert.equal(document.querySelectorAll('.accent-colors button').length, 4, 'four theme colors');
   document.querySelector('button[data-color="blue"]').click();
-  assert(document.documentElement.style.getPropertyValue('--reader-font').includes('仓耳今楷01'), 'color changes preserve the selected font');
-  fontSelect.value = 'yahei'; fontSelect.dispatchEvent(new dom.window.Event('change'));
-  assert(document.documentElement.style.getPropertyValue('--reader-font').includes('Microsoft YaHei'));
-  fontSelect.value = 'default'; fontSelect.dispatchEvent(new dom.window.Event('change'));
-  assert.equal(document.documentElement.style.getPropertyValue('--reader-font'), '', 'default restores the original reader font');
+  assert.equal(document.documentElement.style.getPropertyValue('--reader-font'), '', 'theme settings keep the built-in font stack');
   const wait = async check => { for (let i = 0; i < 100; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 10)); } throw new Error("Reader did not complete"); };
+  const size = document.querySelector('input[aria-label="字号"]');
+  assert.equal(size.value, '15'); size.value = '18'; size.dispatchEvent(new dom.window.Event('input'));
+  assert.equal(document.documentElement.style.getPropertyValue('--reader-size'), '18px');
   await wait(() => document.querySelector(".simple-columns"));
+  assert(document.querySelector('.share-translation strong'), 'translation markers render Markdown inside the stacked card');
+  const copiedBlocks = [];
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { copiedBlocks.push(text); } } });
+  const copy = async selector => {
+    const button = document.querySelector(selector); assert(button, `missing copy button: ${selector}`);
+    button.click(); await Promise.resolve(); assert.equal(button.getAttribute('aria-label'), '已复制');
+    return copiedBlocks.at(-1);
+  };
+  assert.equal(await copy('.share-translation > .share-block-copy'), '原文\n\n译文 加粗', 'translation copy omits its title and all controls');
+  assert.equal(await copy('.callout > .share-block-copy'), '正文 加粗。', 'callout copy contains its body without the title');
+  const sourceBlock = document.querySelector('pre.share-html-source');
+  assert.equal(await copy('pre.share-html-source + .share-block-copy'), sourceBlock.querySelector('code').textContent, 'code copy preserves the complete original source');
+  assert(!document.querySelector('.share-translation').textContent.includes('simple-translation-original'));
+  assert(document.querySelector('span[style*="#e60f61"]'), 'custom text colors survive sanitization');
   assert(requested.includes(`notes/${encodeURIComponent('写作')}/${encodeURIComponent('人物')}/${id}.md`), 'reader resolves mapped UTF-8 paths while keeping the original ID route');
   assert.equal(document.getElementById("note-title").textContent, "双列与安全");
   const folderNames = Array.from(document.querySelectorAll('#note-list summary'), summary => summary.textContent);

@@ -40,12 +40,16 @@ export function registerWindowPositionOptimization(plugin: SimplePlugin): void {
   if (!prototype || typeof prototype.open !== "function") return;
   const screen = (window as DesktopWindow).electron?.remote?.screen;
   if (!screen) return;
+  const initialized = new WeakSet<NativeWindow>();
+  const existing = settings.getPopoutWindow();
+  if (existing?.closed === false && existing.electronWindow) initialized.add(existing.electronWindow);
   const originalOpen = prototype.open;
   const wrappedOpen = function (this: PopoutModal): void {
     originalOpen.call(this);
-    if (!plugin.settings.enableWindowPositionOptimization) return;
     const nativeWindow = this.getPopoutWindow()?.electronWindow;
-    if (!nativeWindow || nativeWindow.isDestroyed() || nativeWindow.isMaximized() || nativeWindow.isFullScreen()) return;
+    if (!nativeWindow || nativeWindow.isDestroyed() || initialized.has(nativeWindow)) return;
+    initialized.add(nativeWindow);
+    if (!plugin.settings.enableWindowPositionOptimization || nativeWindow.isMaximized() || nativeWindow.isFullScreen()) return;
     try {
       const bounds = nativeWindow.getBounds();
       const corrected = constrainWindowBounds(bounds, screen.getDisplayMatching(bounds).workArea);

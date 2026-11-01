@@ -1,3 +1,4 @@
+import { styleActionButton } from "../shared/actionButton";
 import { runAsync } from "../shared/async";
 import { sanitizeNoteFilename } from "../shared/noteFilename";
 import { applySearchUrlTemplate } from "../shared/searchUrl";
@@ -296,7 +297,7 @@ export class TemplateFillView extends ItemView {
 
   private renderUnifiedSearchPager(groups: SearchGroup[]): void {
     const pager = this.previewEl.createDiv({ cls: "simple-search-pager" });
-    const prev = pager.createEl("button", { cls: "simple-soft-button simple-search-page-button" });
+    const prev = styleActionButton(pager.createEl("button", { cls: "simple-soft-button simple-search-page-button" }), "bordered");
     prev.setText("上一页");
     prev.empty();
     setIcon(prev, "chevron-left");
@@ -310,7 +311,7 @@ export class TemplateFillView extends ItemView {
       text: this.searchFilterKey === "all" ? "全部站点" : groups[0] ? siteLabel(groups[0].siteRule) : "当前站点",
     });
 
-    const next = pager.createEl("button", { cls: "simple-soft-button simple-search-page-button" });
+    const next = styleActionButton(pager.createEl("button", { cls: "simple-soft-button simple-search-page-button" }), "bordered");
     next.setText("下一页");
     next.empty();
     setIcon(next, "chevron-right");
@@ -405,7 +406,7 @@ export class TemplateFillView extends ItemView {
 
   private renderSearchBackButton(): void {
     if (this.searchGroups.length === 0) return;
-    const back = this.previewEl.createEl("button", { cls: "simple-soft-button simple-search-back" });
+    const back = styleActionButton(this.previewEl.createEl("button", { cls: "simple-soft-button simple-search-back" }), "text");
     back.setText("返回搜索结果");
     back.addEventListener("click", () => {
       this.createBtn.disabled = true;
@@ -601,13 +602,14 @@ class MergeExistingNoteModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.createEl("h2", { text: "发现同名笔记" });
+    this.modalEl.addClass("simple-one-modal");
     contentEl.createDiv({
       text: `${this.fileName}.md 已经存在。是否合并属性栏，并保留旧笔记正文？`,
       cls: "setting-item-description",
     });
 
     const footer = contentEl.createDiv({ cls: "simple-json-modal-footer" });
-    const cancel = footer.createEl("button");
+    const cancel = styleActionButton(footer.createEl("button"), "text");
     cancel.setText("取消");
     cancel.addEventListener("click", () => {
       this.submitted = true;
@@ -615,7 +617,7 @@ class MergeExistingNoteModal extends Modal {
       this.close();
     });
 
-    const merge = footer.createEl("button", { cls: "mod-cta" });
+    const merge = styleActionButton(footer.createEl("button", { cls: "mod-cta" }), "text");
     merge.setText("合并");
     merge.addEventListener("click", () => {
       this.submitted = true;
@@ -1106,7 +1108,16 @@ async function hydrateFanqieCandidate(candidate: SearchCandidate): Promise<Searc
 }
 
 async function hydrateSearchCandidates(candidates: SearchCandidate[]): Promise<SearchCandidate[]> {
-  return await Promise.all(candidates.map(hydrateFanqieCandidate));
+  const hydrated = new Array<SearchCandidate>(candidates.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < candidates.length) {
+      const index = cursor++;
+      hydrated[index] = await hydrateFanqieCandidate(candidates[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(SEARCH_CONCURRENCY, candidates.length) }, worker));
+  return hydrated;
 }
 
 function extractFanqieCandidateField(

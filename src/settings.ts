@@ -1,21 +1,25 @@
-import { createActionButton, setDeleteIcon, setActionIcon, styleActionFooter } from "./shared/actionButton";
+import { CHINESE_FONTS, LATIN_FONTS, updateFontDownload } from "./shared/fontOptions";
+import { nativeCheckbox } from "./shared/nativeCheckbox";
+import { createActionButton, setDeleteIcon, setActionIcon, styleActionFooter, styleActionButton } from "./shared/actionButton";
 import { checkboxRow, checkboxRowIcon } from "./shared/checkboxRow";
-import { settingsFieldset, settingsGroup, settingsHeading, settingsCard } from "./shared/settingsLayout";
+import { settingsFieldset, settingsGroup, settingsHeading } from "./shared/settingsLayout";
 import { DiaryPathSuggest } from "./features/diaryPathSuggest";
 import { SyncSettingsTab } from "./features/sync";
 import { runAsync } from "./shared/async";
 import { confirmAction } from "./shared/confirm";
-import { ThemeColorPicker } from "./shared/themeColorPicker";
 import { TranslationSettingsModal } from "./features/selectionTranslation";
+import { ThemeColorPicker } from "./shared/themeColorPicker";
 // ============================================================
 // Settings tab UI
 // ============================================================
-import { App, Menu, Modal, Notice, PluginSettingTab, Setting, TFile, TFolder, normalizePath, requireApiVersion, setIcon, type SettingDefinitionItem } from "obsidian";
+import { App, Menu, Modal, Notice, PluginSettingTab, Setting, TFolder, requireApiVersion, setIcon, type SettingDefinitionItem } from "obsidian";
 import type SimplePlugin from "./main";
 import { TYPOGRAPHY_DEFAULTS, TYPOGRAPHY_RANGES } from "./shared/typography";
 import {
   checkUnusedAttachments,
+  DEFAULT_ATTACHMENT_FOLDER,
   describeAttachmentLocation,
+  planAttachmentImageRename,
   planAttachmentOrganization,
   planInlineImageExtraction,
   readObsidianAttachmentLocation,
@@ -42,7 +46,6 @@ import {
   BUILT_IN_TEXT_REFORMAT_RULE_IDS,
   makeHtmlPreviewRule,
   makeFilterRule,
-  makeNewNoteDatabaseRule,
   makeRecurringRule,
   makeTextReformatRule,
   nextId,
@@ -54,14 +57,12 @@ import {
   type HolidaySource,
   type HtmlPreviewRule,
   type DisplayParameter,
-  type NewNoteDatabaseRule,
   type QuickFormatCustomCallout,
   type QuickFormatHeadingLevel,
   type QuickFormatMode,
   type RecurringRule,
   type SiteRule,
   type TemplateCategory,
-  type TextReformatRule,
 } from "./types";
 
 type AttachmentOrganizerDisabledReasons = {
@@ -110,39 +111,17 @@ function attachmentOrganizerDisabledReasons(
   };
 }
 
-type SettingsPage =
-  | { type:
-    | "overview"
-    | "sync-sharing"
-    | "html-preview"
-    | "link-rules"
-    | "template-rules"
-    | "attachment-organizer"
-    | "basic-optimization"
-    | "new-note-defaults"
-    | "search-folders"
-    | "calendar-diary"
-    | "diary"
-    | "reformat"
-    | "automatic-reformat"
-    | "reformat-rules"
-    | "quick-format"
-    | "quick-format-headings"
-    | "quick-format-callouts"
-    | "display-enhancements"
-    | "desktop-typography"
-    | "feature-enhancements"
-    | "display-preview"
-    | "theme-formatting"
-    | "notion-columns"
-    | "event-reminders"
-    | "date-management"
-    | "holiday-national"
-    | "holiday-company"
-    | "holiday-management"
-    | "category-manager"
-  }
-  | { type: "category-sites"; categoryId: string };
+type SettingsPage = { type:
+  | "overview"
+  | "html-preview"
+  | "link-rules"
+  | "template-rules"
+  | "automatic-reformat"
+  | "calendar-diary"
+  | "date-management"
+  | "holiday-national"
+  | "holiday-company"
+};
 
 type HolidayScheduleGroup = {
   title: string;
@@ -207,14 +186,9 @@ export class SimpleSettingTab extends PluginSettingTab {
   private holidayYearFilter: Partial<Record<HolidaySource, number | "all">> = {};
   private displayPreviewTab: string;
   private syncNavigationTab?: string;
-  private expandedReformatRuleSections = new Set(["builtin", "custom"]);
   private editingCustomCalloutIds = new Set<string>();
   private anniversaryTagFilter = "常用";
   private expandedHolidaySchedules = new Set<string>();
-  private deleteMode:
-    | { type: "categories"; selectedIds: Set<string> }
-    | { type: "site-rules"; categoryId: string; selectedIds: Set<string> }
-    | null = null;
 
   constructor(app: App, plugin: SimplePlugin) {
     super(app, plugin);
@@ -231,7 +205,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       };
       appWithSettings.setting.open();
       appWithSettings.setting.openTabById(plugin.manifest.id);
-      this.openPage({ type: "reformat" });
+      this.openPage({ type: "automatic-reformat" });
     };
     plugin.sync.openSettings = (share = false) => {
       this.displayPreviewTab = share ? "sharing" : "sync-sharing";
@@ -286,16 +260,11 @@ export class SimpleSettingTab extends PluginSettingTab {
       return;
     }
     const { containerEl } = this;
-    if (this.page.type !== "sync-sharing") this.syncTab.hide();
+    this.syncTab.hide();
     containerEl.empty();
     containerEl.addClass("simple-settings");
 
-    if (this.page.type === "sync-sharing") {
-      const titleEl = this.renderPageHeader(containerEl, "同步", () => {
-        if (!this.syncTab.backToOverview()) this.openPage({ type: "overview" });
-      });
-      this.syncTab.renderInto(containerEl.createDiv({ cls: "simple-one-sync-feature" }), title => titleEl.setText(title));
-    } else if (this.page.type === "overview") {
+    if (this.page.type === "overview") {
       this.renderOverview(containerEl);
     } else if (this.page.type === "html-preview") {
       this.renderHtmlPreviewSettings(containerEl);
@@ -303,55 +272,16 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.renderLinkRules(containerEl);
     } else if (this.page.type === "template-rules") {
       this.renderTemplateRules(containerEl);
-    } else if (this.page.type === "attachment-organizer") {
-      this.renderAttachmentOrganizerSettings(containerEl);
-    } else if (this.page.type === "basic-optimization") {
-      this.renderBasicOptimizationSettings(containerEl);
-    } else if (this.page.type === "new-note-defaults") {
-      this.renderNewNoteDefaults(containerEl);
-    } else if (this.page.type === "search-folders") {
-      this.renderSearchFolderSettings(containerEl);
-    } else if (this.page.type === "calendar-diary") {
-      this.renderCalendarDiarySettings(containerEl);
-    } else if (this.page.type === "diary") {
-      this.renderDiarySettings(containerEl);
-    } else if (this.page.type === "reformat") {
-      this.renderReformatSettings(containerEl);
     } else if (this.page.type === "automatic-reformat") {
-      this.renderPageHeader(containerEl, "自动排版设置", () => this.openPage({ type: "overview" }));
+      this.renderPageHeader(containerEl, "自动排版设置", () => {
+        this.displayPreviewTab = "shortcuts";
+        this.openPage({ type: "overview" });
+      });
       this.renderInlineReformatSettings(containerEl, true);
-    } else if (this.page.type === "reformat-rules") {
-      this.renderReformatRules(containerEl);
-    } else if (this.page.type === "quick-format") {
-      this.renderQuickFormatSettings(containerEl);
-    } else if (this.page.type === "quick-format-headings") {
-      this.renderQuickFormatHeadingSettings(containerEl);
-    } else if (this.page.type === "quick-format-callouts") {
-      this.renderQuickFormatCalloutSettings(containerEl);
-    } else if (this.page.type === "display-enhancements") {
-      this.renderDisplayEnhancementSettings(containerEl);
-    } else if (this.page.type === "desktop-typography") {
-      this.renderTypographySettings(containerEl);
-    } else if (this.page.type === "feature-enhancements") {
-      this.renderFeatureEnhancementSettings(containerEl);
-    } else if (this.page.type === "display-preview") {
-      this.renderDisplayPreviewSettings(containerEl);
-    } else if (this.page.type === "theme-formatting") {
-      this.renderThemeFormattingSettings(containerEl);
-    } else if (this.page.type === "notion-columns") {
-      this.renderNotionColumnsSettings(containerEl);
-    } else if (this.page.type === "event-reminders") {
-      this.renderEventReminderSettings(containerEl);
     } else if (this.page.type === "date-management") {
       this.renderDateManagementSettings(containerEl);
     } else if (this.page.type === "holiday-national" || this.page.type === "holiday-company") {
       this.renderHolidaySourceSettings(containerEl, this.page.type === "holiday-national" ? "national" : "company");
-    } else if (this.page.type === "holiday-management") {
-      this.renderHolidayManagementSettings(containerEl);
-    } else if (this.page.type === "category-manager") {
-      this.renderCategoryManager(containerEl);
-    } else if (this.page.type === "category-sites") {
-      this.renderCategorySites(containerEl, this.page.categoryId);
     }
   }
 
@@ -370,7 +300,7 @@ export class SimpleSettingTab extends PluginSettingTab {
           } else if ("control" in item && item.control?.type === "toggle") {
             const key = item.control.key;
             new Setting(card).setName(item.name).setDesc(item.desc ?? "").addToggle((toggle) =>
-              toggle.setValue(Boolean(this.getControlValue(key))).setDisabled(this.plugin.isMobile)
+          nativeCheckbox(toggle).setValue(Boolean(this.getControlValue(key))).setDisabled(this.plugin.isMobile)
                 .onChange((value) => this.setControlValue(key, value)));
           }
         }
@@ -385,6 +315,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     const formatRow = this.renderDisplayCheckbox(shortcuts, "浮动工具栏", "启用快捷功能，并在编辑区顶部显示 H 入口。",
       this.plugin.settings.enhancements.quickFormat.enabled && (this.plugin.isMobile ? this.plugin.settings.enhancements.quickFormat.showMobileEntry : this.plugin.settings.enhancements.quickFormat.showDesktopEntry), async value => {
         this.plugin.settings.enhancements.quickFormat.enabled = value;
+        this.plugin.settings.enhancements.quickFormat.selectionToolbar = value;
         this.plugin.settings.enhancements.quickFormat.showDesktopEntry = value;
         this.plugin.settings.enhancements.quickFormat.showMobileEntry = value;
         await this.plugin.saveSettings();
@@ -491,15 +422,17 @@ export class SimpleSettingTab extends PluginSettingTab {
 
   private renderEditingOptimizationSettings(container: HTMLElement): void {
     const basic = settingsFieldset(container, "编辑优化");
-    const floatingRow = this.renderDisplayCheckbox(basic, "禁用浮动编辑栏", "勾选后，选中文字不自动弹出编辑栏；顶部 H 入口保留，可点击恢复。",
-      !this.plugin.settings.enhancements.quickFormat.selectionToolbar, async disabled => {
-        this.plugin.settings.enhancements.quickFormat.selectionToolbar = !disabled;
-        await this.plugin.saveSettings(); this.plugin.refreshQuickFormatActions();
+    const translationRow = this.renderDisplayCheckbox(basic, "在浮动工具栏中启用 AI 翻译（需要 Simple AI 插件）",
+      "控制浮动工具栏中的翻译入口；右侧设置模型、语言和提示词。",
+      this.plugin.settings.enhancements.quickFormat.selectionTranslation !== false, async value => {
+        this.plugin.settings.enhancements.quickFormat.selectionTranslation = value;
+        await this.plugin.saveSettings();
+        this.plugin.refreshQuickFormatActions();
       });
-    floatingRow.addClass("simple-reformat-option");
-    const floatingManage = floatingRow.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", "aria-label": "浮动编辑栏设置" } });
-    setActionIcon(floatingManage, "settings", "bordered");
-    floatingManage.addEventListener("click", () => this.openPage({ type: "quick-format" }));
+    translationRow.addClass("simple-reformat-option");
+    const translationSettings = translationRow.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", title: "AI 翻译设置", "aria-label": "AI 翻译设置" } });
+    setActionIcon(translationSettings, "settings", "bordered");
+    translationSettings.addEventListener("click", () => new TranslationSettingsModal(this.plugin).open());
     this.renderDisplayCheckbox(basic, "新建笔记自动补全属性", "沿用现有规则，按当前目录关联的 Obsidian 数据库视图自动补全属性。",
       this.plugin.settings.newNoteDefaults.enabled, async value => {
         this.plugin.settings.newNoteDefaults.enabled = value;
@@ -540,10 +473,10 @@ export class SimpleSettingTab extends PluginSettingTab {
         this.plugin.refreshSearchFolderControls();
       });
       row.addClass("simple-search-filter-option");
-      const choose = row.createEl("button", {
+      const choose = styleActionButton(row.createEl("button", {
         cls: "clickable-icon simple-attachment-action",
         attr: { type: "button", "aria-label": name + "：选择文件夹" },
-      });
+      }), "bordered");
       setIcon(choose, "settings-2");
       choose.title = "选择文件夹";
       choose.addEventListener("click", () => {
@@ -555,73 +488,6 @@ export class SimpleSettingTab extends PluginSettingTab {
       });
     }
     this.renderAttachmentOrganizerSettings(container);
-  }
-
-  private renderFeatureEnhancementSettings(container: HTMLElement): void {
-    this.renderPageHeader(container, "编辑工具");
-
-    settingsGroup(container, "编辑功能", (card) => {
-      this.renderNavigationItem(card, REFORMAT_NAME, "处理粘贴内容、链接转换和笔记文本排版规则。", () => this.openPage({ type: "reformat" }), REFORMAT_ICON);
-    });
-
-  }
-
-  private renderTypographySettings(container: HTMLElement): void {
-    this.renderPageHeader(container, "排版设置 · 电脑端", () => this.openPage({ type: "display-enhancements" }));
-    const settings = this.plugin.settings.desktopTypography;
-    const save = async (): Promise<void> => {
-      this.plugin.refreshTypography();
-      await this.plugin.saveSettings();
-    };
-    settingsCard(container, card => {
-      new Setting(card).setName("启用排版优化")
-        .setDesc("用于电脑端笔记的编辑和阅读视图；关闭后隐藏下方参数，字号与间距恢复 Obsidian / 主题设置。正文宽度和中文阅读版式由上一级独立控制。")
-        .addToggle(toggle => toggle.setValue(settings.enabled).onChange(async value => {
-          settings.enabled = value;
-          for (const key of Object.keys(TYPOGRAPHY_RANGES) as (keyof typeof TYPOGRAPHY_RANGES)[]) {
-            this.plugin.settings.displayParameterSwitches.desktop[key] = value;
-          }
-          await save();
-          this.renderSettings();
-        }));
-    });
-    if (!settings.enabled) return;
-    settingsGroup(container, "正文与段落", card => {
-      const labels = {
-        fontSize: ["正文字号", "单位 px；默认 15，可按阅读习惯调整。"],
-        lineHeight: ["行高", "字号的倍数；建议 1.7。"],
-        letterSpacing: ["字间距", "额外增加的间距，单位 px；建议 0。"],
-        paragraphSpacing: ["段间距", "字号的倍数，单位 em；建议 0.8。编辑视图保留原有空行。"],
-      };
-      for (const key of Object.keys(TYPOGRAPHY_RANGES) as (keyof typeof TYPOGRAPHY_RANGES)[]) {
-        const [min, max, step] = TYPOGRAPHY_RANGES[key];
-        new Setting(card).setName(labels[key][0]).setDesc(labels[key][1]).addText(text => {
-          text.inputEl.type = "number";
-          text.inputEl.min = String(min);
-          text.inputEl.max = String(max);
-          text.inputEl.step = String(step);
-          text.setValue(String(settings[key])).onChange(async value => {
-            if (!value.trim()) return;
-            const number = Number(value);
-            if (!Number.isFinite(number) || number < min || number > max) return;
-            settings[key] = number;
-            await save();
-          });
-        });
-      }
-      new Setting(card).setName("恢复推荐参数").setDesc("15px / 1.7 倍行高 / 字间距 0 / 段间距 0.8em。正文宽度与中文阅读版式保持原设置。")
-        .addButton(button => button.setButtonText("恢复推荐").onClick(async () => {
-          Object.assign(settings, TYPOGRAPHY_DEFAULTS, { paragraphStyle: settings.paragraphStyle });
-          await save();
-          this.renderSettings();
-        }));
-    });
-  }
-
-  private renderDisplayEnhancementSettings(container: HTMLElement): void {
-    this.renderPageHeader(container, "显示设置", () => this.openPage({ type: "display-preview" }));
-    this.renderPlatformDisplayGroup(container, false);
-    this.renderPlatformDisplayGroup(container, true);
   }
 
   private renderDisplayCheckbox(
@@ -638,6 +504,11 @@ export class SimpleSettingTab extends PluginSettingTab {
     value: string, fallback: string, min: number, max: number, step: number, unit: string,
     setValue: (value: string) => void
   ): void {
+    if (!mobile && key === "letterSpacing") {
+      this.renderLetterSpacing(parent);
+      this.renderLetterSpacing(parent, true);
+      return;
+    }
     const enabled = displayParameterEnabled(this.plugin.settings, mobile, key);
     const save = async (): Promise<void> => {
       await this.plugin.saveSettings();
@@ -645,7 +516,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.plugin.applyImageHeightLimit();
       this.plugin.applyMobileHeaderButtons();
       this.plugin.refreshTypography();
-      this.plugin.refreshPopupWindowSizing();
+      if (key === "fontSize") parent.dispatchEvent(new Event("simple-font-size-change"));
     };
     const row = this.renderDisplayCheckbox(parent, name, desc, enabled, async checked => {
       this.plugin.settings.displayParameterSwitches[mobile ? "mobile" : "desktop"][key] = checked;
@@ -675,11 +546,117 @@ export class SimpleSettingTab extends PluginSettingTab {
     }));
   }
 
+  private renderLetterSpacing(parent: HTMLElement, latin = false): void {
+    const settings = this.plugin.settings;
+    const spacingKey = latin ? "latinLetterSpacing" : "letterSpacing";
+    const name = latin ? "英文字间距" : "中文字间距";
+    let unit: "px" | "em" = "em";
+    const fontSize = (): number => {
+      if (displayParameterEnabled(settings, false, "fontSize")) return settings.desktopTypography.fontSize;
+      const editor = parent.ownerDocument.querySelector<HTMLElement>('.workspace-leaf.mod-active .cm-scroller, .workspace-leaf.mod-active .markdown-preview-view, .cm-scroller, .markdown-preview-view');
+      const size = editor ? parseFloat(getComputedStyle(editor).fontSize) : parseFloat(getComputedStyle(parent.ownerDocument.body).getPropertyValue("--font-text-size"));
+      return Number.isFinite(size) && size > 0 ? size : settings.desktopTypography.fontSize;
+    };
+    const enabled = (): boolean => latin ? settings.desktopTypography.latinLetterSpacingEnabled !== false : displayParameterEnabled(settings, false, "letterSpacing");
+    const save = async (): Promise<void> => {
+      settings.desktopTypography.letterSpacingUnit = "em";
+      await this.plugin.saveSettings();
+      this.plugin.refreshTypography();
+    };
+    const row = this.renderDisplayCheckbox(parent, name, latin
+      ? "用于英文、数字和半角标点（如 , . ! ?）；中文及中文标点使用中文字间距。点击单位切换 em/px，实际间距不变。"
+      : "用于中文及中文标点（如 ，。！？）；英文、数字和半角标点使用英文字间距。点击单位切换 em/px，实际间距不变。", enabled(), async checked => {
+      if (latin) settings.desktopTypography.latinLetterSpacingEnabled = checked;
+      else settings.displayParameterSwitches.desktop.letterSpacing = checked;
+      input.disabled = !checked;
+      await save();
+    });
+    row.addClass("simple-display-parameter-row", "simple-letter-spacing-row");
+    const input = row.createEl("input", { type: "number", cls: "simple-display-parameter-input", attr: { "aria-label": name } });
+    const label = row.createEl("button", { cls: "simple-display-parameter-unit", attr: { type: "button", "aria-label": "切换字间距 em/px", title: "点击切换 em / px，保持实际字间距" } });
+    const refresh = (): void => {
+      const scale = unit === "px" ? fontSize() : 1;
+      input.value = String(Number(((settings.desktopTypography[spacingKey] ?? 0) * scale).toFixed(6)));
+      input.min = String(-0.05 * scale);
+      input.max = String(0.2 * scale);
+      input.step = "any";
+      input.disabled = !enabled();
+      input.setCustomValidity("");
+      label.setText(unit);
+    };
+    label.addEventListener("click", () => { unit = unit === "px" ? "em" : "px"; refresh(); });
+    parent.addEventListener("simple-font-size-change", refresh);
+    parent.addEventListener("simple-font-change", refresh);
+    input.addEventListener("change", runAsync(async () => {
+      const ratio = Number(input.value) / (unit === "px" ? fontSize() : 1);
+      const valid = input.value.trim() !== "" && Number.isFinite(ratio) && ratio >= -0.05 && ratio <= 0.2;
+      input.setCustomValidity(valid ? "" : `请输入 ${input.min}–${input.max} 范围内的数值`);
+      if (!valid) { input.reportValidity(); return; }
+      settings.desktopTypography[spacingKey] = Number(ratio.toFixed(10));
+      await save();
+      refresh();
+    }));
+    refresh();
+  }
+
   private renderPlatformDisplayGroup(container: HTMLElement, mobile: boolean): void {
     const group = settingsFieldset(container, mobile ? "移动端显示" : "桌面端显示");
     const settings = this.plugin.settings;
     const profile = mobile ? settings.mobileDisplay : settings;
     if (!mobile) {
+      for (const [key, name, enabledKey] of [["interfaceFont", "界面字体", "interfaceFontEnabled"], ["textFont", "正文字体", "textFontEnabled"]] as const) {
+        const save = async (): Promise<void> => {
+          await this.plugin.saveSettings();
+          this.plugin.refreshTypography();
+        };
+        const row = this.renderDisplayCheckbox(group, name, "关闭后跟随 Obsidian 字体设置。",
+          settings.desktopTypography[enabledKey], async checked => {
+            settings.desktopTypography[enabledKey] = checked;
+            select.disabled = !checked;
+            await save();
+          });
+        row.addClass("simple-font-option-row");
+        const download = row.createEl("a", { cls: "simple-font-download", href: "https://tsanger.cn/product/4", attr: {
+          "aria-label": "下载仓耳今楷01", title: "下载解压后，双击字体文件安装，重启 Obsidian 生效；未安装时回退微软雅黑。", target: "_blank", rel: "noopener noreferrer",
+        } });
+        setIcon(download, "download");
+        const select = row.createEl("select", { attr: { "aria-label": name } });
+        for (const { value, label } of CHINESE_FONTS) {
+          select.createEl("option", { value, text: label });
+        }
+        select.value = settings.desktopTypography[key];
+        select.disabled = !settings.desktopTypography[enabledKey];
+        updateFontDownload(download, CHINESE_FONTS.find(font => font.value === select.value));
+        select.addEventListener("change", runAsync(async () => {
+          settings.desktopTypography[key] = select.value as typeof settings.desktopTypography[typeof key];
+          updateFontDownload(download, CHINESE_FONTS.find(font => font.value === select.value));
+          await save();
+          group.dispatchEvent(new Event("simple-font-change"));
+        }));
+      }
+      const latinRow = this.renderDisplayCheckbox(group, "英文字体", "用于正文中的英文、数字和半角标点（如 , . ! ?）；中文及中文标点（如 ，。！？）使用正文字体。选择“跟随正文”后统一使用正文字体；未安装的字体会回退。",
+        settings.desktopTypography.latinFontEnabled, async checked => {
+          settings.desktopTypography.latinFontEnabled = checked;
+          latinSelect.disabled = !checked;
+          await this.plugin.saveSettings();
+          this.plugin.refreshTypography();
+        });
+      latinRow.addClass("simple-font-option-row");
+      const latinDownload = latinRow.createEl("a", { cls: "simple-font-download", href: "https://raw.githubusercontent.com/adobe-fonts/source-sans/release/TTF/SourceSans3-Regular.ttf", attr: {
+        "aria-label": "下载英文字体", title: "安装字体后，完全退出并重新打开 Obsidian。未安装时使用系统后备字体。", target: "_blank", rel: "noopener noreferrer",
+      } });
+      setIcon(latinDownload, "download");
+      const latinSelect = latinRow.createEl("select", { attr: { "aria-label": "英文字体" } });
+      for (const { value } of LATIN_FONTS) latinSelect.createEl("option", { value, text: value === "default" ? "跟随正文" : value });
+      latinSelect.value = settings.desktopTypography.latinFont;
+      latinSelect.disabled = !settings.desktopTypography.latinFontEnabled;
+      updateFontDownload(latinDownload, LATIN_FONTS.find(font => font.value === latinSelect.value));
+      latinSelect.addEventListener("change", runAsync(async () => {
+        settings.desktopTypography.latinFont = latinSelect.value as typeof settings.desktopTypography.latinFont;
+        updateFontDownload(latinDownload, LATIN_FONTS.find(font => font.value === latinSelect.value));
+        await this.plugin.saveSettings();
+        this.plugin.refreshTypography();
+      }));
       this.renderDisplayCheckbox(group, "中文阅读版式", "正文首行缩进两字；整行加粗及标题行不缩进。",
         settings.desktopTypography.paragraphStyle === "indent", async value => {
           settings.desktopTypography.paragraphStyle = value ? "indent" : "spaced";
@@ -698,11 +675,11 @@ export class SimpleSettingTab extends PluginSettingTab {
       value => { profile.readableLineWidth = value; });
     this.renderDisplayParameter(group, mobile, "imageMaxHeight", "图片最大高度", "图片按原比例缩放；关闭后不限制高度。",
       profile.imageMaxHeight, "450", 1, 10000, 1, "px", value => { profile.imageMaxHeight = value; });
-    this.renderDisplayParameter(group, mobile, "popupWindowScale", "弹出窗口缩放比例", "调整设置窗口和附件清单的尺寸；关闭后不调整。",
+    this.renderDisplayParameter(group, mobile, "popupWindowScale", "弹出窗口缩放比例", "设置窗口在下次打开时应用尺寸；打开后可自由移动和调整。附件清单在打开时适配，关闭此项则不调整。",
       profile.popupWindowScale, "70", 40, POPUP_SCALE_MAX, 5, "%", value => { profile.popupWindowScale = value; });
     if (!mobile) {
       const labels = { fontSize: ["正文字号", "px"], lineHeight: ["行高", "倍"],
-        letterSpacing: ["字间距", "px"], paragraphSpacing: ["段间距", "em"] };
+        letterSpacing: ["字间距", "em"], paragraphSpacing: ["段间距", "em"] };
       for (const key of Object.keys(TYPOGRAPHY_RANGES) as (keyof typeof TYPOGRAPHY_RANGES)[]) {
         const [min, max, step] = TYPOGRAPHY_RANGES[key];
         this.renderDisplayParameter(group, false, key, labels[key][0], "关闭后跟随 Obsidian 或主题设置。",
@@ -1057,10 +1034,6 @@ export class SimpleSettingTab extends PluginSettingTab {
     }
   }
 
-  private renderSearchFolderSettings(container: HTMLElement): void {
-    this.renderBasicOptimizationSettings(container);
-  }
-
   private renderAttachmentOrganizerSettings(container: HTMLElement): void {
     const location = readObsidianAttachmentLocation(this.plugin);
     const disabledReasons = attachmentOrganizerDisabledReasons(location.mode);
@@ -1069,22 +1042,35 @@ export class SimpleSettingTab extends PluginSettingTab {
     mode.createSpan({ text: "当前附件存放模式" });
     const modeControls = mode.createDiv({ cls: "simple-attachment-mode-controls" });
     modeControls.createSpan({ cls: "simple-attachment-mode-value", text: describeAttachmentLocation(location) });
-    const configure = modeControls.createEl("button", {
+    const configure = styleActionButton(modeControls.createEl("button", {
       cls: "clickable-icon simple-attachment-action",
       attr: { type: "button", title: "打开 Obsidian 附件存放设置", "aria-label": "打开 Obsidian 附件存放设置" },
-    });
+    }), "bordered");
     setIcon(configure, "settings-2");
     configure.addEventListener("click", () => {
       this.openNativeAttachmentSettings();
     });
+    const referenceJump = card.createEl("label", { cls: "simple-preview-checkbox-row" });
+    const referenceCheckbox = referenceJump.createEl("input", {
+      type: "checkbox",
+      attr: { "aria-label": "从附件快速跳转到引用笔记" },
+    });
+    referenceCheckbox.checked = this.plugin.settings.enableAttachmentReferenceJump !== false;
+    referenceJump.createSpan({ text: "从附件快速跳转到引用笔记" });
+    referenceJump.title = "附件右键菜单与预览顶部右侧显示搜索图标，在新标签页打开引用笔记；多篇引用时可选择笔记或全部打开。";
+    referenceCheckbox.addEventListener("change", runAsync(async () => {
+      this.plugin.settings.enableAttachmentReferenceJump = referenceCheckbox.checked;
+      await this.plugin.saveSettings();
+      this.plugin.refreshAttachmentReferenceActions();
+    }));
       if (location.mode === "vault-root") {
         card.createDiv({
           cls: "simple-attachment-mode-warning",
           text: "当前附件默认存放在 Vault 根目录。请先指定附件文件夹，再检查根目录遗留附件的重命名和归位清单。",
         });
         const quickConfig = card.createDiv({ cls: "simple-attachment-quick-config" });
-        quickConfig.createSpan({ text: "将所有附件放入指定文件夹（默认 Attachment；仅影响新附件）" });
-        const button = quickConfig.createEl("button", { text: "快速配置", attr: { type: "button" } });
+        quickConfig.createSpan({ text: `将所有附件放入指定文件夹（默认 ${DEFAULT_ATTACHMENT_FOLDER}；仅影响新附件）` });
+        const button = styleActionButton(quickConfig.createEl("button", { text: "快速配置", attr: { type: "button" } }), "text");
         button.addEventListener("click", () => void this.quickConfigureAttachmentFolder(button));
       } else if (location.mode === "unknown") {
         card.createDiv({
@@ -1094,29 +1080,44 @@ export class SimpleSettingTab extends PluginSettingTab {
       }
       this.renderAttachmentOrganizerAction(
         card,
-        "清理未引用附件图片",
-        "扫描附件目录及根目录遗留图片，列出未引用的文件；根目录图片默认不勾选，确认后移入 Obsidian 回收站。",
+        "清理未引用附件与空文件夹",
+        "扫描附件目录中的未引用附件、空文件夹（含整条为空的子目录链）及根目录遗留图片；保留附件根目录，根目录图片与非图片附件默认不勾选，确认后移入 Obsidian 回收站。",
         "开始检查",
         disabledReasons.unused,
-        () => void checkUnusedAttachments(this.plugin)
+        () => void checkUnusedAttachments(this.plugin),
+        "autoCleanAttachments"
       );
 
-      this.renderAttachmentOrganizerAction(
+      const imageRow = this.renderAttachmentOrganizerAction(
         card,
-        "重命名并归位非图片附件",
-        "检查 JSON、txt、PDF 等非图片附件并按引用笔记归位；保留原名，目标重名时自动避让。先预览清单，确认后执行。",
+        "分类图片至附件专区（并重命名）",
+        "根据引用笔记重命名图片并分类。笔记所在目录：附件专区/笔记完整所在目录；笔记名目录：在此前提下再创建笔记同名目录。先预览，确认后执行。",
+        "开始检查",
+        disabledReasons.imageRename,
+        () => void planAttachmentImageRename(this.plugin),
+        "autoOrganizeImages"
+      );
+      this.renderAttachmentTargetSelect(imageRow, "imageAttachmentFolderMode", "图片分类目录", location.mode !== "fixed-folder" || Boolean(disabledReasons.imageRename));
+
+      const attachmentRow = this.renderAttachmentOrganizerAction(
+        card,
+        "分类附件至附件专区",
+        "JSON、txt、PDF 等非图片附件保留原名，按所选目录规则分类，重名时添加数字避让。先预览，确认后执行。",
         "开始检查",
         disabledReasons.organization,
-        () => void planAttachmentOrganization(this.plugin)
+        () => void planAttachmentOrganization(this.plugin),
+        "autoOrganizeAttachments"
       );
 
+      this.renderAttachmentTargetSelect(attachmentRow, "attachmentFolderMode", "附件分类目录", location.mode !== "fixed-folder" || Boolean(disabledReasons.organization));
       this.renderAttachmentOrganizerAction(
         card,
-        "内嵌图片转为附件",
-        "扫描 Markdown 中直接嵌入的 base64 图片，将其保存为独立附件，并替换为 Obsidian 图片链接。",
+        "内嵌 Base64 图片转为常规图片",
+        "将 Markdown 中的 Base64 图片保存为图片文件，并替换为图片链接；保存位置跟随 Obsidian 附件设置。",
         "转换",
         disabledReasons.inlineExtraction,
-        () => void planInlineImageExtraction(this.plugin)
+        () => void planInlineImageExtraction(this.plugin),
+        "autoExtractInlineImages"
       );
   }
 
@@ -1157,9 +1158,9 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderThemeFormattingSettings(container: HTMLElement, standalone = true): void {
-    if (standalone) this.renderPageHeader(container, "正文格式", () => this.openPage({ type: "display-preview" }));
+    if (standalone) this.renderPageHeader(container, "正文默认格式", () => this.openPage({ type: "overview" }));
     const formatting = this.plugin.settings.themeFormatting;
-    const group = settingsFieldset(container, "正文格式");
+    const group = settingsFieldset(container, "正文默认格式");
     const save = async (): Promise<void> => {
       await this.plugin.saveSettings();
       this.plugin.applyThemeFormattingStyles();
@@ -1223,9 +1224,9 @@ export class SimpleSettingTab extends PluginSettingTab {
       colorSetting("加粗文字颜色", "设置 Markdown 加粗文字颜色。", "boldColor", "strong", "color");
       colorSetting("斜体文字颜色", "设置 Markdown 斜体文字颜色。", "italicColor", "em", "color");
       colorSetting("下划线颜色", "设置下划线文字颜色。", "underlineColor", "u", "color");
+      colorSetting("删除线颜色", "设置 Markdown 删除线文字颜色。", "strikethroughColor", "del", "color");
       colorSetting("高亮背景颜色", "设置 ==高亮== 文本的背景颜色。", "highlightBackground", "mark", "backgroundColor");
       colorSetting("高亮文字颜色", "设置高亮文本的前景颜色。", "highlightColor", "mark", "color");
-      colorSetting("删除线颜色", "设置 Markdown 删除线文字颜色。", "strikethroughColor", "del", "color");
     }
   }
 
@@ -1254,27 +1255,27 @@ export class SimpleSettingTab extends PluginSettingTab {
     };
     if (!vault.setConfig) {
       openFileSettings();
-      new Notice("请在“文件与链接”中将新附件的默认位置设为指定文件夹：Attachment");
+      new Notice(`请在“文件与链接”中将新附件的默认位置设为指定文件夹：${DEFAULT_ATTACHMENT_FOLDER}`);
       return;
     }
 
     button.disabled = true;
     try {
-      const folder = vault.getAbstractFileByPath("Attachment");
+      const folder = vault.getAbstractFileByPath(DEFAULT_ATTACHMENT_FOLDER);
       if (folder && !(folder instanceof TFolder)) {
-        new Notice("Attachment 已被文件占用，请在“文件与链接”中手动选择其他文件夹");
+        new Notice(`${DEFAULT_ATTACHMENT_FOLDER} 已被文件占用，请在“文件与链接”中手动选择其他文件夹`);
         openFileSettings();
         return;
       }
-      if (!folder) await vault.createFolder("Attachment");
-      await vault.setConfig("attachmentFolderPath", "Attachment");
+      if (!folder) await vault.createFolder(DEFAULT_ATTACHMENT_FOLDER);
+      await vault.setConfig("attachmentFolderPath", DEFAULT_ATTACHMENT_FOLDER);
       const updated = readObsidianAttachmentLocation(this.plugin);
-      if (updated.mode !== "fixed-folder" || updated.folder !== "Attachment") {
+      if (updated.mode !== "fixed-folder" || updated.folder !== DEFAULT_ATTACHMENT_FOLDER) {
         throw new Error("Obsidian 未应用附件目录设置");
       }
       this.renderSettings();
       openFileSettings();
-      new Notice("以后新增的附件将存放在 Attachment；现有附件不会自动移动");
+      new Notice(`以后新增的附件将存放在 ${DEFAULT_ATTACHMENT_FOLDER}；现有附件不会自动移动`);
     } catch (error) {
       openFileSettings();
       new Notice(`快速配置失败：${error instanceof Error ? error.message : String(error)}`);
@@ -1283,30 +1284,65 @@ export class SimpleSettingTab extends PluginSettingTab {
     }
   }
 
+  private renderAttachmentTargetSelect(row: HTMLElement, key: "imageAttachmentFolderMode" | "attachmentFolderMode", label: string, disabled: boolean): void {
+    const button = row.querySelector<HTMLButtonElement>(".simple-attachment-action")!;
+    const controls = row.createDiv({ cls: "simple-attachment-mode-controls" });
+    const select = controls.createEl("select", {
+      cls: "simple-attachment-target",
+      attr: { "aria-label": label },
+    });
+    select.createEl("option", { value: "category", text: "笔记所在目录" });
+    select.createEl("option", { value: "note", text: "笔记名目录" });
+    select.value = this.plugin.settings[key] === "note" ? "note" : "category";
+    select.disabled = disabled;
+    if (disabled) select.title = "目录选择仅适用于指定附件文件夹模式。";
+    select.addEventListener("change", runAsync(async () => {
+      this.plugin.settings[key] = select.value === "note" ? "note" : "category";
+      await this.plugin.saveSettings();
+      this.plugin.refreshAttachmentAutomation();
+    }));
+    controls.appendChild(button);
+  }
+
   private renderAttachmentOrganizerAction(
     container: HTMLElement,
     name: string,
     description: string,
     buttonText: string,
     disabledReason: string | null,
-    onClick: () => void
-  ): void {
+    onClick: () => void,
+    automaticKey?: "autoCleanAttachments" | "autoOrganizeImages" | "autoOrganizeAttachments" | "autoExtractInlineImages"
+  ): HTMLElement {
     const row = container.createDiv({
       cls: "simple-preview-checkbox-row simple-attachment-action-row",
       attr: { title: description },
     });
+    if (automaticKey) {
+      const checkbox = row.createEl("input", {
+        type: "checkbox",
+        attr: { "aria-label": `自动静默处理：${name}`, title: "勾选后自动静默处理；右侧按钮可手动预览并执行" },
+      });
+      checkbox.checked = Boolean(this.plugin.settings[automaticKey]);
+      checkbox.disabled = Boolean(disabledReason);
+      checkbox.addEventListener("change", runAsync(async () => {
+        this.plugin.settings[automaticKey] = checkbox.checked;
+        await this.plugin.saveSettings();
+        this.plugin.refreshAttachmentAutomation();
+      }));
+    }
     const copy = row.createDiv({ cls: "simple-attachment-action-copy" });
     copy.createSpan({ text: name });
-    const button = row.createEl("button", {
+    const button = styleActionButton(row.createEl("button", {
       cls: "clickable-icon simple-attachment-action",
       attr: { type: "button", title: disabledReason || `${buttonText}：${name}`, "aria-label": `${buttonText}：${name}` },
-    });
+    }), "bordered");
     setIcon(button, "play");
     button.disabled = Boolean(disabledReason);
     if (!disabledReason) button.addEventListener("click", onClick);
     if (disabledReason) {
       copy.createDiv({ cls: "simple-attachment-disabled-reason", text: disabledReason });
     }
+    return row;
   }
 
   private renderHtmlPreviewSettings(container: HTMLElement): void {
@@ -1503,10 +1539,10 @@ export class SimpleSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       });
 
-      const del = row.createEl("button", {
+      const del = styleActionButton(row.createEl("button", {
         cls: "simple-rule-del",
         attr: { title: "删除规则", "aria-label": "删除规则" },
-      });
+      }), "bordered");
       setIcon(del, "x");
       del.addEventListener("click", runAsync(async () => {
         this.plugin.settings.filterRules.splice(i, 1);
@@ -1516,154 +1552,11 @@ export class SimpleSettingTab extends PluginSettingTab {
     }
   }
 
-  private renderNewNoteDefaults(container: HTMLElement): void {
-    this.renderPageHeader(container, "新建笔记时自动补全属性", () => this.openPage({ type: "basic-optimization" }));
-
-    settingsCard(container, (card) => {
-      new Setting(card)
-        .setName("启用属性补齐")
-        .setDesc("Notebook Navigator 新建空白笔记时，参考每条规则选中的 .base 当前视图列补齐属性。")
-        .addToggle((toggle) =>
-          toggle.setValue(this.plugin.settings.newNoteDefaults.enabled).onChange(async (value) => {
-            this.plugin.settings.newNoteDefaults.enabled = value;
-            await this.plugin.saveSettings();
-          })
-        );
-    });
-
-    const heading = container.createDiv({ cls: "simple-heading-row" });
-    settingsHeading(heading, "参考数据库规则");
-    const addButton = heading.createEl("button", { cls: "mod-cta simple-soft-button" });
-    addButton.setText("新增");
-    addButton.addEventListener("click", runAsync(async () => {
-      this.plugin.settings.newNoteDefaults.rules.push(makeNewNoteDatabaseRule());
-      await this.plugin.saveSettings();
-      this.renderSettings();
-    }));
-
-    if (this.plugin.settings.newNoteDefaults.rules.length === 0) {
-      const empty = container.createDiv({ cls: "simple-card" });
-      empty.createEl("p", { text: "还没有规则。首次在含 .base 的目录中新建空白笔记时会自动记录；也可以点“新增”手动配置。" });
-      return;
-    }
-
-    for (let index = 0; index < this.plugin.settings.newNoteDefaults.rules.length; index++) {
-      this.renderNewNoteDefaultRule(container, this.plugin.settings.newNoteDefaults.rules[index], index);
-    }
-  }
-
-  private renderNewNoteDefaultRule(container: HTMLElement, rule: NewNoteDatabaseRule, index: number): void {
-    settingsCard(container, (card) => {
-      if (!rule.folder) {
-        new Setting(card)
-          .setName("目录")
-          .addText((text) => text
-            .setPlaceholder("Notes/Examples")
-            .setValue(rule.folder)
-            .onChange(async (value) => {
-              rule.folder = normalizePath(value.trim());
-              await this.plugin.saveSettings();
-            }));
-      }
-
-      const options = this.baseOptionsForFolder(rule.folder);
-      const listId = `simple-new-note-base-${rule.id}`;
-      if (options.length > 0) {
-        const list = card.createEl("datalist");
-        list.id = listId;
-        for (const option of options) {
-          list.createEl("option", { attr: { value: option } });
-        }
-      }
-
-      new Setting(card)
-        .setName(rule.folder || "未设置目录")
-        .setDesc("参考 Base 当前视图列。输入 / 可从当前目录下的 .base 中选择。")
-        .addText((text) => {
-          text
-            .setPlaceholder("/目录.base")
-            .setValue(this.relativeDatabasePath(rule))
-            .onChange(async (value) => {
-              rule.databasePath = this.composeDatabasePath(rule.folder, value);
-              await this.plugin.saveSettings();
-            });
-          if (options.length > 0) text.inputEl.setAttr("list", listId);
-        })
-        .addButton((button) => button
-          .setButtonText("选择")
-          .onClick(() => this.openDatabasePicker(rule)))
-        .addExtraButton((button) => button
-          .setIcon("trash-2")
-          .setTooltip("删除规则")
-          .onClick(async () => {
-            this.plugin.settings.newNoteDefaults.rules.splice(index, 1);
-            await this.plugin.saveSettings();
-            this.renderSettings();
-          }));
-    });
-  }
-
-  private openDatabasePicker(rule: NewNoteDatabaseRule): void {
-    const folder = this.app.vault.getAbstractFileByPath(normalizePath(rule.folder));
-    if (!(folder instanceof TFolder)) {
-      new Notice("请先填写有效目录");
-      return;
-    }
-    const bases = this.baseFilesForFolder(folder);
-    if (bases.length === 0) {
-      new Notice("这个目录下没有 .base 数据库文件");
-      return;
-    }
-    new DatabasePickerModal(this.app, bases, async (base) => {
-      rule.databasePath = base.path;
-      await this.plugin.saveSettings();
-      this.renderSettings();
-    }).open();
-  }
-
-  private relativeDatabasePath(rule: NewNoteDatabaseRule): string {
-    const folder = normalizePath(rule.folder);
-    const databasePath = normalizePath(rule.databasePath);
-    if (!folder || !databasePath) return databasePath;
-    return databasePath === folder ? "" : databasePath.startsWith(`${folder}/`) ? `/${databasePath.slice(folder.length + 1)}` : databasePath;
-  }
-
-  private composeDatabasePath(folder: string, input: string): string {
-    const value = input.trim();
-    if (!value) return "";
-    const normalized = normalizePath(value.replace(/^\/+/, ""));
-    if (!folder || value.includes(":")) return normalizePath(value);
-    const currentFolder = normalizePath(folder);
-    if (normalized === currentFolder || normalized.startsWith(`${currentFolder}/`)) return normalized;
-    return normalizePath(`${currentFolder}/${normalized}`);
-  }
-
-  private baseOptionsForFolder(folderPath: string): string[] {
-    const folder = this.app.vault.getAbstractFileByPath(normalizePath(folderPath));
-    if (!(folder instanceof TFolder)) return [];
-    const prefixLength = folder.path ? folder.path.length + 1 : 0;
-    return this.baseFilesForFolder(folder)
-      .map((file) => `/${file.path.slice(prefixLength)}`)
-      .sort((a, b) => a.localeCompare(b));
-  }
-
-  private baseFilesForFolder(folder: TFolder): TFile[] {
-    const files: TFile[] = [];
-    const walk = (current: TFolder) => {
-      for (const child of current.children) {
-        if (child instanceof TFile && child.extension === "base") {
-          files.push(child);
-        } else if (child instanceof TFolder) {
-          walk(child);
-        }
-      }
-    };
-    walk(folder);
-    return files.sort((a, b) => a.path.localeCompare(b.path));
-  }
-
   private renderTemplateRules(container: HTMLElement, inline = false): void {
-    if (!inline) this.renderPageHeader(container, "快速新建笔记", () => this.openPage({ type: "overview" }));
+    if (!inline) this.renderPageHeader(container, "快速新建笔记", () => {
+      this.displayPreviewTab = "shortcuts";
+      this.openPage({ type: "overview" });
+    });
     container = container.createDiv({ cls: "simple-template-rules-body" });
 
     const heading = container.createDiv({ cls: "simple-template-manager-heading" });
@@ -1771,7 +1664,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       const select = controls.createEl("select", { attr: { "aria-label": "选择要添加网站的模板" } });
       select.createEl("option", { text: "选择要添加网站的模板", value: "" });
       for (const template of cats) select.createEl("option", { text: template.name || "未命名模板", value: template.id });
-      const copy = controls.createEl("button", { cls: "simple-soft-button", text: "复制完整提示词" });
+      const copy = styleActionButton(controls.createEl("button", { cls: "simple-soft-button", text: "复制完整提示词" }), "text");
       copy.disabled = true;
       select.addEventListener("change", () => { copy.disabled = !cats.some(template => template.id === select.value); });
       copy.addEventListener("click", runAsync(async () => {
@@ -1810,242 +1703,6 @@ export class SimpleSettingTab extends PluginSettingTab {
       }
       return importTemplateGroup(current, normalizeCategoryImport(value));
     }).open();
-  }
-
-  private renderCategoryManager(container: HTMLElement): void {
-    this.renderPageHeader(container, "管理分类", () => this.openPage({ type: "template-rules" }));
-
-    const heading = container.createDiv({ cls: "simple-heading-row" });
-    settingsHeading(heading, "当前分类");
-    const headingActions = heading.createDiv({ cls: "simple-heading-actions" });
-    const addButton = headingActions.createEl("button", { cls: "mod-cta simple-soft-button" });
-    addButton.setText("新增模板");
-    addButton.addEventListener("click", () => this.openTemplateCreator());
-
-    this.renderMoreButton(headingActions, [
-      {
-        title: "导入",
-        icon: "download",
-        onClick: async () => {
-          const value = await importJsonFile();
-          if (!value) return;
-          const categories = normalizeCategoryImport(value);
-          for (const category of categories) {
-            upsertById(this.plugin.settings.templateCategories, category);
-          }
-          await this.plugin.saveSettings();
-          new Notice(`已导入 ${categories.length} 个分类`);
-          this.renderSettings();
-        },
-      },
-      {
-        title: "导出",
-        icon: "upload",
-        onClick: () => {
-          downloadJsonFile("simple-template-categories.json", {
-            type: "simple-plugin.template-categories",
-            version: 1,
-            categories: this.plugin.settings.templateCategories,
-          });
-          new Notice("分类 JSON 已导出为文件");
-        },
-      },
-      {
-        title: "删除模式",
-        icon: "trash-2",
-        onClick: () => {
-          this.deleteMode = { type: "categories", selectedIds: new Set() };
-          this.renderSettings();
-        },
-      },
-    ]);
-
-    const card = container.createDiv({ cls: "simple-card simple-json-list" });
-    const deleteMode = this.deleteMode?.type === "categories" ? this.deleteMode : null;
-    for (let index = 0; index < this.plugin.settings.templateCategories.length; index++) {
-      const category = this.plugin.settings.templateCategories[index];
-      const row = card.createDiv({ cls: "simple-json-row" });
-      if (deleteMode) {
-        row.addClass("is-delete-selectable");
-        if (deleteMode.selectedIds.has(category.id)) row.addClass("is-selected-for-delete");
-        row.addEventListener("click", () => {
-          this.toggleDeleteSelection(deleteMode, category.id);
-          row.classList.toggle("is-selected-for-delete", deleteMode.selectedIds.has(category.id));
-          const state = row.querySelector<HTMLElement>(".simple-delete-check");
-          if (state) state.setText(deleteMode.selectedIds.has(category.id) ? "已选" : "选择");
-        });
-      }
-      row.createDiv({ cls: "simple-json-name", text: category.name || "(未命名分类)" });
-      if (deleteMode) {
-        row.createDiv({
-          cls: "simple-delete-check",
-          text: deleteMode.selectedIds.has(category.id) ? "已选" : "选择",
-        });
-      } else {
-        this.renderJsonActions(row, {
-          editLabel: "编辑",
-          editTitle: `编辑分类 JSON：${category.name || "未命名分类"}`,
-          editValue: category,
-          onSave: async (value) => {
-            this.plugin.settings.templateCategories[index] = normalizeCategory(value);
-            await this.plugin.saveSettings();
-            this.renderSettings();
-          },
-        });
-      }
-    }
-    if (deleteMode) {
-      this.renderDeleteBar(container, deleteMode.selectedIds.size, async () => {
-        if (deleteMode.selectedIds.size === 0) {
-          new Notice("还没有选择要删除的分类");
-          return;
-        }
-        if (!await confirmAction(this.app, `删除选中的 ${deleteMode.selectedIds.size} 个分类？`)) return;
-        this.plugin.settings.templateCategories = this.plugin.settings.templateCategories.filter(
-          (category) => !deleteMode.selectedIds.has(category.id)
-        );
-        await this.plugin.saveSettings();
-        this.deleteMode = null;
-        this.renderSettings();
-      });
-    }
-  }
-
-  private renderCategorySites(container: HTMLElement, categoryId: string): void {
-    const category = this.plugin.settings.templateCategories.find((cat) => cat.id === categoryId);
-    if (!category) {
-      this.openPage({ type: "template-rules" });
-      return;
-    }
-
-    this.renderPageHeader(container, category.name || "网站填写与搜索规则", () => this.openPage({ type: "template-rules" }));
-
-    settingsCard(container, (card) => {
-      new Setting(card)
-        .setName("笔记输出目录")
-        .setDesc("当前分类通过网址转笔记或书名搜索生成笔记时使用的输出位置。")
-        .addText((text) =>
-          text
-            .setPlaceholder("Reviews")
-            .setValue(category.outputFolder)
-            .onChange(async (value) => {
-              category.outputFolder = value;
-              await this.plugin.saveSettings();
-            })
-        );
-    });
-
-    const heading = container.createDiv({ cls: "simple-heading-row" });
-    settingsHeading(heading, "网站填写与搜索规则");
-    const headingActions = heading.createDiv({ cls: "simple-heading-actions" });
-    const addButton = headingActions.createEl("button", { cls: "mod-cta simple-soft-button" });
-    addButton.setText("新增");
-    addButton.addEventListener("click", () => {
-      const draft = makeBlankSiteRule();
-      this.openJsonModal("新增网站填写与搜索规则 JSON", formatJson(draft), async (value) => {
-        const siteRule = normalizeSiteRule(value);
-        upsertById(category.siteRules, siteRule);
-        await this.plugin.saveSettings();
-        this.renderSettings();
-      });
-    });
-
-    this.renderMoreButton(headingActions, [
-      {
-        title: "导入",
-        icon: "download",
-        onClick: async () => {
-          const value = await importJsonFile();
-          if (!value) return;
-          const siteRules = normalizeSiteRuleImport(value);
-          for (const siteRule of siteRules) {
-            upsertById(category.siteRules, siteRule);
-          }
-          await this.plugin.saveSettings();
-          new Notice(`已导入 ${siteRules.length} 个网站规则`);
-          this.renderSettings();
-        },
-      },
-      {
-        title: "导出",
-        icon: "upload",
-        onClick: () => {
-          downloadJsonFile(`simple-site-rules-${slugify(category.name || category.id)}.json`, {
-            type: "simple-plugin.site-rules",
-            version: 1,
-            categoryId: category.id,
-            categoryName: category.name,
-            siteRules: category.siteRules,
-          });
-          new Notice("网站规则 JSON 已导出为文件");
-        },
-      },
-      {
-        title: "删除模式",
-        icon: "trash-2",
-        onClick: () => {
-          this.deleteMode = { type: "site-rules", categoryId: category.id, selectedIds: new Set() };
-          this.renderSettings();
-        },
-      },
-    ]);
-
-    const card = container.createDiv({ cls: "simple-card simple-json-list" });
-    const deleteMode =
-      this.deleteMode?.type === "site-rules" && this.deleteMode.categoryId === category.id
-        ? this.deleteMode
-        : null;
-    for (let index = 0; index < category.siteRules.length; index++) {
-      const siteRule = category.siteRules[index];
-      const row = card.createDiv({ cls: "simple-json-row" });
-      if (deleteMode) {
-        row.addClass("is-delete-selectable");
-        if (deleteMode.selectedIds.has(siteRule.id)) row.addClass("is-selected-for-delete");
-        row.addEventListener("click", () => {
-          this.toggleDeleteSelection(deleteMode, siteRule.id);
-          row.classList.toggle("is-selected-for-delete", deleteMode.selectedIds.has(siteRule.id));
-          const state = row.querySelector<HTMLElement>(".simple-delete-check");
-          if (state) state.setText(deleteMode.selectedIds.has(siteRule.id) ? "已选" : "选择");
-        });
-      }
-      row.createDiv({ cls: "simple-json-name", text: siteSummary(siteRule) || "(未命名网站规则)" });
-      if (deleteMode) {
-        row.createDiv({
-          cls: "simple-delete-check",
-          text: deleteMode.selectedIds.has(siteRule.id) ? "已选" : "选择",
-        });
-      } else {
-        this.renderJsonActions(row, {
-          editLabel: "编辑",
-          editTitle: `编辑网站填写与搜索规则 JSON：${siteLabel(siteRule) || "未命名网站规则"}`,
-          editValue: siteRule,
-          onSave: async (value) => {
-            category.siteRules[index] = normalizeSiteRule(value);
-            await this.plugin.saveSettings();
-            this.renderSettings();
-          },
-          exportFilename: `simple-site-rule-${slugify(siteLabel(siteRule) || siteRule.id)}.json`,
-          exportValue: {
-            type: "simple-plugin.site-rule",
-            version: 1,
-            siteRule,
-          },
-        });
-      }
-    }
-    if (deleteMode) {
-      this.renderDeleteBar(container, deleteMode.selectedIds.size, async () => {
-        if (deleteMode.selectedIds.size === 0) {
-          new Notice("还没有选择要删除的网站规则");
-          return;
-        }
-        if (!await confirmAction(this.app, `删除选中的 ${deleteMode.selectedIds.size} 个网站规则？`)) return;
-        category.siteRules = category.siteRules.filter((siteRule) => !deleteMode.selectedIds.has(siteRule.id));
-        await this.plugin.saveSettings();
-        this.deleteMode = null;
-        this.renderSettings();
-      });
-    }
   }
 
   private createScrollableTable(container: HTMLElement, label: string, tableClass: string): HTMLElement {
@@ -2090,10 +1747,10 @@ export class SimpleSettingTab extends PluginSettingTab {
     onBack = () => this.openPage({ type: "overview" })
   ): HTMLElement {
     const header = container.createDiv({ cls: "simple-page-header" });
-    const back = header.createEl("button", {
+    const back = styleActionButton(header.createEl("button", {
       cls: "simple-back-button",
       attr: { title: "返回", "aria-label": "返回" },
-    });
+    }), "bordered");
     setIcon(back, "arrow-left");
     back.addEventListener("click", onBack);
     return new Setting(header).setName(title).setHeading().setClass("simple-page-title").nameEl;
@@ -2104,9 +1761,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.displayPreviewTab = this.plugin.settings.showCalendarDiaryEntry ? "calendar-diary" : "basic";
       page = { type: "overview" };
     }
-    if (page.type === "sync-sharing") this.syncTab.resetNavigation();
     this.page = page;
-    this.deleteMode = null;
     if (requireApiVersion("1.13.0") && page.type === "overview") {
       this.syncTab.hide();
       this.containerEl.empty();
@@ -2132,32 +1787,6 @@ export class SimpleSettingTab extends PluginSettingTab {
       await onChange(input.value);
     }));
     return input;
-  }
-
-  private renderJsonActions(
-    row: HTMLElement,
-    options: {
-      editLabel: string;
-      editTitle: string;
-      editValue: unknown;
-      onSave: (value: unknown) => Promise<void>;
-      exportFilename?: string;
-      exportValue?: unknown;
-    }
-  ): void {
-    const actions = row.createDiv({ cls: "simple-json-actions" });
-    const editButton = actions.createEl("button", { cls: "simple-soft-button" });
-    editButton.setText(options.editLabel);
-    editButton.addEventListener("click", () => {
-      this.openJsonModal(options.editTitle, formatJson(options.editValue), options.onSave);
-    });
-    if (options.exportFilename && options.exportValue !== undefined) {
-      const exportButton = actions.createEl("button", { cls: "simple-soft-button" });
-      exportButton.setText("导出");
-      exportButton.addEventListener("click", () => {
-        downloadJsonFile(options.exportFilename!, options.exportValue);
-      });
-    }
   }
 
   private renderDiarySettings(container: HTMLElement, inline = false, section: "all" | "appearance" | "files" = "all"): void {
@@ -2217,207 +1846,6 @@ export class SimpleSettingTab extends PluginSettingTab {
     field("日记模板", "templatePath", "留空不使用模板，输入以搜索笔记");
   }
 
-  private renderReformatSettings(container: HTMLElement): void {
-    this.renderPageHeader(container, REFORMAT_NAME, () => this.openPage({ type: "feature-enhancements" }));
-    const enabled = this.plugin.settings.enhancements.currentNoteLinkConverter.enabled;
-    this.renderDisplayCheckbox(container, "自动排版", "启用自动排版及其快捷操作。", enabled, async value => {
-      this.plugin.settings.enhancements.currentNoteLinkConverter.enabled = value;
-      await this.plugin.saveSettings();
-      this.plugin.refreshReformatActions();
-      this.renderSettings();
-    });
-    this.renderPasteLinkSettings(container);
-    if (enabled) this.renderInlineReformatSettings(container);
-  }
-
-  private renderReformatRules(container: HTMLElement): void {
-    this.renderPageHeader(container, "文本排版规则", () => this.openPage({ type: "reformat" }));
-    const reformat = this.plugin.settings.diary.reformat;
-    const builtInRules = reformat.formatRules.filter((rule) => BUILT_IN_TEXT_REFORMAT_RULE_IDS.has(rule.id));
-    const customRules = reformat.formatRules.filter((rule) => !BUILT_IN_TEXT_REFORMAT_RULE_IDS.has(rule.id));
-
-    this.renderReformatRuleSection(
-      container,
-      "builtin",
-      "内置排版规则",
-      `${builtInRules.length} 条基础正则，可调整内容与启用状态。`,
-      (content) => {
-        this.renderReformatRuleTableHead(content);
-        for (const rule of builtInRules) {
-          this.renderTextReformatRule(content, rule, reformat.formatRules.indexOf(rule), false);
-        }
-      }
-    );
-
-    this.renderReformatRuleSection(
-      container,
-      "custom",
-      "自定义排版规则",
-      `${customRules.length} 条自定义正则，可新增、编辑和删除。`,
-      (content) => {
-        this.renderReformatRuleTableHead(content);
-        for (const rule of customRules) {
-          this.renderTextReformatRule(content, rule, reformat.formatRules.indexOf(rule), true);
-        }
-      },
-      (summary) => {
-        const add = summary.createEl("button", {
-          cls: "mod-cta simple-add-button simple-reformat-rule-summary-add",
-        });
-        add.setText("添加规则");
-        add.addEventListener("click", runAsync(async (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          reformat.formatRules.push(makeTextReformatRule());
-          await this.plugin.saveSettings();
-          this.expandedReformatRuleSections.add("custom");
-          this.renderSettings();
-        }));
-      }
-    );
-  }
-
-  private renderReformatRuleSection(
-    container: HTMLElement,
-    key: "builtin" | "custom",
-    title: string,
-    description: string,
-    render: (content: HTMLElement) => void,
-    renderSummaryAction?: (summary: HTMLElement) => void
-  ): void {
-    const section = container.createEl("details", { cls: "simple-callout-section simple-reformat-rule-section" });
-    section.open = this.expandedReformatRuleSections.has(key);
-    const summary = section.createEl("summary", { cls: "simple-callout-section-summary" });
-    const chevron = summary.createSpan({ cls: "simple-callout-section-chevron" });
-    setIcon(chevron, section.open ? "chevron-down" : "chevron-right");
-    const copy = summary.createDiv({ cls: "simple-callout-section-copy" });
-    copy.createDiv({ cls: "simple-card-title", text: title });
-    copy.createDiv({ cls: "setting-item-description", text: description });
-    renderSummaryAction?.(summary);
-    section.addEventListener("toggle", () => {
-      if (section.open) this.expandedReformatRuleSections.add(key);
-      else this.expandedReformatRuleSections.delete(key);
-      setIcon(chevron, section.open ? "chevron-down" : "chevron-right");
-    });
-    const content = section.createDiv({ cls: "simple-callout-section-content" });
-    render(this.createScrollableTable(content, title, "simple-settings-regex-table"));
-  }
-
-  private renderReformatRuleTableHead(card: HTMLElement): void {
-    const head = card.createDiv({ cls: "simple-reformat-compact-rule simple-rule-head" });
-    head.createDiv({ text: "启用" });
-    head.createDiv({ text: "名称" });
-    head.createDiv();
-  }
-
-  private renderTextReformatRule(
-    card: HTMLElement,
-    rule: TextReformatRule,
-    index: number,
-    deletable = true
-  ): void {
-    const row = card.createDiv({ cls: "simple-reformat-compact-rule" });
-    const toggleWrap = row.createDiv({ cls: "simple-rule-toggle" });
-    const checkbox = toggleWrap.createEl("input", { type: "checkbox", attr: { "aria-label": rule.name } });
-    checkbox.checked = rule.enabled;
-    checkbox.addEventListener("change", runAsync(async () => {
-      rule.enabled = checkbox.checked;
-      await this.plugin.saveSettings();
-    }));
-    row.createSpan({ text: rule.name });
-    const actions = row.createDiv({ cls: "simple-reformat-rule-actions" });
-    const edit = actions.createEl("button", { cls: "clickable-icon", attr: { title: "编辑规则", "aria-label": `编辑${rule.name}` } });
-    setActionIcon(edit, "pencil", "plain");
-    edit.addEventListener("click", () => new ReformatRuleModal(this.app, rule, async updated => {
-      Object.assign(rule, updated);
-      await this.plugin.saveSettings();
-      this.renderSettings();
-    }).open());
-    if (deletable) {
-      const del = actions.createEl("button", { cls: "simple-rule-del", attr: { title: "删除规则", "aria-label": "删除规则" } });
-      setDeleteIcon(del, "plain");
-      del.addEventListener("click", runAsync(async () => {
-        this.plugin.settings.diary.reformat.formatRules.splice(index, 1);
-        await this.plugin.saveSettings();
-        this.renderSettings();
-      }));
-    }
-  }
-
-  private renderQuickFormatSettings(container: HTMLElement): void {
-    const quickFormat = this.plugin.settings.enhancements.quickFormat;
-    this.renderPageHeader(container, QUICK_FORMAT_NAME, () => this.openPage({ type: "feature-enhancements" }));
-
-    settingsCard(container, (card) => {
-      new Setting(card).setName("翻译 · Simple AI 联动").setDesc("使用 Simple AI 的模型与凭据；选择翻译模型和提示词。").addButton(button => button.setButtonText("设置").onClick(() => new TranslationSettingsModal(this.plugin).open()));
-      this.renderDisplayCheckbox(card, "启用浮动工具栏", "启用快捷功能，并显示顶部 H 入口。", quickFormat.enabled, async value => {
-        quickFormat.enabled = value; quickFormat.showDesktopEntry = value; quickFormat.showMobileEntry = value;
-        await this.plugin.saveSettings(); this.plugin.refreshQuickFormatActions(); this.renderSettings();
-      });
-      this.renderDisplayCheckbox(card, "禁用浮动编辑栏", "勾选后不自动弹出；也可通过顶部 H 切换。", !quickFormat.selectionToolbar, async disabled => {
-        quickFormat.selectionToolbar = !disabled; await this.plugin.saveSettings(); this.plugin.refreshQuickFormatActions();
-      });
-      this.renderDisplayCheckbox(card, "电脑端：顶部显示 H 快速开关", "点击暂时暂停或恢复浮动工具栏；关闭该功能时沿用原预设操作。", quickFormat.showDesktopEntry, async value => {
-        quickFormat.showDesktopEntry = value; await this.plugin.saveSettings(); this.plugin.refreshQuickFormatActions();
-      });
-      this.renderDisplayCheckbox(card, "手机端：顶部显示 H 快速开关", "点击暂时暂停或恢复浮动工具栏。", quickFormat.showMobileEntry, async value => {
-        quickFormat.showMobileEntry = value; await this.plugin.saveSettings(); this.plugin.refreshQuickFormatActions();
-      });
-      new Setting(card).setName("在右键菜单中添加“段落设置（Callout 块）”")
-        .setDesc("在编辑区右键菜单中添加“段落设置（Callout 块）”，选中文本后选择类型，即可快速创建对应的 Callout 块。")
-        .addToggle(toggle => toggle.setValue(quickFormat.showCalloutsInParagraphMenu).onChange(async value => {
-          quickFormat.showCalloutsInParagraphMenu = value;
-          await this.plugin.saveSettings();
-        }));
-    });
-
-    const dependent = container.createDiv({ cls: "simple-quick-format-dependent" });
-    dependent.toggleClass("is-disabled", !quickFormat.enabled);
-    dependent.toggleAttribute("inert", !quickFormat.enabled);
-    settingsHeading(dependent, "格式调整");
-    settingsCard(dependent, (card) => {
-      card.createDiv({
-        cls: "setting-item-description",
-        text: "管理格式的启用与新增，调整字号、颜色等样式，并应用到笔记显示中。",
-      });
-      const enabledHeadingCount = (Object.keys(QUICK_FORMAT_HEADING_LABELS) as QuickFormatHeadingLevel[])
-        .filter((level) => quickFormat.visibleModes.includes(level)).length;
-      this.renderNavigationItem(
-        card,
-        "标题",
-        "功能开关、颜色与字号设定。",
-        () => this.openPage({ type: "quick-format-headings" }),
-        "heading",
-        enabledHeadingCount ? `已启用 ${enabledHeadingCount}/6` : "未启用"
-      );
-      this.renderNavigationItem(
-        card,
-        "引用与 Callout",
-        "管理 Callout 类型、颜色及右键段落菜单入口；引用始终显示。",
-        () => this.openPage({ type: "quick-format-callouts" }),
-        "message-square"
-      );
-    });
-  }
-
-  private renderQuickFormatHeadingSettings(container: HTMLElement): void {
-    this.renderPageHeader(container, "标题", () => this.openPage({ type: "quick-format" }));
-    const bodyFontSize = readRenderedFontSize();
-    settingsCard(container, (card) => {
-      const header = card.createDiv({ cls: "simple-card-header" });
-      const copy = header.createDiv();
-      copy.createDiv({ cls: "simple-card-title", text: "标题功能与样式" });
-      copy.createDiv({
-        cls: "setting-item-description",
-        text: "开关控制是否显示在快捷菜单；颜色和字号留空时跟随当前主题。",
-      });
-      header.createDiv({ cls: "simple-font-reference", text: `当前正文 ${bodyFontSize}` });
-      for (const level of Object.keys(QUICK_FORMAT_HEADING_LABELS) as QuickFormatHeadingLevel[]) {
-        this.renderQuickFormatHeadingSetting(card, level, bodyFontSize);
-      }
-    });
-  }
-
   private renderQuickFormatHeadingSetting(card: HTMLElement, level: QuickFormatHeadingLevel, bodyFontSize: string): void {
     const quickFormat = this.plugin.settings.enhancements.quickFormat;
     const color = quickFormat.headingColors[level];
@@ -2457,6 +1885,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     } });
     setActionIcon(reset, "rotate-ccw");
     const refresh = (): void => {
+      if (input.ownerDocument.activeElement !== input) input.value = quickFormat.headingSizes[level];
       this.updateThemeReset(reset, !!(quickFormat.headingSizes[level] || quickFormat.headingColors[level]));
       const current = readRenderedFontSize(level);
       input.placeholder = stripPx(current);
@@ -2479,7 +1908,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   }
 
   private renderQuickFormatCalloutSettings(container: HTMLElement, standalone = true): void {
-    if (standalone) this.renderPageHeader(container, "引用与 Callout", () => this.openPage({ type: "quick-format" }));
+    if (standalone) this.renderPageHeader(container, "引用与 Callout", () => this.openPage({ type: "overview" }));
     const quickFormat = this.plugin.settings.enhancements.quickFormat;
     const card = container.createDiv({ cls: "simple-callout-settings-list" });
     const refresh = (): void => {
@@ -2551,17 +1980,13 @@ export class SimpleSettingTab extends PluginSettingTab {
     const fallback = readCalloutColorHex(callout.type || "note", card);
     const isEditing = this.editingCustomCalloutIds.has(callout.id);
     const setting = new Setting(card)
-      .setClass("simple-custom-callout-setting")
-      .addColorPicker((picker) =>
-        picker
-          .setValue(callout.color || fallback)
-          .onChange(async (value) => {
-            callout.color = value;
-            await this.plugin.saveSettings();
-            applyQuickFormatStyles(this.plugin);
-            refresh();
-          })
-      );
+      .setClass("simple-custom-callout-setting");
+    new ThemeColorPicker(setting.controlEl, this.plugin).setValue(callout.color || fallback).onChange(async value => {
+      callout.color = value;
+      await this.plugin.saveSettings();
+      applyQuickFormatStyles(this.plugin);
+      refresh();
+    }).buttonEl.setAttribute("aria-label", "自定义 Callout 颜色");
 
     setting.settingEl.removeClass("setting-item");
     setting.settingEl.classList.toggle("is-editing", isEditing);
@@ -2670,11 +2095,6 @@ export class SimpleSettingTab extends PluginSettingTab {
     quickFormat.visibleModes = visible
       ? [...new Set([...quickFormat.visibleModes, mode])]
       : quickFormat.visibleModes.filter((item) => item !== mode);
-  }
-
-  private renderEventReminderSettings(container: HTMLElement): void {
-    this.renderPageHeader(container, "自动提醒管理", () => this.openPage({ type: "calendar-diary" }));
-    this.renderRecurringRules(container);
   }
 
   private renderDateManagementSettings(container: HTMLElement): void {
@@ -2918,7 +2338,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     const heading = container.createDiv({ cls: "simple-heading-row" });
     settingsHeading(heading, title);
     const headerActions = heading.createDiv({ cls: "simple-json-actions" });
-    const importButton = headerActions.createEl("button", { cls: "mod-cta simple-soft-button" });
+    const importButton = styleActionButton(headerActions.createEl("button", { cls: "mod-cta simple-soft-button" }), "text");
     importButton.setText("导入");
     importButton.addEventListener("click", () => {
       new HolidayScheduleImportModal(this.app, title, source, async (schedule) => {
@@ -2933,11 +2353,11 @@ export class SimpleSettingTab extends PluginSettingTab {
       }).open();
     });
 
-    const exportButton = headerActions.createEl("button", {
+    const exportButton = styleActionButton(headerActions.createEl("button", {
       cls: "simple-soft-button",
       text: "导出",
       attr: { title: "导出当前年份筛选下的假期安排", "aria-label": `导出${title}` },
-    });
+    }), "text");
     exportButton.addEventListener("click", () => {
       if (!filteredSchedules.length) {
         new Notice("当前没有可导出的假期安排");
@@ -2986,7 +2406,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       text: "先复制提示词，再复制网页或公司通知中的假期安排，一起发给 AI；将 AI 返回的 JSON 粘贴到对应模块的导入窗口。",
     });
     const actions = guide.createDiv({ cls: "simple-holiday-import-guide-actions" });
-    const copy = actions.createEl("button", { cls: "simple-soft-button" });
+    const copy = styleActionButton(actions.createEl("button", { cls: "simple-soft-button" }), "text");
     copy.setText("复制提示词");
     copy.addEventListener("click", runAsync(async () => {
       await navigator.clipboard.writeText(holidayImportPrompt());
@@ -3000,7 +2420,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     const header = wrapper.createDiv({ cls: "simple-holiday-schedule-header" });
     const toggleWrap = header.createDiv({ cls: "simple-holiday-schedule-toggle" });
       new Setting(toggleWrap).addToggle((toggle) =>
-        toggle.setValue(schedule.enabled).onChange(async (value) => {
+          nativeCheckbox(toggle).setValue(schedule.enabled).onChange(async (value) => {
           schedule.enabled = value;
           await this.plugin.saveSettings();
           this.plugin.refreshDiaryViews();
@@ -3019,9 +2439,9 @@ export class SimpleSettingTab extends PluginSettingTab {
 
     const actions = header.createDiv({ cls: "simple-json-actions" });
     const expanded = this.expandedHolidaySchedules.has(schedule.id);
-    const expand = actions.createEl("button", {
+    const expand = styleActionButton(actions.createEl("button", {
       attr: { title: expanded ? "收起" : "展开", "aria-label": expanded ? "收起" : "展开" },
-    });
+    }), "bordered");
     setIcon(expand, expanded ? "chevron-up" : "chevron-down");
     expand.addEventListener("click", () => {
       if (expanded) this.expandedHolidaySchedules.delete(schedule.id);
@@ -3137,63 +2557,6 @@ export class SimpleSettingTab extends PluginSettingTab {
     }
   }
 
-  private renderMoreButton(
-    parent: HTMLElement,
-    items: Array<{ title: string; icon: string; onClick: () => void | Promise<void> }>
-  ): void {
-    const button = parent.createEl("button", {
-      cls: "simple-more-button",
-      attr: { title: "更多操作", "aria-label": "更多操作" },
-    });
-    setIcon(button, "more-horizontal");
-    button.addEventListener("click", (event) => {
-      const menu = new Menu();
-      for (const menuItem of items) {
-        menu.addItem((item) => {
-          item
-            .setTitle(menuItem.title)
-            .setIcon(menuItem.icon)
-            .onClick(() => {
-              void menuItem.onClick();
-            });
-        });
-      }
-      menu.showAtMouseEvent(event);
-    });
-  }
-
-  private toggleDeleteSelection(mode: { selectedIds: Set<string> }, id: string): void {
-    if (mode.selectedIds.has(id)) {
-      mode.selectedIds.delete(id);
-    } else {
-      mode.selectedIds.add(id);
-    }
-  }
-
-  private renderDeleteBar(
-    container: HTMLElement,
-    selectedCount: number,
-    onConfirm: () => Promise<void>
-  ): void {
-    const bar = container.createDiv({ cls: "simple-delete-bar" });
-    bar.createDiv({
-      cls: "simple-delete-count",
-      text: selectedCount > 0 ? `已选择 ${selectedCount} 项` : "点击列表项选择要删除的内容",
-    });
-    const actions = bar.createDiv({ cls: "simple-delete-actions" });
-    const cancel = actions.createEl("button", { cls: "simple-soft-button" });
-    cancel.setText("取消");
-    cancel.addEventListener("click", () => {
-      this.deleteMode = null;
-      this.renderSettings();
-    });
-    const confirmDelete = actions.createEl("button", { cls: "mod-warning simple-soft-button" });
-    confirmDelete.setText("删除选中");
-    confirmDelete.addEventListener("click", () => {
-      void onConfirm();
-    });
-  }
-
   private openJsonModal(
     title: string,
     initialValue: string,
@@ -3245,8 +2608,8 @@ class ConfirmDeleteModal extends Modal {
     this.titleEl.setText(this.title);
     this.contentEl.createDiv({ cls: "setting-item-description", text: this.message });
     const actions = this.contentEl.createDiv({ cls: "simple-confirm-actions" });
-    actions.createEl("button", { text: "取消" }).addEventListener("click", () => this.close());
-    const confirmButton = actions.createEl("button", { cls: "mod-warning", text: "确认删除" });
+    styleActionButton(actions.createEl("button", { text: "取消" }), "text").addEventListener("click", () => this.close());
+    const confirmButton = styleActionButton(actions.createEl("button", { cls: "mod-warning", text: "确认删除" }), "text");
     confirmButton.addEventListener("click", runAsync(async () => {
       confirmButton.disabled = true;
       await this.onConfirm();
@@ -3362,7 +2725,7 @@ class JsonEditModal extends Modal {
       const query = queryLabel.createEl("input", { type: "text", attr: { "aria-label": "测试搜索关键词" } });
       query.value = "我的";
       const actions = panel.createDiv({ cls: "simple-site-test-actions" });
-      const run = actions.createEl("button", { text: "测试", cls: "mod-cta simple-site-test-run", attr: { type: "button" } });
+      const run = styleActionButton(actions.createEl("button", { text: "测试", cls: "mod-cta simple-site-test-run", attr: { type: "button" } }), "text");
       const results = panel.createDiv({ cls: "simple-site-test-results", attr: { "aria-live": "polite" } });
       panel.insertBefore(results, inputs);
       contentEl.insertBefore(panel, this.textarea);
@@ -3476,11 +2839,11 @@ class JsonEditModal extends Modal {
         }));
       }
     }
-    const cancel = footer.createEl("button");
+    const cancel = styleActionButton(footer.createEl("button"), "text");
     cancel.setText("取消");
     cancel.addEventListener("click", () => this.close());
 
-    const save = footer.createEl("button", { cls: "mod-cta" });
+    const save = styleActionButton(footer.createEl("button", { cls: "mod-cta" }), "text");
     save.setText("保存");
     save.addEventListener("click", runAsync(async () => {
       setBusy(true);
@@ -3526,7 +2889,7 @@ class HolidayScheduleImportModal extends Modal {
       this.textarea.value = await navigator.clipboard.readText();
     }));
 
-    const fileImport = toolbar.createEl("button", { text: "从文件导入" });
+    const fileImport = styleActionButton(toolbar.createEl("button", { text: "从文件导入" }), "text");
     fileImport.addEventListener("click", runAsync(async () => {
       const value = await importJsonFile(contentEl.ownerDocument);
       if (value !== null && value !== undefined) this.textarea.value = JSON.stringify(value, null, 2);
@@ -3538,11 +2901,11 @@ class HolidayScheduleImportModal extends Modal {
     });
 
     const footer = contentEl.createDiv({ cls: "simple-json-modal-footer" });
-    const cancel = footer.createEl("button");
+    const cancel = styleActionButton(footer.createEl("button"), "text");
     cancel.setText("取消");
     cancel.addEventListener("click", () => this.close());
 
-    const save = footer.createEl("button", { cls: "mod-cta" });
+    const save = styleActionButton(footer.createEl("button", { cls: "mod-cta" }), "text");
     save.setText("校验并导入");
     save.addEventListener("click", runAsync(async () => {
       try {
@@ -3585,7 +2948,7 @@ class AnniversaryDetailModal extends Modal {
       .setName("当日提醒")
       .setDesc("开启后，创建当天日记时写入这条纪念日提醒。")
       .addToggle((toggle) =>
-        toggle.setValue(this.draft.sameDayReminderEnabled ?? this.draft.reminderEnabled).onChange((value) => {
+          nativeCheckbox(toggle).setValue(this.draft.sameDayReminderEnabled ?? this.draft.reminderEnabled).onChange((value) => {
           this.draft.sameDayReminderEnabled = value;
           this.syncReminderEnabled();
         })
@@ -3595,7 +2958,7 @@ class AnniversaryDetailModal extends Modal {
       .setName("提前提醒")
       .setDesc("开启后，按提前工作日写入预告；留空时使用 7 个工作日。")
       .addToggle((toggle) =>
-        toggle.setValue(Boolean(this.draft.advanceReminderEnabled)).onChange((value) => {
+          nativeCheckbox(toggle).setValue(Boolean(this.draft.advanceReminderEnabled)).onChange((value) => {
           this.draft.advanceReminderEnabled = value;
           if (value && !this.draft.reminderDaysBefore) this.draft.reminderDaysBefore = 7;
           this.syncReminderEnabled();
@@ -3607,11 +2970,11 @@ class AnniversaryDetailModal extends Modal {
     this.renderAdvanceControls();
 
     const footer = contentEl.createDiv({ cls: "simple-json-modal-footer" });
-    const cancel = footer.createEl("button");
+    const cancel = styleActionButton(footer.createEl("button"), "text");
     cancel.setText("取消");
     cancel.addEventListener("click", () => this.close());
 
-    const save = footer.createEl("button", { cls: "mod-cta" });
+    const save = styleActionButton(footer.createEl("button", { cls: "mod-cta" }), "text");
     save.setText("保存");
     save.addEventListener("click", runAsync(async () => {
       await this.onSave({ ...this.draft, reminderText: "", outputFormat: "task" });
@@ -3722,7 +3085,7 @@ class AnniversaryCreateModal extends Modal {
 
     const footer = contentEl.createDiv({ cls: "simple-json-modal-footer" });
     if (isEditing && this.onDelete) {
-      const del = footer.createEl("button", { cls: "mod-warning" });
+      const del = styleActionButton(footer.createEl("button", { cls: "mod-warning" }), "text");
       del.setText("删除");
       del.addEventListener("click", runAsync(async () => {
         if (!await confirmAction(this.app, "确定删除这个自定义纪念日吗？")) return;
@@ -3731,11 +3094,11 @@ class AnniversaryCreateModal extends Modal {
       }));
     }
 
-    const cancel = footer.createEl("button");
+    const cancel = styleActionButton(footer.createEl("button"), "text");
     cancel.setText("取消");
     cancel.addEventListener("click", () => this.close());
 
-    const save = footer.createEl("button", { cls: "mod-cta" });
+    const save = styleActionButton(footer.createEl("button", { cls: "mod-cta" }), "text");
     save.setText(isEditing ? "保存" : "新增");
     save.addEventListener("click", runAsync(async () => {
       const cleaned = cleanCustomAnniversary(this.draft);
@@ -3886,7 +3249,7 @@ class RecurringRuleModal extends Modal {
       .setName("提前提醒")
       .setDesc("在事件发生前若干天，提前写入一条预告。")
       .addToggle((toggle) =>
-        toggle.setValue(Boolean(this.draft.advanceEnabled)).onChange((value) => {
+          nativeCheckbox(toggle).setValue(Boolean(this.draft.advanceEnabled)).onChange((value) => {
           this.draft.advanceEnabled = value;
           if (value && !this.draft.advanceDays) this.draft.advanceDays = 3;
           this.renderAdvanceControls();
@@ -3908,13 +3271,13 @@ class RecurringRuleModal extends Modal {
         finally { setBusy(false); }
       }));
     }
-    const cancel = footer.createEl("button");
+    const cancel = styleActionButton(footer.createEl("button"), "bordered");
     cancel.setAttribute("aria-label", "取消");
     cancel.title = "取消";
     setIcon(cancel, "undo-2");
     cancel.addEventListener("click", () => this.close());
 
-    const save = footer.createEl("button", { cls: "mod-cta" });
+    const save = styleActionButton(footer.createEl("button", { cls: "mod-cta" }), "text");
     save.setText("保存");
     save.addEventListener("click", runAsync(async () => {
       if (!this.draft.text.trim()) {
@@ -4546,32 +3909,6 @@ function normalizeOptionalNumber(value: unknown, min: number, max: number): numb
   return Number.isInteger(number) && number >= min && number <= max ? number : undefined;
 }
 
-class DatabasePickerModal extends Modal {
-  constructor(
-    app: App,
-    private readonly bases: TFile[],
-    private readonly onChoose: (base: TFile) => Promise<void>
-  ) {
-    super(app);
-  }
-
-  onOpen(): void {
-    this.titleEl.setText("选择参考数据库");
-    for (const base of this.bases) {
-      new Setting(this.contentEl)
-        .setName(base.basename)
-        .setDesc(base.path)
-        .addButton((button) => button
-          .setButtonText("使用")
-          .setCta()
-          .onClick(async () => {
-            this.close();
-            await this.onChoose(base);
-          }));
-    }
-  }
-}
-
 function normalizeCategory(value: unknown): TemplateCategory {
   if (!isRecord(value)) throw new Error("分类 JSON 必须是对象");
   return {
@@ -4724,28 +4061,6 @@ function normalizeSiteRuleImport(value: unknown): SiteRule[] {
   return [normalizeSiteRule(value)];
 }
 
-function makeBlankSiteRule(): SiteRule {
-  return {
-    id: nextId(),
-    name: "",
-    shortName: "",
-    handler: "",
-    urlPattern: "",
-    search: {
-      enabled: true,
-      searchUrl: "",
-      resultLimit: 10,
-      resultList: "",
-      resultTitle: "",
-      resultUrl: "",
-      resultAuthor: "",
-      resultIntro: "",
-      nextPage: undefined,
-    },
-    fields: [],
-  };
-}
-
 function importJsonFile(ownerDocument: Document = document): Promise<unknown> {
   return new Promise((resolve) => {
     const input = ownerDocument.win.createEl("input");
@@ -4882,10 +4197,11 @@ function readThemeColor(name: string): string {
 }
 
 function readRenderedFontSize(level?: QuickFormatHeadingLevel): string {
-  const probe = document.body.createDiv({ cls: "markdown-preview-view markdown-rendered simple-font-size-probe" });
+  const host = document.body.createDiv({ cls: "workspace-leaf-content simple-font-size-probe", attr: { "data-type": "markdown" } });
+  const probe = host.createDiv({ cls: "markdown-preview-view markdown-rendered" });
   const element = probe.createEl(level ?? "p", { text: level ? "标题" : "正文" });
   const size = getComputedStyle(element).fontSize;
-  probe.remove();
+  host.remove();
   return size || getComputedStyle(document.body).fontSize || "16px";
 }
 

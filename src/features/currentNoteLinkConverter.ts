@@ -2,6 +2,7 @@ import { Menu, addIcon, setIcon, setTooltip } from "obsidian";
 import type SimplePlugin from "../main";
 import { registerMarkdownAction } from "../shared/markdownAction";
 import { reformatCurrentNote } from "./noteReformat";
+import { runAsync } from "../shared/async";
 
 const ACTION_ATTR = "data-simple-current-note-link-converter";
 export const REFORMAT_ICON = "simple-reformat";
@@ -42,6 +43,22 @@ export function registerCurrentNoteLinkConverter(plugin: SimplePlugin): () => vo
 
 function createLinkConverterMenu(plugin: SimplePlugin): Menu {
   const menu = new Menu();
+  const reformat = plugin.settings.diary.reformat;
+  const shortcuts = [
+    ["runLinkConversion", "将 URL 处理为超链接"],
+    ["autoReformatAfterPaste", "粘贴时自动排版"],
+    ["runFormatReflow", "文本排版"],
+  ] as const;
+  for (const [key, title] of shortcuts) {
+    menu.addItem((item) => {
+      item.setTitle(title).setIcon(reformat[key] ? "square-check" : "square").onClick(runAsync(async () => {
+        reformat[key] = !reformat[key];
+        await plugin.saveSettings();
+        plugin.refreshReformatActions();
+      }));
+    });
+  }
+  menu.addSeparator();
   menu.addItem((item) => {
     item
       .setTitle("自动排版设置")
@@ -59,7 +76,7 @@ function actionTitle(plugin: SimplePlugin): string {
   ].filter(Boolean);
   return [
     `点击对当前笔记自动排版${enabledSteps.length ? `：${enabledSteps.join(" → ")}` : ""}`,
-    "右键：打开自动排版设置",
+    "右键：快捷选择排版功能或打开设置",
   ].join("\n");
 }
 

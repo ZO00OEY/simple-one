@@ -63,7 +63,9 @@ try {
     return { status, json, headers: {} };
   };
   let localWrites = 0;
-  const adapter = { exists: async () => false, write: async () => { localWrites++; } };
+  const localFiles = new Map();
+  const adapter = { exists: async path => localFiles.has(path), read: async path => localFiles.get(path),
+    write: async (path, text) => { localWrites++; localFiles.set(path, text); } };
   const options = () => ({ token, repoUrl, branch, syncImages: true, syncPlugins, plugins: selectedPlugins, bound, ignorePatterns: [], cacheEnabled: true, trackPaths: true });
   const engine = new MobileGithub(adapter, ".obsidian", "simple-link", options, () => {});
   assert.equal(await engine.verifyToken(), "example");
@@ -87,15 +89,19 @@ try {
   writeAllowed = true; calls = [];
   const verified = await engine.verifyAccess();
   assert.equal(verified.branch, "main");
-  assert.equal(verified.files["note.md"].sha, "blob");
+  assert(!('files' in verified), 'access verification does not enumerate repository files');
+  assert(!('plugins' in verified));
+  assert(!calls.some(request => request.url.includes('/git/trees/')), 'access verification only reads commit/tree metadata');
   assert.equal(localWrites, 0, "verification must not bind or save live settings");
   const mutations = calls.filter((request) => request.method !== "GET");
   assert.equal(mutations.length, 1);
   assert(mutations[0].url.endsWith("/git/blobs"));
   assert.deepEqual(JSON.parse(mutations[0].body), { content: "", encoding: "utf-8" });
+  syncPlugins = true; selectedPlugins = ['cloud-only'];
+  await engine.prepareLocalRules();
   // A fresh device has no local plugin directory: listing must use cloud files alone.
   assert.deepEqual(await engine.listCloudPlugins(), ["cloud-only", "simple-link"]);
-  assert(!Object.keys(verified.files).some((path) => path.includes("/plugins/")));
+  assert(!Object.keys(verified.files ?? {}).some((path) => path.includes("/plugins/")));
   truncated = true;
   assert.deepEqual(await engine.listCloudPlugins(), ["cloud-only", "simple-link"], "truncated trees must discover excluded plugin directories");
   hasCloudPlugins = false;
@@ -115,6 +121,7 @@ try {
   assert.equal(firstSync.uploads.length, 0);
   assert.equal(firstSync.remoteDeletes.length, 0, "empty local vault must not delete cloud files on first sync");
   selectedPlugins = ["cloud-only", "simple-link"];
+  await adapter.write('.gitignore', await adapter.read('.gitignore') + '\n!.obsidian/plugins/simple-link/\n');
   const withSelf = await engine.preview();
   assert(withSelf.conflicts.some(c => c.label === ".obsidian/plugins/simple-link/main.js"));
   assert(withSelf.conflicts.some(c => c.label === ".obsidian/plugins/simple-link/manifest.json"));
@@ -126,6 +133,8 @@ try {
   }
   assert.equal(engine.allowed(".obsidian/plugins/simple-link/sync-settings.json"), true, "shared settings retain their existing behavior");
   selectedPlugins = [];
+  await adapter.write('.gitignore', await adapter.read('.gitignore') + '\n.obsidian/plugins/simple-link/\n');
+  await engine.preview();
   assert.equal(engine.allowed(".obsidian/plugins/simple-link/main.js"), false, "self must be explicitly selected");
   calls = [];
   await assert.rejects(engine.createPrivateRepository("invalid/name"), /仓库名称/);

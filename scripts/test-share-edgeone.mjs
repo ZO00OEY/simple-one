@@ -54,7 +54,7 @@ const context = vm.createContext({ module: { exports: {} }, require: () => obsid
 context.window = context;
 vm.runInContext(output.outputFiles[0].text, context);
 const { EdgeOneConnection, edgeOneRequest, matchesEdgeOneRepository, edgeOneDeploymentResult,
-  edgeOneWebsite, renderEdgeOneGuide, renderEdgeOneRow } = context.module.exports;
+  edgeOneWebsite, renderEdgeOneGuide } = context.module.exports;
 const site = { owner: 'fixture', repo: 'notes-share', branch: 'main', initialized: true };
 const project = { ProjectId: 'pages-fixture', Name: 'notes-share', Provider: 'Github',
   RepoOwner: 'fixture', RepoName: 'notes-share', RepoBranch: 'main', PresetDomain: 'fixture.edgeone.app', Area: 'mainland' };
@@ -315,8 +315,6 @@ try {
   const root = dom.window.document.querySelector('main');
   const ui = fixture(async () => ({ Projects: [], TotalCount: 0 }));
   await ui.connection.load();
-  renderEdgeOneRow(root, ui.connection, true, false, () => {});
-  assert(root.textContent.includes('开始接入引导'));
   root.replaceChildren(); renderEdgeOneGuide(root, ui.connection, true, false, () => {}, () => {});
   assert.equal(root.querySelectorAll('.simple-one-sync-setup-nav__step').length, 3);
   assert(root.querySelector('input[type="password"]'), 'missing saved token immediately shows the API Token form');
@@ -415,9 +413,6 @@ try {
   assert.equal(root.querySelectorAll('select').length, 0, 'existing project area is not presented as an editable setting');
   root.replaceChildren(); renderEdgeOneGuide(root, ui.connection, false, false, () => {}, () => {});
   assert([...root.querySelectorAll('.simple-share-edgeone-guide button')].every(button => button.disabled));
-  root.replaceChildren(); renderEdgeOneRow(root, initialize.connection, true, false, () => {});
-  assert(root.textContent.includes('检查网站部署')); assert(root.textContent.includes('正式网站已更新'));
-  assert(root.querySelector('.simple-share-edgeone-result').classList.contains('simple-share-success'));
   const callsBeforeReset = initialize.calls.length;
   await initialize.connection.resetGuide();
   assert.equal(initialize.connection.linked, false);

@@ -1,3 +1,4 @@
+import { remoteSnapshotRef } from "./directRemote";
 import { sanitizeNoteFilename } from "../../shared/noteFilename";
 
 type RunGit = (args: string[], authenticated?: boolean, stdin?: string) => Promise<string>;
@@ -23,7 +24,7 @@ export function hasCaseInsensitivePathCollisions(paths: string[]): boolean {
 }
 
 /** Rewrite trees without checking out Windows-incompatible paths or touching the local index. */
-export async function repairRemoteFilenames(git: RunGit, branch: string): Promise<string[]> {
+export async function repairRemoteFilenames(git: RunGit, branch: string, url: string): Promise<string[]> {
   const parent = (await git(["rev-parse", "FETCH_HEAD"])).trim();
   const renamed: string[] = [];
   const rewrite = async (tree: string, prefix: string): Promise<string> => {
@@ -72,10 +73,10 @@ export async function repairRemoteFilenames(git: RunGit, branch: string): Promis
     "Fix Windows-incompatible filenames for sync"])).trim();
   // A regular push rejects concurrent updates; never force-push a repair.
   try {
-    await git(["push", "origin", `${commit}:refs/heads/${branch}`], true);
+    await git(["push", "--no-follow-tags", "--", url, `${commit}:refs/heads/${branch}`], true);
   } catch (error) {
     throw new Error(`云端文件名修复提交未能推送，已停止下载合并；请检查写入权限或稍后重试。${String(error)}`);
   }
-  await git(["fetch", "origin", branch], true);
+  await git(["fetch", "--no-tags", "--refmap=", "--", url, `+refs/heads/${branch}:${await remoteSnapshotRef(url, branch)}`], true);
   return renamed;
 }

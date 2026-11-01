@@ -1,3 +1,4 @@
+import { styleActionButton } from "../shared/actionButton";
 import { Modal, Setting, TFolder, normalizePath, setIcon } from "obsidian";
 import type SimplePlugin from "../main";
 import type { SearchFolderSettings } from "../types";
@@ -147,14 +148,14 @@ export function registerSearchFolderFilter(plugin: SimplePlugin): () => void {
         });
       })
       .addButton((button) =>
-        button.setButtonText("选择").onClick(() => {
+        { styleActionButton(button.buttonEl, "text"); return (button.setButtonText("选择").onClick(() => {
           openSearchFolderPicker(
             plugin,
             plugin.settings.searchFolders.includeFolders,
             (folders) => updateConfig((config) => { config.includeFolders = folders; }),
             "选择限定搜索的文件夹"
           );
-        })
+        })); }
       );
 
     new Setting(panel)
@@ -170,14 +171,14 @@ export function registerSearchFolderFilter(plugin: SimplePlugin): () => void {
         });
       })
       .addButton((button) =>
-        button.setButtonText("选择").onClick(() => {
+        { styleActionButton(button.buttonEl, "text"); return (button.setButtonText("选择").onClick(() => {
           openSearchFolderPicker(
             plugin,
             plugin.settings.searchFolders.excludeFolders,
             (folders) => updateConfig((config) => { config.excludeFolders = folders; }),
             "选择需要屏蔽的文件夹"
           );
-        })
+        })); }
       );
 
     const togglePanel = (): void => {
@@ -446,7 +447,7 @@ class SearchFolderPickerModal extends Modal {
 
     const actions = this.contentEl.createDiv({ cls: "modal-button-container" });
     new Setting(actions)
-      .addButton((button) => button.setButtonText("取消").onClick(() => this.close()))
+      .addButton((button) => { styleActionButton(button.buttonEl, "text"); return (button.setButtonText("取消").onClick(() => this.close())); })
       .addButton((button) => button.setCta().setButtonText("保存").onClick(() => {
         const folders = [...this.selected].sort((a, b) => a.localeCompare(b, "zh-CN"));
         void this.onSave(folders);

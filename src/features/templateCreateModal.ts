@@ -1,4 +1,4 @@
-import { setDeleteIcon, setActionIcon, styleActionFooter } from "../shared/actionButton";
+import { setDeleteIcon, setActionIcon, styleActionFooter, styleActionButton } from "../shared/actionButton";
 import { AbstractInputSuggest, App, Modal, Notice, Setting, TFolder, normalizePath } from "obsidian";
 import { nextId, type TemplateCategory } from "../types";
 import { runAsync } from "../shared/async";
@@ -72,7 +72,8 @@ export class TemplateCreateModal extends Modal {
     const editor = tags.createSpan({ cls: "simple-template-property-editor" });
     editor.hidden = true;
     const input = editor.createEl("input", { type: "text", attr: { placeholder: "属性名称", "aria-label": "新增属性名称" } });
-    const confirm = editor.createEl("button", { text: "✓", attr: { type: "button", "aria-label": "确认添加属性" } });
+    const confirm = editor.createEl("button", { attr: { type: "button", title: "确认添加属性", "aria-label": "确认添加属性" } });
+    setActionIcon(confirm, "check", "bordered");
     const add = tags.createEl("button", { cls: "clickable-icon simple-template-property-add", attr: { type: "button", title: "添加属性", "aria-label": "添加属性" } });
     setActionIcon(add, "plus", "bordered");
     const renderTags = () => {
@@ -173,8 +174,8 @@ export class TemplateCreateModal extends Modal {
       }));
       footer.addClass("simple-template-import-footer");
     }
-    footer.createEl("button", { text: "取消" }).addEventListener("click", () => this.close());
-    const save = footer.createEl("button", { text: "保存", cls: "mod-cta" });
+    styleActionButton(footer.createEl("button", { text: "取消" }), "text").addEventListener("click", () => this.close());
+    const save = styleActionButton(footer.createEl("button", { text: "保存", cls: "mod-cta" }), "text");
     save.addEventListener("click", runAsync(async () => {
       if (!commitProperty()) return;
       if (!filenameField) {

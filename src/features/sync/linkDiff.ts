@@ -1,5 +1,7 @@
+export class LocalSyncEdit extends Error { constructor() { super("检测到同步期间的新修改，正在重新核对…"); this.name = "LocalSyncEdit"; } }
 import { DataAdapter } from "obsidian";
 import { defaultSyncIgnorePatterns, isPrivateSyncPath, shouldIgnore } from "./dirty";
+import { isFixedIgnored } from "./localIgnore";
 
 export interface MobileOptions {
   mode: "github" | "server";
@@ -86,20 +88,10 @@ export function safePath(path: string): string {
 
 export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "tif", "tiff", "avif", "heic", "heif", "apng"];
 
-export function mobileIgnores(options: MobileOptions, configDir: string, pluginId: string): string[] {
-  const generated = [...defaultSyncIgnorePatterns(configDir), ...options.ignorePatterns];
-  if (!options.syncImages) generated.push(...IMAGE_EXTENSIONS.map((ext) => `*.${ext}`));
-  if (!options.syncPlugins) generated.push(`${configDir}/plugins/`);
-  // The generated list is informational; hard exclusions below cannot be negated.
-  generated.push(`${configDir}/plugins/${pluginId}/sync-local.json`, `${configDir}/plugins/${pluginId}/link-state.json`,
-    `${configDir}/plugins/${pluginId}/link-state.json.recovery`, `${configDir}/plugins/${pluginId}/mobile-ignore.json`, ".git/", ".simple-link/");
-  generated.push(`!${configDir}/plugins/${pluginId}/sync-settings.json`);
-  return generated;
-}
-
-export function included(path: string, options: MobileOptions, configDir: string, pluginId: string): boolean {
+export function included(path: string, options: MobileOptions, configDir: string, pluginId: string, rootPatterns?: readonly string[]): boolean {
   if (path === `${configDir}/__link_scan__` || path === `${configDir}/plugins/__link_scan__` ||
       path === `${configDir}/plugins/${pluginId}/__link_scan__`) return true;
+  if (rootPatterns) return !isFixedIgnored(path, configDir) && !shouldIgnore(path, rootPatterns, configDir);
   const parts = path.split("/");
   if (parts.some((part) => part === ".git" || part === "node_modules" || part === ".codex") ||
       path === ".simple-link" || path.startsWith(".simple-link/") || path === ".gitshare" || path.startsWith(".gitshare/") ||
@@ -126,12 +118,6 @@ export function included(path: string, options: MobileOptions, configDir: string
 
 export function pluginSelected(selection: string[], id: string): boolean {
   return selection.includes("*") ? !selection.includes(`!${id}`) : selection.includes(id);
-}
-
-export function selectPlugin(selection: string[], id: string, checked: boolean): string[] {
-  const key = selection.includes("*") ? `!${id}` : id;
-  const include = selection.includes("*") ? !checked : checked;
-  return include ? [...new Set([...selection, key])] : selection.filter(item => item !== key);
 }
 
 export async function blobSha(bytes: Uint8Array): Promise<string> {
@@ -181,7 +167,7 @@ export async function listIncluded(adapter: DataAdapter, allowed: (path: string)
       const path = safePath(folder.replace(/^\/+/, ""));
       if ([".git", "node_modules", ".simple-link", ".trash", ".codex"].includes(path.split("/").pop()!)) continue;
       // Use a neutral filename so plugin selection and directory patterns prune subtrees.
-      if (allowed(`${path}/__link_scan__`)) await visit(path);
+      if (allowed(`${path}/`)) await visit(path);
     }
   };
   await visit("/");
@@ -190,30 +176,54 @@ export async function listIncluded(adapter: DataAdapter, allowed: (path: string)
 
 export async function scanCurrent(
   adapter: DataAdapter, state: LocalState, options: MobileOptions,
-  allowed: (path: string) => boolean, force: boolean, progress?: (message: string) => void, verifiedPaths: ReadonlySet<string> = new Set()
+  allowed: (path: string) => boolean, force: boolean, progress?: (message: string) => void, verifiedPaths: ReadonlySet<string> = new Set(), modeBase: Manifest = state.base
 ): Promise<Manifest> {
   const paths = await listIncluded(adapter, allowed);
   const current: Manifest = {};
+  const statBatchSize = 4;
+  let stats: Array<Awaited<ReturnType<DataAdapter["stat"]>>> = [];
+  let statsStart = 0;
   for (let index = 0; index < paths.length; index++) {
+    if (index >= statsStart + stats.length) {
+      statsStart = index;
+      const batch = paths.slice(index, index + statBatchSize);
+      const uncached = batch.findIndex(path => force || !options.cacheEnabled ||
+        state.cache[path]?.hashVersion !== SYNC_HASH_VERSION || !!state.dirty[path]);
+      if (uncached >= 0) batch.length = Math.max(1, uncached);
+      // Parallelize metadata only; settle every check before failing and keep file buffers sequential.
+      const results = await Promise.allSettled(batch.map(async path => adapter.stat(path)));
+      stats = results.map(result => {
+        if (result.status === "rejected") throw result.reason;
+        return result.value;
+      });
+    }
     const path = paths[index];
-    const before = await adapter.stat(path);
-    if (!before || before.type !== "file") throw new Error("扫描期间文件发生变化，请重试。");
+    const before = stats[index - statsStart];
+    if (!before || before.type !== "file") throw new LocalSyncEdit();
     const cached = state.cache[path];
-      const recentlyWritten = !!cached && !verifiedPaths.has(path) && Date.now() - Math.max(before.mtime, cached.mtime) < 2000;
+    const recentlyWritten = !!cached && !verifiedPaths.has(path) && Date.now() - Math.max(before.mtime, cached.mtime) < 2000;
     if (!force && options.cacheEnabled && cached?.hashVersion === SYNC_HASH_VERSION && !state.dirty[path] && !recentlyWritten &&
         before.mtime === cached.mtime && before.ctime === cached.ctime && before.size === cached.size) {
-      cached.mode = state.base[path]?.mode ?? cached.mode;
+      cached.mode = modeBase[path]?.mode ?? cached.mode;
       current[path] = { sha: cached.sha, rawSha: cached.rawSha, mode: cached.mode };
     } else {
+      // Reading/hashing can take time; do not reuse later files' prefetched metadata across that work.
+      stats = [];
       const dirtyRevision = state.dirty[path];
-      const bytes = new Uint8Array(await adapter.readBinary(path));
+      let bytes: Uint8Array;
+      try { bytes = new Uint8Array(await adapter.readBinary(path)); }
+      catch (error) {
+        const latest = await adapter.stat(path);
+        if (!latest || latest.type !== "file" || latest.mtime !== before.mtime || latest.ctime !== before.ctime || latest.size !== before.size) throw new LocalSyncEdit();
+        throw error;
+      }
       const canonical = syncBytes(bytes);
       const sha = await blobSha(canonical);
       const rawSha = canonical === bytes ? sha : await blobSha(bytes);
       const after = await adapter.stat(path);
       if (!after || before.mtime !== after.mtime || before.size !== after.size || before.ctime !== after.ctime ||
-          state.dirty[path] !== dirtyRevision) throw new Error("扫描期间文件正在修改，请稍后重试。");
-      const entry = { sha, rawSha, mode: state.base[path]?.mode ?? "100644", mtime: after.mtime, ctime: after.ctime,
+          state.dirty[path] !== dirtyRevision) throw new LocalSyncEdit();
+      const entry = { sha, rawSha, mode: modeBase[path]?.mode ?? "100644", mtime: after.mtime, ctime: after.ctime,
         size: after.size, verifiedAt: Date.now(), hashVersion: SYNC_HASH_VERSION };
       current[path] = { sha, rawSha, mode: entry.mode };
       if (options.cacheEnabled) state.cache[path] = entry;
@@ -222,6 +232,7 @@ export async function scanCurrent(
     if (index % 25 === 0) {
       progress?.(`核对本地文件 ${index + 1}/${paths.length}`);
       await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      stats = [];
     }
   }
   for (const path of Object.keys(state.cache)) if (!(path in current)) delete state.cache[path];
@@ -246,12 +257,17 @@ export function identityPaths(base: Manifest, current: Manifest, recorded: Recor
   }
   // Exact content fallback only for unambiguous disappeared/new pairs, never event tombstones.
   const missing = hashFallback ? Object.keys(base).filter((path) => mapping[path] === null && !(path in recorded)) : [];
-  const added = Object.keys(current).filter((path) => !claimed.has(path));
+  const sourceCounts = new Map<string, number>();
+  const targets = new Map<string, string | null>();
+  for (const path of missing) sourceCounts.set(base[path].sha, (sourceCounts.get(base[path].sha) ?? 0) + 1);
+  if (missing.length) for (const path of Object.keys(current)) if (!claimed.has(path)) {
+    const sha = current[path].sha;
+    targets.set(sha, targets.has(sha) ? null : path);
+  }
   for (const from of missing) {
-    const matches = added.filter((to) => !claimed.has(to) && current[to].sha === base[from].sha);
-    const sources = missing.filter((path) => base[path].sha === base[from].sha);
-    if (matches.length === 1 && sources.length === 1) {
-      mapping[from] = matches[0]; claimed.add(matches[0]);
+    const sha = base[from].sha, to = targets.get(sha);
+    if (to && sourceCounts.get(sha) === 1) {
+      mapping[from] = to; claimed.add(to);
     }
   }
   return mapping;

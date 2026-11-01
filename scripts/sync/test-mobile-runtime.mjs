@@ -36,21 +36,17 @@ try {
     vm.runInContext(source, context);
     assert.deepEqual(nodeLoads, [], `${platform}: plugin loads without Node modules`);
     const { LinkPlugin, MobileGithub, blobSha, ZoeySyncConflictPreviewModal, textParts, resolveTextParts } = context.module.exports;
-    // Completing (or leaving) the guide must redraw the sidebar after releasing
-    // the busy flag, even when no later vault event triggers another render.
-    for (const outcome of ["success", "cancel", "error"]) {
+    // Setup releases its busy state before a sidebar refresh that only reuses cached data.
+    for (const outcome of ["success", "error"]) {
       const finalViews = [];
       const engine = {
-        state: {}, load: async () => {}, verifyAccess: async () => ({ branch: "main" }),
+        state: {}, load: async () => {}, verifyToken: async () => 'fixture', verifyAccess: async () => ({ branch: "main" }),
         bind: async remote => remote,
-        preview: async () => {
-          if (outcome === "error") throw new Error("fixture preview failure");
-          return { conflicts: [], downloads: [], desired: {} };
+        prepareLocalRules: async () => {
+          if (outcome === "error") throw new Error("fixture rules failure");
         },
-        execute: async () => {
-          engine.state.baseCommitSha = "confirmed";
-          guide.syncActivity = { tone: "checking", text: "新基准已确认" };
-        },
+        preview: async () => { throw Error('setup must not preview sync'); },
+        execute: async () => { throw Error('setup must not execute sync'); },
         requiresPluginReload: () => false
       };
       const guide = {
@@ -64,18 +60,22 @@ try {
         setStatus: () => {}, recordSuccess: async () => {},
         lightweightFlow: () => ({ strategy: async () => "custom", confirm: async () => outcome !== "cancel" }),
         clearSyncActivity: LinkPlugin.prototype.clearSyncActivity,
-        refreshSyncView: async () => finalViews.push({
-          syncing: guide.syncing, switching: guide.switchingSyncMode, activity: guide.syncActivity
+        refreshSyncView: async reuseChanges => finalViews.push({
+          reuseChanges, syncing: guide.syncing, switching: guide.switchingSyncMode, activity: guide.syncActivity
         })
       };
       const completion = LinkPlugin.prototype.completeLightweightGuide.call(guide,
         { plugins: [], ignorePatterns: [], repoUrl: "https://github.com/example/vault" });
       if (outcome === "success") {
         await completion;
-        assert.equal(engine.state.baseCommitSha, "confirmed");
-      } else await assert.rejects(completion, outcome === "cancel" ? /同步已取消/ : /fixture preview failure/);
-      assert.deepEqual(finalViews, [{ syncing: false, switching: false, activity: undefined }],
-        `${platform}: guide ${outcome} clears activity and redraws an idle sidebar`);
+        assert.equal(engine.state.baseCommitSha, undefined);
+        assert.equal(guide.settings.lightweightGuideProgress.complete, true);
+      } else await assert.rejects(completion, /fixture rules failure/);
+      assert.deepEqual(finalViews, [{ reuseChanges: true, syncing: false, switching: false, activity: undefined }],
+        `${platform}: guide ${outcome} redraws an idle sidebar using cached changes`);
+      assert.equal(guide.syncing, false);
+      assert.equal(guide.switchingSyncMode, false);
+      assert.equal(guide.syncActivity, undefined);
     }
     let sideLeaf, revealed = 0, refreshed = 0, created = 0;
     const states = [];
@@ -223,7 +223,7 @@ try {
       assert.equal(resolveTextParts(parts, parts.filter(p => p.common === undefined).map(p => p.local)), local);
       assert.equal(resolveTextParts(parts, parts.filter(p => p.common === undefined).map(p => p.remote)), remote);
     }
-    const file = { path: "new:note.md", totalLines: 0, localUpdatedAt: "", remoteUpdatedAt: "", mergeable: true, blocks: [] };
+    const file = { path: "new:note.md" };
     let reads = 0, selected;
     const review = new ZoeySyncConflictPreviewModal({}, { files: [file], read: async () => {
       reads++; return { local: "head\none\ncommon\ntwo\ntail\n", remote: "head\nONE\ncommon\nTWO\ntail\n" };
@@ -231,15 +231,16 @@ try {
     review.render = () => {}; review.close = () => {}; review.active = true;
     review.resolve = choices => { selected = choices; };
     assert.equal(reads, 0, "collapsed review loads no file contents");
-    assert.equal(review.getReadyFiles().length, 0, "unexpanded file is not silently confirmed");
-    await review.loadFile(file);
-    assert.equal(file.blocks.length, 2);
-    review.selectBlock(file, 0, "local");
-    assert.equal(review.getReadyFiles().length, 0, "every difference needs a selection");
-    review.selectBlock(file, 1, "remote");
     review.applyReadyFiles();
-    assert.equal(selected[file.path].choice, "manual");
-    assert.equal(selected[file.path].text, "head\none\ncommon\nTWO\ntail\n");
+    assert.equal(selected, undefined, "a file is never silently confirmed");
+    await review.loadFile(file);
+    assert.equal(review.wholeContents.get(file.path).remote, "head\nONE\ncommon\nTWO\ntail\n");
+    review.applyReadyFiles();
+    assert.equal(selected, undefined, "reading a preview does not choose a version");
+    review.selectFile(file, "remote");
+    review.applyReadyFiles();
+    assert.equal(selected[file.path].choice, "remote");
+    assert.equal(selected[file.path].text, undefined, "whole-file selection does not reconstruct text");
   }
   console.log("Android/iOS browser runtime: module loading, hashing and quota checks passed");
 } finally {

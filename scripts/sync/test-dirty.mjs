@@ -66,7 +66,8 @@ assert.equal(module.shouldIgnore("folder/draft.tmp"), true);
 assert.equal(module.shouldIgnore("folder/node_modules/package/index.js"), true);
 assert.equal(module.shouldIgnore(".codex/output/preview.png"), true);
 assert.equal(module.shouldIgnore("attachments/image.png"), false);
-assert.equal(module.shouldIgnore("private/keep.md", ["private/", "!private/keep.md"]), false);
+assert.equal(module.shouldIgnore("private/keep.md", ["private/", "!private/keep.md"]), true);
+assert.equal(module.shouldIgnore("private/keep.md", ["private/*", "!private/keep.md"]), false);
 assert.equal(module.shouldIgnore("Notes/a.md"), false);
 const gitStatus = await loadModule("src/features/sync/gitStatus.ts");
 assert.deepEqual(gitStatus.parseGitStatus(" M changed.md\0?? new file.md\0D  old.md\0"), [
@@ -217,17 +218,18 @@ assert.equal(groupedPreview.optimizedIgnore, finalIgnore, "grouping must not rew
 assert(ruleGroups.setupFinalIgnoreRuleGroups(groupedPreview, ".custom", "远端自有规则").some(group => group.title === "远端自有规则"));
 console.log("Rule cards: categories, custom rules, negations and unchanged source order passed");
 
+const originalRules = "# user comment\n.custom/cache/\n/.custom/cache/\nnode_modules\nprivate/\n!private/keep.md\nprivate/\n";
 const organized = ruleGroups.organizedSetupIgnore(
-  "# user comment\n.custom/cache/\n/.custom/cache/\nnode_modules\nprivate/\n!private/keep.md\nprivate/\n",
+  originalRules,
   [{ directory: "plugins/example", gitIsDirectory: true }], ".custom");
-assert(organized.includes("# Git 元数据（默认排除）\n.git/\n"));
-assert(organized.indexOf("# 本机自有规则") < organized.indexOf("# Git 元数据（默认排除）"));
-assert(organized.includes("# 检测到的内嵌仓库（排除其 Git 历史与配置）\n/plugins/example/.git/"));
-assert.equal(organized.split(".custom/cache/").length, 2);
-assert.equal(organized.split("node_modules").length, 2);
-assert(organized.includes("# 本机自有规则\n# user comment\n!private/keep.md\nprivate/\n"));
+assert(organized.includes(originalRules.trimEnd()), "all original lines, duplicates and comments remain ordered");
+assert(organized.includes("# >>> simple-one:recommended"));
+assert(organized.includes("# >>> simple-one:original"));
+assert(organized.includes("# >>> simple-one:custom"));
+assert(organized.includes("# >>> simple-one:fixed"));
+assert(module.shouldIgnore("plugins/example/.git/config", organized.split("\n")));
 assert.equal(ruleGroups.organizedSetupIgnore(organized, [{ directory: "plugins/example", gitIsDirectory: true }], ".custom"), organized);
-console.log("Categorized ignore generation: deduplication, custom precedence and idempotence passed");
+console.log("Root ignore generation: four sections, original order, nested Git protection and idempotence passed");
 
 // The overview and ignore diff viewer must agree across Windows/Unix line endings.
 const ignoreDiff = await loadModule("src/features/sync/textDiff.ts");

@@ -38,6 +38,10 @@ export interface ShareManifest {
   enabled: boolean;
   defaultPath?: "root" | "source";
   holdToEdit?: boolean;
+  showCopyButton?: boolean;
+  showLinkButtons?: boolean;
+  linkChannels?: string[];
+  recordSharePerformance?: boolean;
   copyContent?: ShareCopyContent;
   customDomains?: ShareDomain[];
   edgeOneDomains?: ShareEdgeOneDomains;
@@ -65,6 +69,9 @@ export function parseManifest(source: string): ShareManifest {
   const value = JSON.parse(source) as ShareManifest;
   if (!value || value.version !== 1 || typeof value.enabled !== "boolean" || !value.site || !value.notes || typeof value.notes !== "object" || Array.isArray(value.notes)) throw new Error("分享清单版本或格式不正确；已停止覆盖。");
   if (value.holdToEdit !== undefined && typeof value.holdToEdit !== "boolean") throw new Error("长按目录编辑设置不正确。");
+  for (const key of ["showCopyButton", "showLinkButtons"] as const) if (value[key] !== undefined && typeof value[key] !== "boolean") throw new Error("分享按钮开关不正确。");
+  if (value.linkChannels !== undefined && (!Array.isArray(value.linkChannels) || value.linkChannels.some(key => typeof key !== "string"))) throw new Error("分享链接渠道不正确。");
+  if (value.recordSharePerformance !== undefined && typeof value.recordSharePerformance !== "boolean") throw new Error("分享性能记录设置不正确。");
   if (value.defaultPath !== undefined && value.defaultPath !== "root" && value.defaultPath !== "source") throw new Error("默认分享路径设置不正确。");
   if (value.copyContent !== undefined && (!value.copyContent || ["title", "github", "pageOne"].some(key => typeof value.copyContent![key as keyof ShareCopyContent] !== "boolean"))) throw new Error("复制内容设置不正确。");
   if (value.copyContent?.excludedDomains !== undefined && (!Array.isArray(value.copyContent.excludedDomains) || value.copyContent.excludedDomains.some(key => typeof key !== "string") || new Set(value.copyContent.excludedDomains).size !== value.copyContent.excludedDomains.length)) throw new Error("复制渠道设置不正确。");

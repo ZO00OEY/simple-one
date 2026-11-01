@@ -1,5 +1,5 @@
 // Sampled from the supplied Feishu screenshot, rather than an official palette specification.
-const FEISHU_TEXT = ["#1f2329", "#8f959e", "#e60f61", "#d83931", "#de7802", "#2ea121", "#168c54", "#2f80ed", "#6425d0"];
+const FEISHU_TEXT = ["#1f2329", "#8f959e", "#e60f61", "#ed393b", "#de7802", "#2ea121", "#168c54", "#2f80ed", "#824ce6"];
 const PERSONAL = ["#824ce6", "#e60f61", "#ed393b", "#168c54", "#2f80ed"];
 
 export function tintSelectionColor(color: string, amount: number): string {
@@ -13,8 +13,8 @@ export function selectionPalette(name: "feishu" | "personal"): { text: string[];
 
 export function selectionColors(favorites: string[] = []): string[] {
   // Coalesce the previous preset variants for display without changing saved favorites.
-  const aliases: Record<string, string> = { "#ed393b": "#d83931", "#245bdb": "#2f80ed", "#824ce6": "#6425d0" };
-  const colors = [...new Set([...FEISHU_TEXT, ...favorites].map(color => aliases[color.toLowerCase()] ?? color.toLowerCase()))].filter(color => /^#[\da-f]{6}$/i.test(color));
+  const aliases: Record<string, string> = { "#d83931": "#ed393b", "#245bdb": "#2f80ed", "#6425d0": "#824ce6" };
+  const colors = [...new Set([...FEISHU_TEXT, ...favorites].map(color => aliases[color.toLowerCase()] ?? color.toLowerCase()))].filter(color => /^#[\da-f]{6}$/i.test(color) && color !== "#f6f7f9");
   const hue = (color: string): number => {
     const [r, g, b] = [1, 3, 5].map(index => parseInt(color.slice(index, index + 2), 16));
     const max = Math.max(r, g, b), delta = max - Math.min(r, g, b);

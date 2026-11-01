@@ -1,11 +1,11 @@
 import { confirmAction } from "../shared/confirm";
-import { styleActionFooter } from "../shared/actionButton";
+import { styleActionFooter, styleActionButton } from "../shared/actionButton";
 import { Modal, Notice, TFile, TFolder, normalizePath } from "obsidian";
 import type SimplePlugin from "../main";
 import { applyModalScale, getMainAppWindow } from "../shared/popupSizing";
 
 type UnusedAttachment = {
-  file: TFile;
+  file: TFile | TFolder;
   checked: boolean;
 };
 
@@ -34,9 +34,47 @@ type InlineImagePlan = {
   checked: boolean;
 };
 
+type AutomaticRun = {
+  active: () => boolean;
+  paths?: ReadonlySet<string>;
+  notes?: TFile[];
+  canDelete?: (file: TFile | TFolder) => boolean;
+};
+
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif"]);
 const NOTE_EXTENSIONS = new Set(["md", "canvas", "base"]);
 const INLINE_IMAGE_RE = /!\[[^\]]*]\(data:image\/(png|jpe?g|gif|webp|bmp|svg\+xml);base64,([A-Za-z0-9+/=\r\n]+)\)/g;
+
+export const DEFAULT_ATTACHMENT_FOLDER = "999 attachment";
+const referenceReadiness = new WeakMap<SimplePlugin, () => boolean>();
+export function registerAttachmentCleanupGuard(plugin: SimplePlugin, ready: () => boolean): void {
+  referenceReadiness.set(plugin, ready);
+}
+function attachmentReferencesReady(plugin: SimplePlugin): boolean {
+  return referenceReadiness.get(plugin)?.() === true
+    && plugin.app.vault.getMarkdownFiles().every(file => Boolean(plugin.app.metadataCache.getFileCache(file)));
+}
+const REFERENCES_PENDING = "笔记引用索引尚未完成，请等待后重新扫描附件。";
+
+export async function initializeAttachmentDefaults(plugin: SimplePlugin): Promise<void> {
+  if (plugin.settings.attachmentDefaultsInitialized) return;
+  const vault = plugin.app.vault as typeof plugin.app.vault & {
+    getConfig?: (key: string) => unknown;
+    setConfig?: (key: string, value: string) => void | Promise<void>;
+  };
+  if (!vault.getConfig) return;
+  const current = vault.getConfig("attachmentFolderPath");
+  if (current === undefined || current === null || current === "" || current === "/") {
+    if (!vault.setConfig) return;
+    const folder = vault.getAbstractFileByPath(DEFAULT_ATTACHMENT_FOLDER);
+    if (folder && !(folder instanceof TFolder)) throw new Error(`${DEFAULT_ATTACHMENT_FOLDER} 已被文件占用，请手动选择附件文件夹`);
+    if (!folder) await vault.createFolder(DEFAULT_ATTACHMENT_FOLDER);
+    await vault.setConfig("attachmentFolderPath", DEFAULT_ATTACHMENT_FOLDER);
+    if (vault.getConfig("attachmentFolderPath") !== DEFAULT_ATTACHMENT_FOLDER) throw new Error("Obsidian 未应用默认附件目录设置");
+  }
+  plugin.settings.attachmentDefaultsInitialized = true;
+  await plugin.saveSettings();
+}
 
 export type AttachmentLocation =
   | { mode: "fixed-folder"; raw: string; folder: string }
@@ -72,27 +110,36 @@ export function describeAttachmentLocation(location: AttachmentLocation): string
   }
 }
 
-export async function checkUnusedAttachments(plugin: SimplePlugin): Promise<void> {
-  const location = requireAttachmentMode(plugin, "清理未引用附件", ["fixed-folder"]);
+export async function checkUnusedAttachments(plugin: SimplePlugin, automatic?: AutomaticRun): Promise<void> {
+  const location = requireAttachmentMode(plugin, "清理未引用附件与空文件夹", ["fixed-folder"], Boolean(automatic));
   if (!location || location.mode !== "fixed-folder") return;
-  const folder = getFixedAttachmentFolder(plugin, location);
+  const folder = getFixedAttachmentFolder(plugin, location, Boolean(automatic));
   if (!folder) return;
+  if (!attachmentReferencesReady(plugin)) { if (!automatic) new Notice(REFERENCES_PENDING); return; }
 
   const used = referencedPaths(plugin);
-  const items = [...filesInFolder(folder), ...rootAttachmentFiles(plugin).filter(isImage)]
+  const items: UnusedAttachment[] = [...filesInFolder(folder), ...rootAttachmentFiles(plugin).filter(isImage)]
     .filter((file) => isAttachmentCandidate(file) && !used.has(file.path))
     .map((file) => ({ file, checked: isImage(file) && !isRootFile(file) }));
+  items.push(...(await emptyFoldersInFolder(plugin, folder)).map((file) => ({ file, checked: true })));
+  if (!attachmentReferencesReady(plugin)) { if (!automatic) new Notice(REFERENCES_PENDING); return; }
+
+  if (automatic) {
+    const selected = items.filter(item => item.checked && automatic.canDelete?.(item.file));
+    if (automatic.active()) await deleteUnusedAttachments(plugin, selected, automatic.active);
+    return;
+  }
 
   if (!items.length) {
-    new Notice("未发现未引用附件");
+    new Notice("未发现未引用附件或空文件夹");
     return;
   }
 
   new UnusedAttachmentModal(plugin, items).open();
 }
 
-export async function planAttachmentImageRename(plugin: SimplePlugin): Promise<void> {
-  const location = requireAttachmentMode(plugin, "图片重命名并按笔记归位", ["fixed-folder", "same-folder", "current-subfolder"]);
+export async function planAttachmentImageRename(plugin: SimplePlugin, automatic?: AutomaticRun): Promise<void> {
+  const location = requireAttachmentMode(plugin, "重命名图片并整理存放", ["fixed-folder", "same-folder", "current-subfolder"], Boolean(automatic));
   if (!location) return;
 
   const references = attachmentReferences(plugin);
@@ -100,54 +147,51 @@ export async function planAttachmentImageRename(plugin: SimplePlugin): Promise<v
   const counters = new Map<string, number>();
   const existingTargets = new Set(plugin.app.vault.getFiles().map((file) => file.path));
   const plans: RenamePlan[] = [];
-  const candidates = imageRenameCandidates(plugin, location, references);
-
-  for (const file of candidates) {
-    if (!isImage(file)) continue;
-
+  for (const file of organizationCandidates(plugin, location, references, Boolean(automatic))) {
+    if (!isImage(file) || (automatic?.paths && !automatic.paths.has(file.path))) continue;
     const source = pickSourceNote(plugin, file, references.get(file.path), location);
     if (!source) continue;
-
-    const targetFolder = imageTargetFolderForSource(plugin, location, file, source);
-    const desiredPath = looksMeaningless(file.basename)
-      ? nextNumberedPath(
-          targetFolder,
-          attachmentNameBaseForSource(plugin, source, ambiguousNameBases),
-          file.extension,
-          existingTargets,
-          counters
-        )
+    const targetFolder = location.mode === "fixed-folder"
+      ? attachmentTargetFolder(location, source, plugin.settings.imageAttachmentFolderMode === "note")
+      : imageTargetFolderForSource(plugin, location, file, source);
+    const nameBase = attachmentNameBaseForSource(plugin, source, ambiguousNameBases);
+    const alreadyNamed = file.basename.startsWith(`${nameBase} `) && /^\d+$/.test(file.basename.slice(nameBase.length + 1));
+    const desiredPath = !alreadyNamed && looksMeaningless(file.basename)
+      ? nextNumberedPath(targetFolder, nameBase, file.extension, existingTargets, counters)
       : normalizePath(`${targetFolder}/${file.name}`);
-    const targetPath = desiredPath === file.path ? desiredPath : uniquePath(desiredPath, existingTargets);
+    const targetPath = file.path === desiredPath ? desiredPath : uniquePath(desiredPath, existingTargets);
     existingTargets.add(targetPath);
     if (targetPath !== file.path) plans.push({ file, source, targetPath, checked: true });
   }
-
-  if (!plans.length) {
-    new Notice("未发现需要重命名或归位的图片");
+  if (automatic) {
+    await applyAutomaticMoves(plugin, plans, automatic.active);
     return;
   }
-
-  new RenamePlanModal(plugin, plans).open();
+  if (!plans.length) {
+    new Notice("未发现需要重命名或整理的图片");
+    return;
+  }
+  new ImageRenameModal(plugin, plans).open();
 }
 
-export async function planAttachmentOrganization(plugin: SimplePlugin): Promise<void> {
-  const location = requireAttachmentMode(plugin, "非图片附件按笔记归位", ["fixed-folder", "current-subfolder"]);
+export async function planAttachmentOrganization(plugin: SimplePlugin, automatic?: AutomaticRun): Promise<void> {
+  const location = requireAttachmentMode(plugin, "分类附件", ["fixed-folder", "current-subfolder"], Boolean(automatic));
   if (!location) return;
 
   const references = attachmentReferences(plugin);
   const existingTargets = new Set(plugin.app.vault.getFiles().map((file) => file.path));
   const plans: AttachmentOrganizePlan[] = [];
-  const candidates = organizationCandidates(plugin, location, references);
+  const candidates = organizationCandidates(plugin, location, references, Boolean(automatic));
 
   for (const file of candidates) {
-    // Markdown files are notes, and images have their own rename/classify flow.
-    if (!isAttachmentCandidate(file) || isImage(file)) continue;
+    if (!isAttachmentCandidate(file) || isImage(file) || (automatic?.paths && !automatic.paths.has(file.path))) continue;
     const linkedNotes = (references.get(file.path) ?? []).sort((a, b) => a.path.localeCompare(b.path));
     const source = pickSourceNote(plugin, file, linkedNotes, location);
     if (!source) continue;
 
-    const targetFolder = preciseTargetFolderForSource(location, source);
+    const targetFolder = location.mode === "fixed-folder"
+      ? attachmentTargetFolder(location, source, plugin.settings.attachmentFolderMode !== "category")
+      : preciseTargetFolderForSource(location, source);
     const desiredPath = normalizePath(`${targetFolder}/${file.name}`);
     const targetPath = file.path === desiredPath ? desiredPath : uniquePath(desiredPath, existingTargets);
     existingTargets.add(targetPath);
@@ -156,30 +200,31 @@ export async function planAttachmentOrganization(plugin: SimplePlugin): Promise<
     }
   }
 
+  if (automatic) {
+    await applyAutomaticMoves(plugin, plans, automatic.active);
+    return;
+  }
   if (!plans.length) {
-    new Notice("未发现需要归位的非图片附件");
+    new Notice("未发现需要分类的非图片附件");
     return;
   }
 
   new AttachmentOrganizationModal(plugin, plans).open();
 }
 
-export async function planInlineImageExtraction(plugin: SimplePlugin): Promise<void> {
-  const location = requireAttachmentMode(plugin, "内嵌图片转为附件", ["fixed-folder", "same-folder", "current-subfolder"]);
+export async function planInlineImageExtraction(plugin: SimplePlugin, automatic?: AutomaticRun): Promise<void> {
+  const location = requireAttachmentMode(plugin, "内嵌 Base64 图片转为常规图片", ["fixed-folder", "same-folder", "current-subfolder"], Boolean(automatic));
   if (!location) return;
   const existingTargets = new Set(plugin.app.vault.getFiles().map((file) => file.path));
   const counters = new Map<string, number>();
-  const ambiguousNameBases = ambiguousAttachmentNameBases(plugin);
   const plans: InlineImagePlan[] = [];
 
-  for (const file of plugin.app.vault.getMarkdownFiles()) {
+  for (const file of automatic?.notes ?? plugin.app.vault.getMarkdownFiles()) {
+    if (automatic && !automatic.active()) return;
     const content = await plugin.app.vault.cachedRead(file);
     for (const match of content.matchAll(INLINE_IMAGE_RE)) {
       const mimeExt = match[1].toLowerCase() === "svg+xml" ? "svg" : match[1].toLowerCase().replace("jpeg", "jpg");
-      const nameBase = attachmentNameBaseForSource(plugin, file, ambiguousNameBases);
-      const targetPath = location.mode === "fixed-folder"
-        ? nextNumberedPath(imageTargetFolderForSource(plugin, location, file, file), nameBase, mimeExt, existingTargets, counters)
-        : await nextObsidianAttachmentPath(plugin, file, nameBase, mimeExt, existingTargets, counters);
+      const targetPath = await nextObsidianAttachmentPath(plugin, file, safeName(file.basename), mimeExt, existingTargets, counters);
       existingTargets.add(targetPath);
       plans.push({
         source: file,
@@ -193,6 +238,10 @@ export async function planInlineImageExtraction(plugin: SimplePlugin): Promise<v
     }
   }
 
+  if (automatic) {
+    await applyInlineImages(plugin, plans, automatic.active);
+    return;
+  }
   if (!plans.length) {
     new Notice("未发现 base64 内嵌图片");
     return;
@@ -201,21 +250,22 @@ export async function planInlineImageExtraction(plugin: SimplePlugin): Promise<v
   new InlineImagePlanModal(plugin, plans).open();
 }
 
-function getFixedAttachmentFolder(plugin: SimplePlugin, location: Extract<AttachmentLocation, { mode: "fixed-folder" }>): TFolder | null {
+function getFixedAttachmentFolder(plugin: SimplePlugin, location: Extract<AttachmentLocation, { mode: "fixed-folder" }>, silent = false): TFolder | null {
   const folder = plugin.app.vault.getAbstractFileByPath(location.folder);
   if (folder instanceof TFolder) return folder;
-  new Notice(`附件目录不存在：${location.folder}`);
+  if (!silent) new Notice(`附件目录不存在：${location.folder}`);
   return null;
 }
 
 function requireAttachmentMode(
   plugin: SimplePlugin,
   feature: string,
-  allowed: AttachmentLocation["mode"][]
+  allowed: AttachmentLocation["mode"][],
+  silent = false
 ): AttachmentLocation | null {
   const location = readObsidianAttachmentLocation(plugin);
   if (allowed.includes(location.mode)) return location;
-  new Notice(`${feature}在“${describeAttachmentLocation(location)}”模式下已禁用`);
+  if (!silent) new Notice(`${feature}在“${describeAttachmentLocation(location)}”模式下已禁用`);
   return null;
 }
 
@@ -226,6 +276,49 @@ function filesInFolder(folder: TFolder): TFile[] {
     if (child instanceof TFolder) out.push(...filesInFolder(child));
   }
   return out;
+}
+
+async function emptyFoldersInFolder(plugin: SimplePlugin, root: TFolder): Promise<TFolder[]> {
+  const empty: TFolder[] = [];
+  const paths = new Set<string>();
+  const visit = async (folder: TFolder): Promise<void> => {
+    for (const child of folder.children) {
+      if (child instanceof TFolder) await visit(child);
+    }
+    if (folder === root || folder.children.some((child) => !paths.has(child.path))) return;
+    // Check disk too: Obsidian may omit hidden or unsupported files from its tree.
+    const listing = await plugin.app.vault.adapter.list(folder.path);
+    if (listing.files.length || listing.folders.some((path) => !paths.has(path))) return;
+    paths.add(folder.path);
+    empty.push(folder);
+  };
+  await visit(root);
+  return empty;
+}
+
+async function deleteUnusedAttachments(plugin: SimplePlugin, selected: UnusedAttachment[], active = () => true): Promise<{ files: number; folders: number }> {
+  const deleted = { files: 0, folders: 0 };
+  // Children must be removed first; a deselected child keeps its parent nonempty.
+  const ordered = [...selected].sort((a, b) => b.file.path.split("/").length - a.file.path.split("/").length);
+  for (const item of ordered) {
+    if (!active()) break;
+    if (!attachmentReferencesReady(plugin)) throw new Error(REFERENCES_PENDING);
+    if (plugin.app.vault.getAbstractFileByPath(item.file.path) !== item.file) continue;
+    if (item.file instanceof TFolder) {
+      if (item.file.children.length) continue;
+      const listing = await plugin.app.vault.adapter.list(item.file.path);
+      if (listing.files.length || listing.folders.length) continue;
+      if (!active()) break;
+      if (!attachmentReferencesReady(plugin)) throw new Error(REFERENCES_PENDING);
+      await plugin.app.fileManager.trashFile(item.file);
+      deleted.folders++;
+    } else {
+      if (referencedPaths(plugin).has(item.file.path)) continue;
+      await plugin.app.fileManager.trashFile(item.file);
+      deleted.files++;
+    }
+  }
+  return deleted;
 }
 
 function isAttachmentCandidate(file: TFile): boolean {
@@ -322,6 +415,12 @@ function imageTargetFolderForSource(plugin: SimplePlugin, location: AttachmentLo
   return attachment.parent?.path === "/" ? "" : attachment.parent?.path ?? "";
 }
 
+function attachmentTargetFolder(location: Extract<AttachmentLocation, { mode: "fixed-folder" }>, source: TFile, noteDirectory: boolean): string {
+  if (noteDirectory) return preciseTargetFolderForSource(location, source);
+  const parent = source.parent?.path;
+  return normalizePath([location.folder, parent && parent !== "/" ? safePath(parent) : ""].filter(Boolean).join("/"));
+}
+
 function preciseTargetFolderForSource(location: AttachmentLocation, source: TFile): string {
   const noteFolderName = safeName(source.basename);
   if (location.mode === "fixed-folder") {
@@ -363,27 +462,14 @@ function isPathInside(path: string, folder: string): boolean {
   return path === normalizedFolder || path.startsWith(`${normalizedFolder}/`);
 }
 
-function imageRenameCandidates(
-  plugin: SimplePlugin,
-  location: AttachmentLocation,
-  references: Map<string, TFile[]>
-): TFile[] {
-  if (location.mode === "fixed-folder") {
-    const folder = getFixedAttachmentFolder(plugin, location);
-    return folder ? [...filesInFolder(folder), ...rootAttachmentFiles(plugin)] : [];
-  }
-  return referencedAttachmentFiles(plugin, references).filter((file) =>
-    Boolean(pickSourceNote(plugin, file, references.get(file.path), location))
-  );
-}
-
 function organizationCandidates(
   plugin: SimplePlugin,
   location: AttachmentLocation,
-  references: Map<string, TFile[]>
+  references: Map<string, TFile[]>,
+  silent = false
 ): TFile[] {
   if (location.mode === "fixed-folder") {
-    const folder = getFixedAttachmentFolder(plugin, location);
+    const folder = getFixedAttachmentFolder(plugin, location, silent);
     return folder ? [...filesInFolder(folder), ...rootAttachmentFiles(plugin)] : [];
   }
   return referencedAttachmentFiles(plugin, references).filter((file) =>
@@ -499,10 +585,10 @@ function attachmentModalHeader(modal: Modal, plugin: SimplePlugin, title: string
 
 function attachmentModalActions<T extends { checked: boolean }>(modal: Modal, items: T[], title: string, apply: () => Promise<void>): void {
   const actions = modal.contentEl.createDiv({ cls: "simple-json-actions simple-json-modal-footer" });
-  actions.createEl("button", { text: "全选" }).addEventListener("click", () => setChecked(modal.contentEl, items, true));
-  actions.createEl("button", { text: "反选" }).addEventListener("click", () => invertChecked(modal.contentEl, items));
-  actions.createEl("button", { text: "取消" }).addEventListener("click", () => modal.close());
-  const execute = actions.createEl("button", { text: title, cls: title.startsWith("删除") ? "mod-warning" : "mod-cta" });
+  styleActionButton(actions.createEl("button", { text: "全选" }), "text").addEventListener("click", () => setChecked(modal.contentEl, items, true));
+  styleActionButton(actions.createEl("button", { text: "反选" }), "text").addEventListener("click", () => invertChecked(modal.contentEl, items));
+  styleActionButton(actions.createEl("button", { text: "取消" }), "text").addEventListener("click", () => modal.close());
+  const execute = styleActionButton(actions.createEl("button", { text: title, cls: title.startsWith("删除") ? "mod-warning" : "mod-cta" }), "text");
   execute.addEventListener("click", () => {
     execute.disabled = true;
     void apply().catch(error => new Notice(error instanceof Error ? error.message : String(error)))
@@ -517,21 +603,15 @@ class UnusedAttachmentModal extends Modal {
   }
 
   onOpen(): void {
-    attachmentModalHeader(this, this.plugin, "未引用附件", "附件目录内的图片默认勾选；根目录图片及 JSON、txt 等非图片默认不勾选。确认后删除到 Obsidian 回收站。");
-    renderChecklist(this.contentEl, this.items, (item) => item.file.path);
+    attachmentModalHeader(this, this.plugin, "清理未引用附件与空文件夹", "附件目录内的图片和空文件夹（含整条为空的子目录链）默认勾选；根目录图片及非图片附件默认不勾选。保留附件根目录，确认后移入 Obsidian 回收站；执行前再次检查，跳过已变化的项目。");
+    renderChecklist(this.contentEl, this.items, (item) => item.file instanceof TFolder ? `${item.file.path}/\n空文件夹（含仅包含空子目录的文件夹）` : item.file.path);
     attachmentModalActions(this, this.items, "删除勾选项", async () => {
       const selected = this.items.filter((item) => item.checked);
       if (!selected.length) return;
-      if (!await confirmAction(this.plugin.app, `删除选中的 ${selected.length} 个未引用附件？`)) return;
-      const used = referencedPaths(this.plugin);
-      let deleted = 0;
-      for (const item of selected) {
-        if (used.has(item.file.path)) continue;
-        if (this.plugin.app.vault.getAbstractFileByPath(item.file.path) !== item.file) continue;
-        await this.plugin.app.fileManager.trashFile(item.file);
-        deleted++;
-      }
-      new Notice(`已删除 ${deleted} 个附件；跳过 ${selected.length - deleted} 个已变化或已被引用的附件`);
+      const folders = selected.filter((item) => item.file instanceof TFolder).length;
+      if (!await confirmAction(this.plugin.app, `将选中的 ${selected.length - folders} 个未引用附件、${folders} 个空文件夹移入 Obsidian 回收站？`)) return;
+      const deleted = await deleteUnusedAttachments(this.plugin, selected);
+      new Notice(`已删除 ${deleted.files} 个附件、${deleted.folders} 个空文件夹；跳过 ${selected.length - deleted.files - deleted.folders} 个已变化、已被引用或非空的项目`);
       this.close();
     });
   }
@@ -561,7 +641,7 @@ async function applyAttachmentMoves(
   }
 }
 
-class RenamePlanModal extends Modal {
+class ImageRenameModal extends Modal {
   private progressEl: HTMLElement | null = null;
 
   constructor(private plugin: SimplePlugin, private plans: RenamePlan[]) {
@@ -569,7 +649,7 @@ class RenamePlanModal extends Modal {
   }
 
   onOpen(): void {
-    attachmentModalHeader(this, this.plugin, "图片重命名并按笔记归位清单", "只处理勾选项；执行时会让 Obsidian 更新引用。", true);
+    attachmentModalHeader(this, this.plugin, "重命名图片并整理存放清单", "根据引用笔记修改自动生成的图片名，保留有意义的原名；按所选目录规则整理存放，重名时自动避让。", true);
     renderRenameChecklist(this.contentEl, this.plans);
     attachmentModalActions(this, this.plans, "执行", () => this.applyPlans());
     this.progressEl = this.contentEl.createDiv({ cls: "simple-attachment-progress" });
@@ -577,7 +657,7 @@ class RenamePlanModal extends Modal {
 
   private async applyPlans(): Promise<void> {
     await applyAttachmentMoves(this, this.plugin, this.plans, this.progressEl,
-      count => `重命名/移动选中的 ${count} 张图片？`, count => `已处理 ${count} 张图片`);
+      count => `重命名并整理选中的 ${count} 张图片？`, count => `已处理 ${count} 张图片`);
   }
 }
 
@@ -589,7 +669,7 @@ class AttachmentOrganizationModal extends Modal {
   }
 
   onOpen(): void {
-    attachmentModalHeader(this, this.plugin, "非图片附件按笔记归位清单", "按引用笔记归位至附件目录/笔记所在目录/笔记名；多处引用时采用路径最靠前的笔记。", true);
+    attachmentModalHeader(this, this.plugin, "分类附件清单", "非图片附件保留原名，按所选目录规则分类；多处引用时采用路径最靠前的笔记，重名时添加数字避让。", true);
     renderRenameChecklist(this.contentEl, this.plans);
     attachmentModalActions(this, this.plans, "执行", () => this.applyPlans());
     this.progressEl = this.contentEl.createDiv({ cls: "simple-attachment-progress" });
@@ -597,8 +677,59 @@ class AttachmentOrganizationModal extends Modal {
 
   private async applyPlans(): Promise<void> {
     await applyAttachmentMoves(this, this.plugin, this.plans, this.progressEl,
-      count => `将选中的 ${count} 个附件按笔记归位？`, count => `已归位 ${count} 个附件`);
+      count => `分类选中的 ${count} 个非图片附件？`, count => `已处理 ${count} 个非图片附件`);
   }
+}
+
+async function applyAutomaticMoves(plugin: SimplePlugin, plans: RenamePlan[], active: () => boolean): Promise<void> {
+  for (const plan of plans) {
+    if (!active()) return;
+    if (plugin.app.vault.getAbstractFileByPath(plan.file.path) !== plan.file) continue;
+    if (!attachmentReferences(plugin).get(plan.file.path)?.includes(plan.source)) continue;
+    if (plugin.app.vault.getAbstractFileByPath(plan.targetPath)) continue;
+    await ensureFolder(plugin, plan.targetPath.split("/").slice(0, -1).join("/"));
+    if (!active()) return;
+    await plugin.app.fileManager.renameFile(plan.file, plan.targetPath);
+  }
+}
+
+async function applyInlineImages(
+  plugin: SimplePlugin, selected: InlineImagePlan[], active = () => true,
+  progress?: (text: string) => void, onConverted?: (count: number) => void,
+): Promise<number> {
+  const groups = [...groupBySource(selected)];
+  const replace = (content: string, plans: InlineImagePlan[]): string => {
+    for (const plan of [...plans].sort((a, b) => b.start - a.start)) {
+      if (content.slice(plan.start, plan.end) !== plan.match) throw new Error(`笔记已变化，请重新扫描：${plan.source.path}`);
+      content = `${content.slice(0, plan.start)}![[${plan.targetPath}]]${content.slice(plan.end)}`;
+    }
+    return content;
+  };
+  for (const [source, plans] of groups) replace(await plugin.app.vault.read(source), plans);
+  let converted = 0, completed = 0;
+  for (const [source, plans] of groups) {
+    if (!active()) break;
+    const created: TFile[] = [];
+    try {
+      for (const plan of plans) {
+        if (!active()) throw new Error("图片转换已停止");
+        progress?.(`处理进度：${++completed} / ${selected.length}`);
+        await ensureFolder(plugin, plan.targetPath.split("/").slice(0, -1).join("/"));
+        created.push(await plugin.app.vault.createBinary(plan.targetPath, base64ToArrayBuffer(plan.base64)));
+      }
+      if (!active()) throw new Error("图片转换已停止");
+      await plugin.app.vault.process(source, content => {
+        if (!active()) throw new Error("图片转换已停止");
+        return replace(content, plans);
+      });
+      converted += plans.length;
+      onConverted?.(converted);
+    } catch (error) {
+      for (const file of created) await plugin.app.fileManager.trashFile(file);
+      throw error;
+    }
+  }
+  return converted;
 }
 
 class InlineImagePlanModal extends Modal {
@@ -609,7 +740,7 @@ class InlineImagePlanModal extends Modal {
   }
 
   onOpen(): void {
-    attachmentModalHeader(this, this.plugin, "内嵌图片转为附件清单", "把 Markdown 中直接嵌入的 base64 图片保存为独立附件，并替换为 Obsidian 图片链接。");
+    attachmentModalHeader(this, this.plugin, "内嵌 Base64 图片转为常规图片", "将 Markdown 中的 Base64 图片保存为图片文件，并将原内嵌内容替换为图片链接。");
     renderChecklist(this.contentEl, this.plans, (plan) => `${plan.source.path}\n→ ${plan.targetPath}`);
     attachmentModalActions(this, this.plans, "执行勾选项", () => this.applyPlans());
     this.progressEl = this.contentEl.createDiv({ cls: "simple-attachment-progress" });
@@ -618,41 +749,15 @@ class InlineImagePlanModal extends Modal {
   private async applyPlans(): Promise<void> {
     const selected = this.plans.filter((plan) => plan.checked);
     if (!selected.length) return;
-    if (!await confirmAction(this.plugin.app, `将选中的 ${selected.length} 张内嵌图片保存为附件？`)) return;
+    if (!await confirmAction(this.plugin.app, `将选中的 ${selected.length} 张内嵌 Base64 图片转换为常规图片？`)) return;
 
     let converted = 0;
     try {
-      const groups = [...groupBySource(selected)];
-      const replace = (content: string, plans: InlineImagePlan[]): string => {
-        for (const plan of [...plans].sort((a, b) => b.start - a.start)) {
-          if (content.slice(plan.start, plan.end) !== plan.match) {
-            throw new Error(`笔记已变化，请重新扫描：${plan.source.path}`);
-          }
-          content = `${content.slice(0, plan.start)}![[${plan.targetPath}]]${content.slice(plan.end)}`;
-        }
-        return content;
-      };
-      for (const [source, plans] of groups) replace(await this.plugin.app.vault.read(source), plans);
-
-      let completed = 0;
-      for (const [source, plans] of groups) {
-        const created: TFile[] = [];
-        try {
-          for (const plan of plans) {
-            if (this.progressEl) this.progressEl.setText(`处理进度：${++completed} / ${selected.length}`);
-            await ensureFolder(this.plugin, plan.targetPath.split("/").slice(0, -1).join("/"));
-            created.push(await this.plugin.app.vault.createBinary(plan.targetPath, base64ToArrayBuffer(plan.base64)));
-          }
-          await this.plugin.app.vault.process(source, (content) => replace(content, plans));
-          converted += plans.length;
-        } catch (error) {
-          for (const file of created) await this.plugin.app.fileManager.trashFile(file);
-          throw error;
-        }
-      }
+      await applyInlineImages(this.plugin, selected, () => true,
+        text => this.progressEl?.setText(text), count => { converted = count; });
 
       this.close();
-      new Notice(`已将 ${selected.length} 张内嵌图片保存为附件`);
+      new Notice(`已将 ${selected.length} 张内嵌 Base64 图片转换为常规图片`);
     } catch (error) {
       if (converted) {
         this.close();

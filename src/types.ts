@@ -102,15 +102,32 @@ export interface TemplateCategory {
 }
 
 export interface TypographySettings {
+  latinFontEnabled: boolean;
+  latinFont: "default" | "Source Sans 3" | "Times New Roman" | "Georgia" | "Source Serif 4" | "Segoe UI";
+  interfaceFontEnabled: boolean;
+  textFontEnabled: boolean;
+  interfaceFont: "default" | "yahei" | "jinkai" | "wenkai" | "notoSerif" | "notoSans";
+  textFont: "default" | "yahei" | "jinkai" | "wenkai" | "notoSerif" | "notoSans";
   enabled: boolean;
   fontSize: number;
   lineHeight: number;
   letterSpacing: number;
+  latinLetterSpacing?: number;
+  latinLetterSpacingEnabled?: boolean;
+  letterSpacingUnit?: "em";
   paragraphSpacing: number;
   paragraphStyle: "spaced" | "indent";
 }
 
 export interface SimplePluginSettings {
+  enableAttachmentReferenceJump: boolean;
+  autoCleanAttachments: boolean;
+  autoOrganizeImages: boolean;
+  autoOrganizeAttachments: boolean;
+  autoExtractInlineImages: boolean;
+  attachmentDefaultsInitialized: boolean;
+  imageAttachmentFolderMode: "category" | "note";
+  attachmentFolderMode: "category" | "note";
   lastSettingsTab?: string;
   showSyncSharingEntry: boolean;
   showSharingEntry: boolean;
@@ -286,6 +303,7 @@ export interface QuickCopyLinkSettings {
 export interface QuickFormatSettings {
   translation?: { sourceId: string; modelId: string; preset: string; prompt: string; languageA?: string; languageB?: string };
   selectionToolbar: boolean;
+  selectionTranslation: boolean;
   highlightPairing: boolean;
   toolbarOrder: string[];
   toolbarHidden: string[];
@@ -460,10 +478,6 @@ export function makeTextReformatRule(): TextReformatRule {
 
 export function makeHtmlPreviewRule(): HtmlPreviewRule {
   return { id: nextId(), importId: makeExternalId(), enabled: true, name: "", pattern: "", flags: "g", replaceWith: "" };
-}
-
-export function makeNewNoteDatabaseRule(): NewNoteDatabaseRule {
-  return { id: nextId(), enabled: true, folder: "", databasePath: "", includeSubfolders: false };
 }
 
 function makeExternalId(): string {
@@ -714,14 +728,22 @@ function makeSolarTermAnniversary(
 }
 
 export const DEFAULT_SETTINGS: SimplePluginSettings = {
+  enableAttachmentReferenceJump: true,
+  autoCleanAttachments: false,
+  autoOrganizeImages: false,
+  autoOrganizeAttachments: false,
+  autoExtractInlineImages: false,
+  attachmentDefaultsInitialized: false,
+  imageAttachmentFolderMode: "category",
+  attachmentFolderMode: "note",
   showSyncSharingEntry: true,
   showSharingEntry: true,
   showCalendarDiaryEntry: true,
   displayParameterSwitches: { desktop: {}, mobile: {} },
-  desktopTypography: { enabled: true, fontSize: 15, lineHeight: 1.7, letterSpacing: 0, paragraphSpacing: 0.8, paragraphStyle: "spaced" },
+  desktopTypography: { latinFontEnabled: true, latinFont: "Segoe UI", interfaceFontEnabled: true, textFontEnabled: true, interfaceFont: "yahei", textFont: "jinkai", enabled: true, fontSize: 15, lineHeight: 1.7, letterSpacing: 0.04, latinLetterSpacing: 0, latinLetterSpacingEnabled: true, letterSpacingUnit: "em", paragraphSpacing: 0.8, paragraphStyle: "spaced" },
   themeBackgroundColor: "#f6f7f9",
   themeRecentColors: [],
-  themeFavoriteColors: ["#824ce6", "#e60f61", "#ed393b", "#168c54", "#2f80ed"],
+  themeFavoriteColors: ["#f6f7f9", "#e60f61", "#ed393b", "#de7802", "#2ea121", "#168c54", "#2f80ed", "#824ce6"],
   autoProcessPaste: true,
   autoProcessObsidian: true,
   autoProcessPastedTextLinks: false,
@@ -730,7 +752,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   enableColorPreview: true,
   readableLineWidth: "900",
   popupWindowScale: "70",
-  enableWindowPositionOptimization: true,
+  enableWindowPositionOptimization: false,
   mobileSwitches: {},
   mobileDisplay: { readableLineWidth: "", imageMaxHeight: "", popupWindowScale: "0", headerButtonSize: "29", disableThemeHeaderButtons: true, compactBottomBar: true },
   enableMermaidEnhancer: true,
@@ -763,6 +785,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
     },
     quickFormat: {
       selectionToolbar: true,
+      selectionTranslation: true,
       highlightPairing: true,
       toolbarOrder: ["textColor", "bold", "italic", "underline", "strike", "highlight", "heading", "quote"],
       toolbarHidden: [],

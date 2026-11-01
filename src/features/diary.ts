@@ -1,4 +1,5 @@
-import { setActionIcon } from "../shared/actionButton";
+import { nativeCheckbox } from "../shared/nativeCheckbox";
+import { setActionIcon, styleActionButton } from "../shared/actionButton";
 import { runAsync } from "../shared/async";
 import {
   App,
@@ -337,10 +338,10 @@ export class DiaryView extends ItemView {
       await carryUnfinishedToActiveDiary(this.plugin);
     }));
 
-    const recurring = toolbar.createEl("button", {
+    const recurring = styleActionButton(toolbar.createEl("button", {
       cls: this.showRecurringPanel ? "simple-diary-icon-button is-active" : "simple-diary-icon-button",
       attr: { title: "周期计划", "aria-label": "周期计划" },
-    });
+    }), "bordered");
     setIcon(recurring, "repeat");
     recurring.addEventListener("click", () => {
       this.showRecurringPanel = !this.showRecurringPanel;
@@ -388,7 +389,7 @@ export class DiaryView extends ItemView {
         .setName(name)
         .setDesc(description)
         .addToggle((toggle) =>
-          toggle.setValue(value).onChange(async (nextValue) => {
+          nativeCheckbox(toggle).setValue(value).onChange(async (nextValue) => {
             await onChange(nextValue);
           })
         );
@@ -531,7 +532,7 @@ export class DiaryView extends ItemView {
           }
         });
       })
-      .addButton((button) => {
+      .addButton((button) => { styleActionButton(button.buttonEl, "text");
         editButton = button.buttonEl;
         button.setButtonText("修改").onClick(async () => {
           if (!editing) {
@@ -557,7 +558,7 @@ export class DiaryView extends ItemView {
 
   private renderRecurringPanel(container: HTMLElement): void {
     const panel = container.createDiv({ cls: "simple-diary-recurring-panel" });
-    const add = panel.createEl("button", { cls: "mod-cta simple-diary-recurring-add" });
+    const add = styleActionButton(panel.createEl("button", { cls: "mod-cta simple-diary-recurring-add" }), "text");
     add.setText("新增");
     add.addEventListener("click", () => {
       new DiaryRecurringRuleModal(this.app, "周期计划编辑", makeRecurringRule(), async (rule) => {
@@ -579,7 +580,7 @@ export class DiaryView extends ItemView {
       const row = list.createDiv({ cls: "simple-diary-recurring-row" });
       const toggleWrap = row.createDiv({ cls: "simple-diary-recurring-toggle" });
       new Setting(toggleWrap).addToggle((toggle) =>
-        toggle.setValue(rule.enabled).onChange(async (value) => {
+          nativeCheckbox(toggle).setValue(rule.enabled).onChange(async (value) => {
           rule.enabled = value;
           await this.plugin.saveSettings();
           this.render();
@@ -807,7 +808,7 @@ class DiaryRecurringRuleModal extends Modal {
       .setName("提前提醒")
       .setDesc("在事件发生前若干天，提前写入一条预告。")
       .addToggle((toggle) =>
-        toggle.setValue(Boolean(this.draft.advanceEnabled)).onChange((value) => {
+          nativeCheckbox(toggle).setValue(Boolean(this.draft.advanceEnabled)).onChange((value) => {
           this.draft.advanceEnabled = value;
           if (value && !this.draft.advanceDays) this.draft.advanceDays = 3;
           this.renderAdvanceControls();
@@ -817,10 +818,10 @@ class DiaryRecurringRuleModal extends Modal {
     this.renderAdvanceControls();
 
     const footer = contentEl.createDiv({ cls: "simple-json-modal-footer" });
-    const cancel = footer.createEl("button");
+    const cancel = styleActionButton(footer.createEl("button"), "text");
     cancel.setText("取消");
     cancel.addEventListener("click", () => this.close());
-    const save = footer.createEl("button", { cls: "mod-cta" });
+    const save = styleActionButton(footer.createEl("button", { cls: "mod-cta" }), "text");
     save.setText("保存");
     save.addEventListener("click", runAsync(async () => {
       if (!this.draft.text.trim()) {

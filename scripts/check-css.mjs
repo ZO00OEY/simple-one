@@ -11,6 +11,16 @@ css.walkDecls((decl) => { if (decl.important) issues.push(`Line ${decl.source.st
 css.walkRules((rule) => {
   if (rule.parent.type === "atrule" && /keyframes$/i.test(rule.parent.name)) return;
   selectorParser((selectors) => {
+  // A setting row is the last compound selector; ancestors may still have frames.
+  selectors.each(selector => {
+    const last = selector.nodes.reduce((index, node, i) => node.type === "combinator" ? i : index, -1);
+    const isRow = selector.nodes.slice(last + 1).some(node => node.type === "class" && node.value === "setting-item");
+    if (isRow) rule.walkDecls(decl => {
+      if (/^border(?:-(?:top|bottom|block)(?:-width)?)?$/.test(decl.prop) && !/^(0|none)\b/.test(decl.value)) {
+        issues.push(`Line ${decl.source.start.line}: settings rows must not add separator borders`);
+      }
+    });
+  });
   selectors.walkPseudos((pseudo) => { if (pseudo.value === ":has") issues.push(`Line ${rule.source.start.line}: avoid :has()`); });
   selectors.walkTags((tag) => {
     // Selector parsers represent nth-child arithmetic (e.g. 7n) as tags.

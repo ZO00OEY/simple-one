@@ -7,7 +7,9 @@ import { setFormatIcon } from "../shared/formatIcon";
 import { FAVORITE_COLORS, ThemeColorPicker } from "../shared/themeColorPicker";
 import { readCalloutColor } from "../shared/calloutColor";
 import { selectionColors, tintSelectionColor } from "./selectionPalettes";
-import { translationBridge, SelectionTranslationModal, TranslationSettingsModal } from "./selectionTranslation";
+import { translationBridge, TranslationSettingsModal } from "./selectionTranslation";
+import { startInlineTranslation } from "./inlineTranslation";
+import { paragraphLinkTarget } from "./paragraphLink";
 
 const LABELS: Record<FormatTool, string> = { textColor: "字体颜色", bold: "加粗", italic: "斜体", strike: "删除线", underline: "下划线", highlight: "高亮", heading: "标题", quote: "引用与 Callout" };
 const ICONS: Record<FormatTool, string> = { textColor: "baseline", bold: "bold", italic: "italic", strike: "strikethrough", underline: "underline", highlight: "highlighter", heading: "heading", quote: "quote" };
@@ -37,15 +39,6 @@ export function registerSelectionToolbar(plugin: SimplePlugin, changed: () => vo
     if (icon) setFormatIcon(el, icon); else el.setText(label);
     labelButton(el, label);
     return el;
-  };
-  const customColor = (parent: HTMLElement, label: string, value: string, refresh: () => void) => {
-    const refreshAll = () => { if (colorRefreshers.length) for (const update of colorRefreshers) update(); else refresh(); };
-    const picker = new ThemeColorPicker(parent, plugin, "manage").setValue(value).onChange(color => {
-      plugin.settings.themeFavoriteColors = [...new Set([...(plugin.settings.themeFavoriteColors ?? FAVORITE_COLORS), color])];
-      save(); refreshAll();
-    }).onClose(refreshAll);
-    picker.buttonEl.classList.add("simple-selection-custom-swatch");
-    setIcon(picker.buttonEl, "palette"); labelButton(picker.buttonEl, label);
   };
   const apply = (transform: (text: string) => string, wholeLines = false): boolean => {
     const current = target;
@@ -85,13 +78,14 @@ export function registerSelectionToolbar(plugin: SimplePlugin, changed: () => vo
     bar = doc.body.createDiv({ cls: "simple-selection-toolbar", attr: { role: "toolbar", "aria-labelledby": barName } });
     bar.createSpan({ cls: "simple-selection-control-label", text: "浮动编辑栏", attr: { id: barName } }).hidden = true;
     bar.toggleClass("is-editing", editing);
-    bar.addEventListener("pointerleave", () => {
+    bar.addEventListener("pointerleave", event => {
+      if (event.pointerType === "touch") return;
       menuCloseTimer = window.setTimeout(() => {
         bar?.querySelectorAll(".is-open").forEach(element => { element.classList.remove("is-open"); element.querySelector("button")?.setAttribute("aria-expanded", "false"); });
       }, 110);
     });
     bar.addEventListener("pointerdown", event => {
-      if (!(event.target as Element).closest("input") && !editing) event.preventDefault();
+      if (event.pointerType !== "touch" && !(event.target as Element).closest("input") && !editing) event.preventDefault();
     });
     const config = settings();
     const appearance: Record<string, { color: string; background: string; fontStyle: string; border: string }> = {};
@@ -115,7 +109,6 @@ export function registerSelectionToolbar(plugin: SimplePlugin, changed: () => vo
         const style = doc.defaultView!.getComputedStyle(sample);
         element.style.color = style.color; element.style.fontWeight = style.fontWeight;
         element.style.fontStyle = style.fontStyle; element.style.textDecoration = style.textDecoration;
-        if (parseFloat(style.borderBottomWidth)) element.style.borderBottom = style.borderBottom;
         sampleView.remove();
       } else if (mode === "quote") {
         element.style.color = appearance.quote.color;
@@ -133,12 +126,23 @@ export function registerSelectionToolbar(plugin: SimplePlugin, changed: () => vo
         bar?.querySelectorAll(".is-open").forEach(element => { element.classList.remove("is-open"); element.querySelector("button")?.setAttribute("aria-expanded", "false"); });
       };
       const open = () => { closeOthers(); group.classList.add("is-open"); control.setAttribute("aria-expanded", "true"); position(rect, doc.defaultView!); };
-      group.addEventListener("pointerenter", open);
+      group.addEventListener("pointerenter", event => { if (event.pointerType !== "touch") open(); });
       group.addEventListener("pointerleave", event => {
+        if (event.pointerType === "touch") return;
         if (event.relatedTarget && bar?.contains(event.relatedTarget as Node)) return;
         menuCloseTimer = window.setTimeout(() => { group.classList.remove("is-open"); control.setAttribute("aria-expanded", "false"); }, 110);
       });
       menu.addEventListener("pointerenter", () => { if (menuCloseTimer !== undefined) window.clearTimeout(menuCloseTimer); });
+      let touchControl = false;
+      control.addEventListener("pointerdown", event => { touchControl = event.pointerType === "touch"; });
+      control.addEventListener("pointercancel", () => { touchControl = false; });
+      control.addEventListener("click", event => {
+        const firstTouch = touchControl && !group.classList.contains("is-open");
+        touchControl = false;
+        if (!firstTouch) return;
+        // A touch has no hover: open the choices before allowing the direct format action.
+        event.preventDefault(); event.stopImmediatePropagation(); open();
+      }, true);
       control.addEventListener("keydown", event => {
         if (event.key === "ArrowDown") { event.preventDefault(); open(); menu.querySelector<HTMLButtonElement>("button")?.focus(); }
       });
@@ -252,7 +256,6 @@ export function registerSelectionToolbar(plugin: SimplePlugin, changed: () => vo
           clearColors(colors);
           const presets = selectionColors();
           addColors(colors, presets);
-          customColor(colors, `管理${LABELS[id]}预选颜色`, "#824ce6", refresh);
           addColors(colors, selectionColors(plugin.settings.themeFavoriteColors ?? FAVORITE_COLORS).filter(color => !presets.includes(color)));
         };
         colorRefreshers.push(refresh);
@@ -287,22 +290,20 @@ export function registerSelectionToolbar(plugin: SimplePlugin, changed: () => vo
             else { pending.hidden = false; pending.setText(foreground === undefined ? "尚未选择字体颜色" : "尚未选择背景颜色"); }
           };
           control.addEventListener("click", () => apply(text => useThemeStyle(text, "highlight")));
-          for (const property of ["color", "background-color"] as const) {
-            const colors = menu.createDiv({ cls: "simple-selection-colors" });
-            colors.dataset.highlightColors = property;
-            const refreshPalette = () => {
-              const paired = !!config.highlightPairing;
-              colors.hidden = paired && property === "background-color";
-              colors.querySelectorAll(".simple-selection-swatch, .simple-selection-custom-swatch").forEach(element => {
-                doc.getElementById(element.getAttribute("aria-labelledby") || "")?.remove(); element.remove();
-              });
-              const presets = selectionColors();
-              const textColors = [...presets, ...selectionColors(plugin.settings.themeFavoriteColors ?? FAVORITE_COLORS).filter(color => !presets.includes(color))];
-              if (property === "color") colors.append(pairing);
-              for (const textColor of textColors) {
-                if (property === "color" && textColors.indexOf(textColor) === presets.length) customColor(colors, "管理高亮预选颜色", "#824ce6", () => { for (const refresh of refreshPalettes) refresh(); });
+          const grid = menu.createDiv({ cls: "simple-selection-highlight-grid" });
+          const refreshPalette = () => {
+            grid.replaceChildren();
+            const paired = !!config.highlightPairing;
+            const toggleCell = grid.createDiv({ cls: "simple-selection-highlight-pair" });
+            toggleCell.append(pairing);
+            if (!paired) toggleCell.createSpan({ cls: "simple-selection-highlight-spacer", attr: { "aria-hidden": "true" } });
+            for (const textColor of selectionColors(plugin.settings.themeFavoriteColors ?? FAVORITE_COLORS)) {
+              const pair = grid.createDiv({ cls: "simple-selection-highlight-pair" });
+              for (const property of ["color", "background-color"] as const) {
                 const color = property === "color" ? textColor : tintSelectionColor(textColor, 0.2);
-                const swatch = button(colors, `${property === "color" ? "字体" : "背景"} ${color}`);
+                const swatch = button(pair, `${property === "color" ? "字体" : "背景"} ${color}`);
+                swatch.hidden = paired && property === "background-color";
+                swatch.dataset.highlightColors = property;
                 swatch.dataset.selectionColor = color;
                 swatch.dataset.highlightProperty = property; swatch.dataset.highlightColor = color;
                 swatch.style.setProperty("--simple-selection-color", color);
@@ -315,10 +316,9 @@ export function registerSelectionToolbar(plugin: SimplePlugin, changed: () => vo
                   else choose(property, color);
                 });
               }
-              if (property === "color" && textColors.length === presets.length) customColor(colors, "管理高亮预选颜色", "#824ce6", () => { for (const refresh of refreshPalettes) refresh(); });
-            };
-            refreshPalettes.push(refreshPalette); colorRefreshers.push(refreshPalette); refreshPalette();
-          }
+            }
+          };
+          refreshPalettes.push(refreshPalette); colorRefreshers.push(refreshPalette); refreshPalette();
         } else {
           const modes: (QuickFormatMode | "paragraph")[] = id === "heading" ? ["paragraph", "h1", "h2", "h3", "h4", "h5", "h6"] : visibleModes(plugin).filter(mode => !isHeadingMode(mode));
           for (const mode of modes) {
@@ -346,14 +346,44 @@ export function registerSelectionToolbar(plugin: SimplePlugin, changed: () => vo
         }
       }
     }
+    const paletteGroup = bar.createDiv({ cls: "simple-selection-tool simple-selection-palette" });
+    const palette = new ThemeColorPicker(paletteGroup, plugin, "manage").setValue("var(--interactive-accent)").onClose(() => {
+      for (const refresh of colorRefreshers) refresh();
+    });
+    palette.buttonEl.classList.add("simple-selection-custom-swatch");
+    palette.buttonEl.disabled = editing;
+    setFormatIcon(palette.buttonEl, "palette"); labelButton(palette.buttonEl, "调色盘与收藏管理");
     const toolbox = bar.createDiv({ cls: "simple-selection-tool simple-selection-toolbox has-group-divider" });
-    const toolboxButton = button(toolbox, "搜索工具箱", "layout-grid");
+    const toolboxButton = button(toolbox, "工具箱", "layout-grid");
     toolboxButton.disabled = editing;
     const toolboxMenu = submenu(toolbox, toolboxButton);
     const vaultSearch = button(toolboxMenu, "笔记库内搜索", "search");
     const webSearch = button(toolboxMenu, "网页搜索", "globe");
     vaultSearch.classList.add("simple-selection-block-option"); webSearch.classList.add("simple-selection-block-option");
     vaultSearch.createSpan({ text: "笔记库内搜索" }); webSearch.createSpan({ text: "网页搜索" });
+    const copyParagraph = button(toolboxMenu, "复制段落 Obsidian URL", "link");
+    copyParagraph.classList.add("simple-selection-block-option");
+    copyParagraph.createSpan({ text: "复制段落 Obsidian URL" });
+    copyParagraph.addEventListener("click", () => {
+      const selected = target;
+      if (!selected?.file || selected.editor.getValue() !== selected.document || selected.view.file?.path !== selected.file || !selected.view.containerEl.isConnected) { hide(); return; }
+      void (async () => {
+        try {
+          let id: string;
+          do { id = `so-${crypto.randomUUID().slice(0, 8)}`; } while (selected.document.includes(`^${id}`));
+          const block = paragraphLinkTarget(selected.document, selected.from.line, id);
+          const url = `obsidian://open?vault=${encodeURIComponent(plugin.app.vault.getName())}&file=${encodeURIComponent(`${selected.file}#^${block.id}`)}`;
+          await navigator.clipboard.writeText(url);
+          if (disposed || selected.editor.getValue() !== selected.document || selected.view.file?.path !== selected.file || !selected.view.containerEl.isConnected) throw new Error("笔记已变化，请重新选择段落后复制");
+          if (block.suffix) {
+            const position = { line: block.endLine, ch: selected.editor.getLine(block.endLine).length };
+            selected.editor.replaceRange(block.suffix, position);
+          }
+          new Notice("已复制段落 Obsidian URL");
+        } catch (error) { new Notice(`复制失败：${String(error)}`); }
+      })();
+      hide();
+    });
     vaultSearch.addEventListener("click", () => {
       const query = target?.text.trim(); if (!query) return;
       void (async () => {
@@ -370,7 +400,7 @@ export function registerSelectionToolbar(plugin: SimplePlugin, changed: () => vo
       const query = target?.text.trim(); if (!query) return;
       window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, "_blank", "noopener"); hide();
     });
-    if (translationBridge(plugin.app)) {
+    if (config.selectionTranslation !== false && translationBridge(plugin.app)) {
       const row = toolboxMenu.createDiv({ cls: "simple-selection-translation-row" });
       const translate = button(row, "翻译", "languages"); translate.classList.add("simple-selection-block-option"); translate.createSpan({ text: "翻译" });
       const configure = button(row, "翻译模型与提示词", "settings");
@@ -378,13 +408,12 @@ export function registerSelectionToolbar(plugin: SimplePlugin, changed: () => vo
         const selected = target;
         if (!selected || selected.editor.getValue() !== selected.document) { hide(); return; }
         hide();
-        new SelectionTranslationModal(plugin, selected.text, result => {
-          if (disposed || !selected.view.containerEl.isConnected || selected.view.file?.path !== selected.file || selected.editor.getValue() !== selected.document) return false;
-          selected.editor.replaceRange(result, selected.from, selected.to); return true;
-        }).open();
+        startInlineTranslation(plugin, selected);
       });
       configure.addEventListener("click", () => { hide(); new TranslationSettingsModal(plugin).open(); });
     }
+    toolboxMenu.append(copyParagraph);
+    bar.append(paletteGroup);
     const clearGroup = bar.createDiv({ cls: "simple-selection-tool" });
     const clear = button(clearGroup, "清除选中文字的局部格式代码", "trash-2");
     clear.classList.add("simple-selection-clear"); clear.disabled = editing;

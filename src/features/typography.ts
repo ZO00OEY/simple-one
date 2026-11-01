@@ -4,6 +4,40 @@ import type SimplePlugin from "../main";
 import { isStandaloneBoldLine, normalizeTypography } from "../shared/typography";
 import { displayParameterEnabled } from "../shared/displayProfile";
 
+export function latinSpacingDecorations(view: EditorView): DecorationSet {
+  const ranges = [];
+  for (const { from, to } of view.visibleRanges) {
+    const text = view.state.doc.sliceString(from, to);
+    for (const match of text.matchAll(/[\u0020-\u024f]+/g)) {
+      ranges.push(Decoration.mark({ class: "simple-latin-spacing" }).range(from + match.index, from + match.index + match[0].length));
+    }
+  }
+  return Decoration.set(ranges, true);
+}
+
+export function decorateRenderedLatinSpacing(root: HTMLElement): void {
+  const walker = root.ownerDocument.createTreeWalker(root, 4);
+  const nodes: Text[] = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    if (!node.parentElement?.closest(".simple-latin-spacing, code, pre, script, style, svg, math, .math, .mermaid, input, textarea, [contenteditable=true]") && /[\u0020-\u024f]/.test(node.data)) nodes.push(node);
+  }
+  for (const node of nodes) {
+    const fragment = createFragment();
+    let start = 0;
+    for (const match of node.data.matchAll(/[\u0020-\u024f]+/g)) {
+      fragment.append(node.data.slice(start, match.index));
+      const span = root.ownerDocument.win.createSpan();
+      span.className = "simple-latin-spacing";
+      span.textContent = match[0];
+      fragment.append(span);
+      start = match.index + match[0].length;
+    }
+    fragment.append(node.data.slice(start));
+    node.replaceWith(fragment);
+  }
+}
+
 // Each manually entered body line gets a first-line indent; soft wraps do not.
 export function paragraphDecorations(view: EditorView): DecorationSet {
   const lines = new Map<number, Set<string>>();
@@ -78,8 +112,22 @@ export function registerTypography(plugin: SimplePlugin): () => void {
   if (plugin.isMobile) return () => {};
   const documents = new Set<Document>();
   const properties = ["font-size", "line-height", "letter-spacing", "paragraph-spacing"];
+  const fontStacks = { default: "", yahei: '"Microsoft YaHei", "微软雅黑", sans-serif',
+    jinkai: '"仓耳今楷01", "仓耳今楷01 W01", "TsangerJinKai01", "Microsoft YaHei", "微软雅黑", sans-serif',
+    wenkai: '"LXGW WenKai", "LXGW WenKai TC", "LXGW WenKai GB", "LXGW WenKai Screen", "霞鹜文楷", "Microsoft YaHei", sans-serif',
+    notoSerif: '"Noto Serif SC", "Source Han Serif SC", "思源宋体", serif',
+    notoSans: '"Noto Sans SC", "Source Han Sans SC", "思源黑体", sans-serif' };
+  const fontProperties = ["--font-interface", "--font-text"];
+  const originalFonts = new Map<Document, string[]>();
   const clear = (doc: Document): void => {
+    const originals = originalFonts.get(doc);
+    if (originals) fontProperties.forEach((property, i) => {
+      if (originals[i]) doc.body.style.setProperty(property, originals[i]);
+      else doc.body.style.removeProperty(property);
+    });
     doc.body.classList.remove("simple-desktop-typography", "simple-chinese-reading");
+    doc.body.classList.remove("simple-typography-latin-spacing");
+    doc.body.style.removeProperty("--simple-typography-latin-letter-spacing");
     for (const property of properties) doc.body.style.removeProperty('--simple-typography-' + property);
     for (const property of properties) doc.body.classList.remove(`simple-typography-${property}`);
   };
@@ -87,15 +135,28 @@ export function registerTypography(plugin: SimplePlugin): () => void {
     documents.add(doc);
     const settings = normalizeTypography(plugin.settings.desktopTypography);
     clear(doc);
+    if (!originalFonts.has(doc)) originalFonts.set(doc, fontProperties.map(property => doc.body.style.getPropertyValue(property)));
+    [settings.interfaceFont, settings.textFont].forEach((font, i) => {
+      if ((i === 0 ? settings.interfaceFontEnabled : settings.textFontEnabled) && fontStacks[font]) doc.body.style.setProperty(fontProperties[i], fontStacks[font]);
+    });
+    if (settings.latinFontEnabled && settings.latinFont !== "default") {
+      const base = doc.body.style.getPropertyValue("--font-text") || 'var(--font-text-override), var(--font-default)';
+      const fallback = settings.latinFont === "Source Sans 3" ? '"Simple One Latin Times New Roman", ' : "";
+      doc.body.style.setProperty("--font-text", `"Simple One Latin ${settings.latinFont}", ${fallback}"Simple One Latin System", ${base}`);
+    }
     if (settings.paragraphStyle === "indent") {
       doc.body.classList.add("simple-chinese-reading");
+    }
+    if (settings.latinLetterSpacingEnabled) {
+      doc.body.classList.add("simple-typography-latin-spacing");
+      doc.body.style.setProperty("--simple-typography-latin-letter-spacing", settings.latinLetterSpacing + "em");
     }
     const keys = ["fontSize", "lineHeight", "letterSpacing", "paragraphSpacing"] as const;
     if (!keys.some(key => displayParameterEnabled(plugin.settings, false, key))) return;
     doc.body.classList.add("simple-desktop-typography");
     const values = [
       settings.fontSize + 'px', String(settings.lineHeight),
-      settings.letterSpacing + 'px', settings.paragraphSpacing + 'em',
+      settings.letterSpacing + 'em', settings.paragraphSpacing + 'em',
     ];
     properties.forEach((property, i) => {
       if (!displayParameterEnabled(plugin.settings, false, keys[i])) return;
@@ -112,25 +173,36 @@ export function registerTypography(plugin: SimplePlugin): () => void {
       }
     }
   }, { decorations: view => view.decorations }));
+  plugin.registerEditorExtension(ViewPlugin.fromClass(class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) { this.decorations = latinSpacingDecorations(view); }
+    update(update: ViewUpdate): void {
+      if (update.docChanged || update.viewportChanged) this.decorations = latinSpacingDecorations(update.view);
+    }
+  }, { decorations: view => view.decorations }));
   const refresh = (): void => {
     const docs = new Set<Document>([document, ...documents]);
     plugin.app.workspace.iterateAllLeaves(leaf => {
       docs.add(leaf.getContainer().doc);
       decorateRenderedLineIndents(leaf.view.containerEl);
+      leaf.view.containerEl.querySelectorAll<HTMLElement>(".markdown-preview-view").forEach(decorateRenderedLatinSpacing);
     });
     for (const doc of docs) apply(doc);
   };
   plugin.registerMarkdownPostProcessor(decorateRenderedLineIndents);
+  plugin.registerMarkdownPostProcessor(decorateRenderedLatinSpacing);
   plugin.registerEvent(plugin.app.workspace.on("window-open", win => apply(win.doc)));
   plugin.registerEvent(plugin.app.workspace.on("window-close", win => {
     clear(win.doc);
     documents.delete(win.doc);
+    originalFonts.delete(win.doc);
   }));
   plugin.register(() => {
     for (const doc of documents) {
       clear(doc);
       doc.querySelectorAll(".simple-typography-line-indent").forEach(marker => marker.remove());
       doc.querySelectorAll(".simple-typography-bold-line").forEach(element => element.classList.remove("simple-typography-bold-line"));
+      doc.querySelectorAll(".markdown-preview-view .simple-latin-spacing").forEach(element => element.replaceWith(...element.childNodes));
     }
     documents.clear();
   });

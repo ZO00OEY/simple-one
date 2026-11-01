@@ -84,11 +84,10 @@ main a:hover { text-decoration-thickness:2px }
 .accent-picker summary::-webkit-details-marker { display:none }
 .accent-picker summary::after { content:""; width:6px; height:6px; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; transform:rotate(45deg); margin-top:-3px }
 .accent-swatch { display:block; width:22px; height:22px; border-radius:4px; background:var(--swatch); border:1px solid rgb(0 0 0 / 10%) }
-.accent-options { position:absolute; top:calc(100% + 6px); right:0; display:grid; gap:6px; min-width:174px; padding:8px; border:1px solid var(--share-line); border-radius:8px; background:var(--share-bg); box-shadow:0 4px 16px rgb(0 0 0 / 10%); z-index:10 }
+.accent-options { position:absolute; top:calc(100% + 6px); right:0; display:grid; gap:4px; width:220px; max-width:calc(100vw - 32px); padding:10px 12px; border:1px solid var(--share-line); border-radius:8px; background:var(--share-bg); box-shadow:0 4px 16px rgb(0 0 0 / 10%); z-index:10 }
 .accent-colors { display:flex; justify-content:space-between; gap:6px }
-.reader-font-control { display:grid; gap:6px; margin-top:4px; padding-top:10px; border-top:1px dashed var(--share-line); font-size:13px }
-.reader-font-control select { width:100%; min-height:34px; padding:4px 8px; border:1px solid var(--share-line); border-radius:5px; background:var(--share-bg); color:var(--share-text); font:inherit }
-.reader-font-control select:focus-visible { outline:2px solid var(--share-accent); outline-offset:2px }
+.reader-font-control { display:grid; grid-template-columns:minmax(0,1fr) 76px; align-items:center; gap:12px; margin:0; padding:5px 0; font-size:13px }
+.reader-font-control input:focus-visible { outline:2px solid var(--share-accent); outline-offset:2px }
 .accent-options button { display:grid; place-items:center; width:36px; height:36px; padding:5px; background:transparent; border:1px solid transparent; border-radius:6px; cursor:pointer }
 .accent-options button[aria-pressed="true"] { border-color:var(--share-text) }
 .accent-options button:hover { background:color-mix(in srgb,var(--share-text) 8%,transparent) }
@@ -149,6 +148,30 @@ main .simple-mermaid-frame .mermaid { margin:0; padding:0; background:transparen
 @media(prefers-color-scheme:dark){.share-tag{background:#1d694b;color:#fff}main h3{color:#80b4ff}}
 @media(max-width:740px){.layout{grid-template-columns:1fr}.sidebar-resizer{display:none}main{padding-inline:28px 18px}.heading-toggle{left:-28px;width:26px}.simple-mermaid-frame.is-fullscreen{inset:8px}}
 
+/* Share defaults; reader overrides stay local to the visitor's browser. */
+:root{--share-width:900px;--share-size:15px;--share-line-height:1.7;--share-image-max-height:450px;--share-bold:#e60f61;--share-italic:#e60f61}
+body{font-family:"Segoe UI","Times New Roman","Microsoft YaHei","微软雅黑",sans-serif}
+main{max-width:var(--share-width);font-family:var(--reader-font,"Segoe UI","Times New Roman","Microsoft YaHei","微软雅黑",sans-serif);font-size:var(--reader-size,var(--share-size));line-height:var(--reader-line-height,var(--share-line-height));letter-spacing:var(--reader-spacing,.04em)}
+#content :is(p,ul,ol,blockquote){max-width:none}
+main p{margin:var(--reader-paragraph,.8em) 0}
+main strong,main b{color:var(--share-bold,inherit);font-weight:var(--share-bold-weight,700)}
+main em,main i{color:var(--share-italic,inherit)}
+main u{color:var(--share-underline,inherit);text-decoration-color:var(--share-underline,currentColor)}
+main s,main del{color:var(--share-strike,inherit)}
+main mark{background:var(--share-highlight-bg,#ffda0040);color:var(--share-highlight-text,inherit)}
+.share-translation,.callout[data-callout="simple-translation"]{position:relative;isolation:isolate;overflow:visible;margin:26px 12px;padding:14px 18px;border:1px dashed color-mix(in srgb,var(--share-accent) 50%,transparent);border-radius:10px;background:var(--share-bg)}
+.share-translation::before,.callout[data-callout="simple-translation"]::before{content:"";position:absolute;inset:0;z-index:-1;transform:translate(4px,3px) rotate(-2deg);border:1px solid color-mix(in srgb,var(--share-accent) 25%,transparent);border-radius:10px;background:color-mix(in srgb,var(--share-accent) 7%,var(--share-bg));pointer-events:none}
+.share-translation-title{font-size:13px;color:var(--share-accent);margin-bottom:12px}
+.reader-font-control input{width:100%;padding:4px 8px;border:1px solid var(--share-line);border-radius:5px;background:var(--share-bg);color:var(--share-text)}
+.share-latin{letter-spacing:var(--reader-latin-spacing,0em)}
+.share-copy-host,.share-copy-block{position:relative}
+.share-copy-block{padding-right:44px}
+.share-block-copy{position:absolute;top:8px;right:8px;z-index:2;display:grid;place-items:center;width:28px;height:28px;padding:5px;border:0;border-radius:5px;background:var(--share-bg);color:var(--share-muted);opacity:0;cursor:pointer;transition:opacity .15s}
+.share-block-copy svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+:is(.share-copy-host,.share-copy-block):is(:hover,:focus-within)>.share-block-copy{opacity:1}
+.share-block-copy:hover{color:var(--share-accent)}
+.share-block-copy:focus-visible{outline:2px solid var(--share-accent);outline-offset:2px}
+@media(hover:none){.share-block-copy{opacity:1}}
 </style>
   <style data-simple-appearance></style>
   <!-- 独立网站阅读器；构建时内嵌依赖、样式与字体，不在 Obsidian 中执行。 -->
@@ -239,9 +262,9 @@ if (header) {
   const colorOptions = document.createElement("div");
   colorOptions.className = "accent-colors";
   options.append(colorOptions);
-  const colors = { pink: "#fb7299", blue: "#2563eb", purple: "#7c3aed" };
-  const darkColors = { blue: "#80b4ff", purple: "#b69aff", pink: "#fb7299" };
-  const names = { pink:"B 站粉", blue:"蓝色", purple:"紫色" };
+  const colors = { pink: "#fb7299", blue: "#2f80ed", green: "#168c54", dragon: "#e60f61" };
+  const darkColors = { ...colors, blue: "#80b4ff", green: "#52c993" };
+  const names = { pink:"猛男粉", blue:"蓝色", green:"绿色", dragon:"火龙果粉" };
   let selected = "pink";
   try {
     const saved = window.localStorage.getItem("simple-reader-theme-color");
@@ -252,8 +275,8 @@ if (header) {
     const palette = dark?.matches ? darkColors : colors;
     document.documentElement.style.setProperty("--share-accent", palette[selected]);
     swatch.style.setProperty("--swatch", palette[selected]);
-    summary.setAttribute("aria-label", `主题色：${names[selected]}，点击选择主题色和字体`);
-    options.querySelectorAll("button").forEach(button => {
+    summary.setAttribute("aria-label", `主题色：${names[selected]}，点击调整主题色和排版`);
+    colorOptions.querySelectorAll("button").forEach(button => {
       button.style.setProperty("--swatch", palette[button.dataset.color]);
       button.setAttribute("aria-pressed", String(button.dataset.color === selected));
     });
@@ -274,32 +297,22 @@ if (header) {
     });
     colorOptions.append(button);
   }
-  const fontControl = document.createElement("label");
-  fontControl.className = "reader-font-control";
-  fontControl.append("字体");
-  const fontSelect = document.createElement("select");
-  fontSelect.setAttribute("aria-label", "正文字体");
-  fontSelect.title = "使用设备已安装的字体；未安装时使用默认字体";
-  const fonts = { default: { name: "默认", family: "" }, yahei: { name: "微软雅黑", family: '"Microsoft YaHei", "微软雅黑", sans-serif' }, jinkai: { name: "仓耳今楷", family: '"仓耳今楷01", "TsangerJinKai01", "Microsoft YaHei", sans-serif' } };
-  for (const [value, font] of Object.entries(fonts)) {
-    const option = document.createElement("option");
-    option.value = value; option.textContent = font.name; fontSelect.append(option);
+  for (const [name, property, initial, min, max, step, unit] of [
+    ["字号", "--reader-size", 15, 12, 36, 1, "px"],
+    ["行高", "--reader-line-height", 1.7, 1.2, 2.4, 0.1, ""],
+    ["字间距", "--reader-spacing", 0.04, -0.05, 0.2, 0.01, "em"],
+    ["英文字间距", "--reader-latin-spacing", 0, -0.05, 0.2, 0.01, "em"],
+    ["段间距", "--reader-paragraph", 0.8, 0, 2, 0.1, "em"],
+  ]) {
+    const label = document.createElement("label"); label.className = "reader-font-control"; label.append(name);
+    const input = document.createElement("input"); input.type = "number"; input.min = min; input.max = max; input.step = step; input.value = initial; input.setAttribute("aria-label", name);
+    const apply = () => { const value = Number(input.value); if (input.value && Number.isFinite(value) && value >= min && value <= max) {
+      document.documentElement.style.setProperty(property, value + unit);
+      try { localStorage.setItem(property, String(value)); } catch { /* Optional preference. */ }
+    } };
+    try { const saved = localStorage.getItem(property); if (saved !== null && Number(saved) >= min && Number(saved) <= max) { input.value = saved; apply(); } } catch { /* Optional preference. */ }
+    input.addEventListener("input", apply); label.append(input); options.append(label);
   }
-  const applyFont = () => {
-    const family = fonts[fontSelect.value].family;
-    if (family) document.documentElement.style.setProperty("--reader-font", family);
-    else document.documentElement.style.removeProperty("--reader-font");
-  };
-  try {
-    const saved = window.localStorage.getItem("simple-reader-font");
-    if (Object.prototype.hasOwnProperty.call(fonts, saved)) fontSelect.value = saved;
-  } catch { /* Font selection also works without browser storage. */ }
-  applyFont();
-  fontSelect.addEventListener("change", () => {
-    applyFont();
-    try { window.localStorage.setItem("simple-reader-font", fontSelect.value); } catch { /* Optional preference. */ }
-  });
-  fontControl.append(fontSelect); options.append(fontControl);
   picker.addEventListener("keydown", event => {
     if (event.key === "Escape") { picker.open = false; summary.focus(); }
   });
@@ -315,6 +328,10 @@ const escape = md.utils.escapeHtml;
 const normalFence = md.renderer.rules.fence;
 md.renderer.rules.fence = (tokens, index, options, env, self) => {
   const token = tokens[index];
+  if (token.info.trim() === "simple-translation") {
+    const source = token.content.replace(/^<!-- simple-translation-original:.*? -->\r?\n/, "");
+    return `<section class="share-translation"><div class="share-translation-title">翻译</div>${md.render(source, env)}</section>`;
+  }
   if (token.info.trim() === "simple-columns") {
     const columns = parseColumns(token.content.replace(/\n$/, ""));
     if (columns) return `<div class="simple-columns" style="--columns:${columns.widths.map((value) => `minmax(0,${value}fr)`).join(" ")}">${columns.content.map((source) => `<div class="simple-column">${md.render(source, env)}</div>`).join("")}</div>`;
@@ -457,6 +474,48 @@ function renderTags(root) {
       fragment.append(document.createTextNode(text.slice(offset)));
       node.replaceWith(fragment);
     }
+  }
+}
+function addBlockCopyButtons(root) {
+  for (const block of root.querySelectorAll("pre:not(.mermaid),blockquote,.share-translation,.share-special-block")) {
+    if (block.querySelector(":scope > .share-block-copy")) continue;
+    let host = block;
+    if (block.tagName === "PRE") {
+      host = document.createElement("div"); host.className = "share-copy-host";
+      block.before(host); host.append(block);
+    } else host.classList.add("share-copy-block");
+    const button = document.createElement("button"); button.type = "button"; button.className = "share-block-copy";
+    const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    button.innerHTML = icon;
+    const label = text => { button.title = text; button.setAttribute("aria-label", text); };
+    label("复制区块内容");
+    button.addEventListener("click", async event => {
+      event.preventDefault(); event.stopPropagation();
+      const clone = block.cloneNode(true);
+      clone.querySelectorAll(".share-block-copy,.share-translation-title,.heading-toggle,.footnotes,.footnotes-sep,.footnote-backref").forEach(node => node.remove());
+      if (block.classList.contains("callout")) clone.querySelectorAll(":scope > strong,:scope > details > summary").forEach(node => node.remove());
+      if (block.classList.contains("share-special-block")) clone.querySelector(":scope > summary")?.remove();
+      let text;
+      if (block.tagName === "PRE") text = block.querySelector("code")?.textContent ?? block.textContent;
+      else {
+        clone.querySelectorAll("br").forEach(node => node.replaceWith(document.createTextNode("\n")));
+        clone.querySelectorAll("p,div,li,blockquote,pre,h1,h2,h3,h4,h5,h6,tr").forEach(node => node.append(document.createTextNode("\n\n")));
+        text = clone.textContent.replace(/\n{3,}/g, "\n\n").trim();
+      }
+      try {
+        if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
+        else {
+          const active = document.activeElement, input = document.createElement("textarea");
+          input.value = text; input.style.cssText = "position:fixed;left:-9999px;top:0"; document.body.append(input);
+          try { input.select(); if (!document.execCommand("copy")) throw new Error("复制失败"); }
+          finally { input.remove(); active?.focus(); }
+        }
+        label("已复制");
+        button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>';
+      } catch { label("复制失败，请选中文字手动复制"); }
+      window.setTimeout(() => { label("复制区块内容"); button.innerHTML = icon; }, 1800);
+    });
+    host.append(button);
   }
 }
 function decorate(root) {
@@ -607,9 +666,23 @@ async function route() {
     const source = await response.text();
     if (current !== request) return;
     content.replaceChildren(DOMPurify.sanitize(md.render(source), { RETURN_DOM_FRAGMENT: true, ADD_TAGS: ["math", "annotation", "think", "thinking", "think_nya~", "snapshot", "abstract", "todo", "seeds", "events"], FORBID_TAGS: ["iframe", "object", "embed", "form", "style", "link", "meta"], FORBID_ATTR: ["srcdoc"] }));
-    content.closest("main")?.classList.toggle("has-columns", Boolean(content.querySelector(".simple-columns")));
     decorate(content);
+    const walker = document.createTreeWalker(content, 4), textNodes = [];
+    while (walker.nextNode()) textNodes.push(walker.currentNode);
+    for (const node of textNodes) {
+      if (node.parentElement?.closest("pre,code,svg,math,.katex,script,style")) continue;
+      const parts = node.textContent.split(/([\u0020-\u024f]+)/g);
+      if (parts.length < 2) continue;
+      const fragment = document.createDocumentFragment();
+      parts.forEach((text, index) => {
+        if (index % 2) { const span = document.createElement("span"); span.className = "share-latin"; span.textContent = text; fragment.append(span); }
+        else fragment.append(document.createTextNode(text));
+      });
+      node.replaceWith(fragment);
+    }
+    content.closest("main")?.classList.toggle("has-columns", Boolean(content.querySelector(".simple-columns")));
     foldHeadings(content);
+    addBlockCopyButtons(content);
     mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default" });
     for (const node of Array.from(content.querySelectorAll(".mermaid"))) {
       try {

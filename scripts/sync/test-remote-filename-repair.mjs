@@ -44,7 +44,7 @@ const initial = run(local, ["commit-tree", tree, "-m", "seed"]).trim();
 run(local, ["push", "origin", `${initial}:refs/heads/master`]);
 run(local, ["fetch", "origin", "master"]);
 const git = async (args, authenticated, input) => run(local, args, input);
-const renames = await repairRemoteFilenames(git, "master");
+const renames = await repairRemoteFilenames(git, "master", origin);
 assert.equal(renames.length, 4);
 const remote = run(origin, ["rev-parse", "master"]).trim();
 assert.equal(run(origin, ["rev-parse", "master^"]).trim(), initial);
@@ -54,7 +54,7 @@ assert.equal(run(origin, ["rev-parse", "master:badfolder/_CON.md"]).trim(), blob
 assert.equal(run(origin, ["rev-parse", "master:badfolder/Note.md"]).trim(), blob);
 assert.equal(run(origin, ["rev-parse", "master:badfolder/note 1.md"]).trim(), blob);
 assert.equal(run(local, ["ls-files", "-z"]), "");
-assert.deepEqual(await repairRemoteFilenames(git, "master"), []);
+assert.deepEqual(await repairRemoteFilenames(git, "master", origin), []);
 assert.equal(run(origin, ["rev-parse", "master"]).trim(), remote);
 run(local, ["fetch", "origin", `${initial}`]);
 let fetchedAfterFailure = false;
@@ -62,7 +62,7 @@ await assert.rejects(repairRemoteFilenames(async (args, auth, input) => {
   if (args[0] === "push") throw new Error("permission denied");
   if (args[0] === "fetch") fetchedAfterFailure = true;
   return git(args, auth, input);
-}, "master"), /修复提交未能推送/);
+}, "master", origin), /修复提交未能推送/);
 assert.equal(fetchedAfterFailure, false);
 assert.equal(run(origin, ["rev-parse", "master"]).trim(), remote);
 console.log(`Remote filename repair tests passed; fixtures: ${root}`);

@@ -1,5 +1,5 @@
 import { App, Modal, Setting } from "obsidian";
-import { setActionIcon, setDeleteIcon, styleActionFooter } from "../shared/actionButton";
+import { setActionIcon, setDeleteIcon, styleActionFooter, styleActionButton } from "../shared/actionButton";
 import type { TextReformatRule } from "../types";
 import { applyTextReformatRules, parseReformatExpression } from "./noteReformatRules";
 
@@ -98,8 +98,8 @@ export class ReformatRuleModal extends Modal {
         } catch (reason) { error.setText(reason instanceof Error ? reason.message : String(reason)); }
       });
     }
-    actions.addButton(button => button.setButtonText("取消").onClick(() => this.close()));
-    actions.addButton(button => {
+    actions.addButton(button => { styleActionButton(button.buttonEl, "text"); return (button.setButtonText("取消").onClick(() => this.close())); });
+    actions.addButton(button => { styleActionButton(button.buttonEl, "text");
       saveButton = button.buttonEl;
       button.setButtonText("保存").setCta().onClick(async () => {
         try {

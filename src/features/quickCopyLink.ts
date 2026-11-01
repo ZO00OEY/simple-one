@@ -5,8 +5,8 @@ import { registerMarkdownAction } from "../shared/markdownAction";
 
 const MODE_LABELS: Record<QuickCopyLinkMode, string> = {
   "obsidian-url": "Obsidian URL",
-  "absolute-path": "绝对路径",
-  "navigator-folder-absolute-path": "导航目录绝对路径",
+  "absolute-path": "文件绝对路径",
+  "navigator-folder-absolute-path": "目录绝对路径",
 };
 
 const MODE_ICONS: Record<QuickCopyLinkMode, string> = {
@@ -167,7 +167,9 @@ function makeVaultAbsolutePath(plugin: SimplePlugin, vaultRelativePath: string):
 
 function actionTitle(plugin: SimplePlugin): string {
   const mode = plugin.settings.enhancements.quickCopyLink.lastMode;
-  return `点击复制当前笔记${MODE_LABELS[mode]}`;
+  return mode === "navigator-folder-absolute-path"
+    ? "点击复制左侧导航所选目录的绝对路径"
+    : `点击复制当前笔记${MODE_LABELS[mode]}`;
 }
 
 export function modeIcon(mode: QuickCopyLinkMode): string {

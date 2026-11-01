@@ -39,6 +39,7 @@ function fixture() {
     desktopCommitOnly: async () => { calls.push("commit"); sync.resetDesktopCommitTracking(); return { committed: true }; },
     hasDesktopChanges: async () => false,
     getInterruptedGitOperation: async () => null, getUnmergedPaths: async () => [], setStatus: () => {},
+    saveSettings: async () => {},
     desktopPushOnly: async () => { calls.push("push"); return true; } });
   return { sync, calls };
 }
@@ -107,6 +108,37 @@ for (const [pull, backup, expected] of [
   assert.deepEqual(f.calls, [], 'startup recovery does not bypass the disabled startup upload switch');
 }
 console.log('Desktop startup: fetch-only mode, fetch-before-backup order and deferred merge protection passed');
+
+// The panel's last-sync timestamp tracks completed startup checks, not only uploads.
+for (const backup of [false, true]) {
+  for (const changed of [false, true]) {
+    const f = fixture();
+    const saved = [];
+    Object.assign(f.sync.settings, { pullOnStartup: !backup, backupOnStartup: backup, lastSyncAt: 42 });
+    f.sync.saveSettings = async () => saved.push(f.sync.settings.lastSyncAt);
+    f.sync.desktopFetchAndMerge = async () => changed;
+    f.sync.desktopCommitOnly = async () => ({ committed: changed });
+    f.sync.desktopPushOnly = async () => changed;
+    now = 100;
+    assert.equal(await f.sync.desktopStartupSync(), changed);
+    assert.equal(f.sync.settings.lastSyncAt, 100, 'successful startup, including no changes, updates the displayed time');
+    assert.deepEqual(saved, [100], 'completion time is persisted');
+  }
+}
+for (const stage of ['fetch', 'commit', 'push', 'disabled']) {
+  const f = fixture();
+  const saved = [];
+  Object.assign(f.sync.settings, { pullOnStartup: false, backupOnStartup: stage !== 'disabled', lastSyncAt: 42 });
+  f.sync.saveSettings = async () => saved.push(f.sync.settings.lastSyncAt);
+  f.sync.desktopFetchAndMerge = async () => { if (stage === 'fetch') throw Error('offline'); return false; };
+  f.sync.desktopCommitOnly = async () => { if (stage === 'commit') throw Error('commit failed'); return { committed: false }; };
+  f.sync.desktopPushOnly = async () => { if (stage === 'push') throw Error('push failed'); return false; };
+  if (stage === 'disabled') assert.equal(await f.sync.desktopStartupSync(), false);
+  else await assert.rejects(f.sync.desktopStartupSync(), /offline|failed/);
+  assert.equal(f.sync.settings.lastSyncAt, 42, 'failed or disabled startup retains the previous completion time');
+  assert.deepEqual(saved, []);
+}
+console.log('Desktop startup timestamps: changed/no-op success persists; failures and disabled startup retain prior time');
 
 for (const cancel of [false, true]) {
   const f = fixture();

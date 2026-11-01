@@ -1,6 +1,14 @@
 export const FORMAT_TOOLS = ["textColor", "bold", "italic", "underline", "strike", "highlight", "heading", "quote"] as const;
 export type FormatTool = typeof FORMAT_TOOLS[number];
 
+function preserveBoundaryNewlines(text: string, transform: (content: string) => string): string {
+  const leading = /^[\r\n]+/.exec(text)?.[0] || "";
+  const trailing = /[\r\n]+$/.exec(text)?.[0] || "";
+  if (leading.length === text.length) return text;
+  const content = text.slice(leading.length, trailing ? -trailing.length : undefined);
+  return leading + transform(content) + trailing;
+}
+
 export function orderedFormatTools(order: string[]): FormatTool[] {
   const migrated = order.map(id => id === "color" ? "textColor" : id);
   const result = [...new Set([...migrated, ...FORMAT_TOOLS])].filter((id): id is FormatTool => FORMAT_TOOLS.some(tool => tool === id));
@@ -14,6 +22,7 @@ export function orderedFormatTools(order: string[]): FormatTool[] {
 }
 
 export function toggleInlineFormat(text: string, marker: string): string {
+  if (/^[\r\n]|[\r\n]$/.test(text)) return preserveBoundaryNewlines(text, content => toggleInlineFormat(content, marker));
   if (text.startsWith(marker) && text.endsWith(marker) && text.length > marker.length * 2) return text.slice(marker.length, -marker.length);
   return marker + text + marker;
 }
@@ -25,6 +34,7 @@ function inlineHtmlText(text: string): string {
 }
 
 export function colorSelection(text: string, property: "color" | "background-color", color: string): string {
+  if (/^[\r\n]|[\r\n]$/.test(text)) return preserveBoundaryNewlines(text, content => colorSelection(content, property, color));
   if (!/^#[\da-f]{6}(?:[\da-f]{2})?$/i.test(color)) throw new Error("无效的颜色值");
   const escaped = inlineHtmlText(text);
   return property === "background-color"
@@ -33,6 +43,7 @@ export function colorSelection(text: string, property: "color" | "background-col
 }
 
 export function colorInlineFormat(text: string, tool: "bold" | "italic" | "strike" | "underline", color: string): string {
+  if (/^[\r\n]|[\r\n]$/.test(text)) return preserveBoundaryNewlines(text, content => colorInlineFormat(content, tool, color));
   const span = colorSelection(text, "color", color);
   const tag = { bold: "strong", italic: "em", strike: "del", underline: "u" }[tool];
   const html = span.replace(/^<span /, `<${tag} `).replace(/<\/span>$/, `</${tag}>`);
@@ -107,6 +118,7 @@ export function restoreThemeStyles(text: string, tool: InlineFormatTool | "textC
 }
 
 export function useThemeStyle(text: string, tool: InlineFormatTool | "textColor"): string {
+  if (/^[\r\n]|[\r\n]$/.test(text)) return preserveBoundaryNewlines(text, content => useThemeStyle(content, tool));
   const restored = restoreThemeStyles(text, tool);
   if (restored.changed || tool === "textColor") return restored.text;
   return applyInlineStyle(text, tool, "theme");
@@ -128,6 +140,7 @@ export function clearSpecialFormatting(text: string): string {
 }
 
 export function highlightSelection(text: string, foreground: string, background: string): string {
+  if (/^[\r\n]|[\r\n]$/.test(text)) return preserveBoundaryNewlines(text, content => highlightSelection(content, foreground, background));
   for (const color of [foreground, background]) if (color !== "theme" && !/^#[\da-f]{6}(?:[\da-f]{2})?$/i.test(color)) throw new Error("无效的颜色值");
   if (foreground === "theme" && background === "theme") return useThemeStyle(text, "highlight");
   text = restoreThemeStyles(text, "highlight").text;
@@ -137,6 +150,7 @@ export function highlightSelection(text: string, foreground: string, background:
 }
 
 export function applyInlineStyle(text: string, tool: InlineFormatTool, color = "theme"): string {
+  if (/^[\r\n]|[\r\n]$/.test(text)) return preserveBoundaryNewlines(text, content => applyInlineStyle(content, tool, color));
   const tag = { bold: "strong", italic: "em", strike: "del", underline: "u", highlight: "mark" }[tool];
   const marker = { bold: "**", italic: "*", strike: "~~", underline: "", highlight: "==" }[tool];
   const html = new RegExp(`^<${tag}(?: style="[^"]*")?>([\\s\\S]*)<\\/${tag}>$`, "i").exec(text);

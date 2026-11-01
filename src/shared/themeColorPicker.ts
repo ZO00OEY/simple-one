@@ -1,8 +1,9 @@
+import { styleActionButton } from "./actionButton";
 import { Modal, Notice, setIcon } from "obsidian";
 import type SimplePlugin from "../main";
 import { colorRgb, hsvHex, parseColorValue } from "./colorValues";
 
-export const FAVORITE_COLORS = ["#f6f7f9", "#824ce6", "#e60f61", "#ed393b", "#168c54", "#2f80ed"];
+export const FAVORITE_COLORS = ["#f6f7f9", "#e60f61", "#ed393b", "#de7802", "#2ea121", "#168c54", "#2f80ed", "#824ce6"];
 
 export function readThemePalette(context: HTMLElement, plugin: SimplePlugin): string[] {
   const doc = context.ownerDocument;
@@ -124,7 +125,7 @@ class ThemeColorModal extends Modal {
     const preview = tools.createEl("button", { cls: "simple-theme-color-preview", attr: { type: "button", "aria-label": "收藏当前颜色", "aria-pressed": "false" } });
     setIcon(preview, "heart");
     let refreshRecent = (): void => {};
-    const emit = (value: string): void => { if (!this.confirmSelection) this.changed(value); };
+    const emit = (value: string): void => { if (this.confirmSelection !== "manage") this.changed(value); };
     const commit = (): void => { emit(this.value); refreshRecent(); };
     const pick = (value: string, commit = true): void => {
       this.value = value; this.readColor(); this.refresh();
@@ -162,7 +163,8 @@ class ThemeColorModal extends Modal {
     const renderPalette = (): void => {
       swatches.replaceChildren();
       const colors = active === "最近" ? this.plugin.settings.themeRecentColors || [] : active === "收藏" ? this.plugin.settings.themeFavoriteColors ?? FAVORITE_COLORS : themeColors;
-      for (const color of [...new Set([initial, ...colors])].filter(color => /^#[0-9a-f]{6}$/i.test(color))) {
+      const pinned = this.confirmSelection === "manage" ? [initial, "#f6f7f9"] : [initial];
+      for (const color of [...new Set([...pinned, ...colors])].filter(color => /^#[0-9a-f]{6}$/i.test(color))) {
         const control = swatches.createEl("button", { cls: "simple-theme-color-swatch", attr: { type: "button", title: color.toUpperCase(), "aria-pressed": String(color === this.value) } });
         control.style.setProperty("--simple-color-swatch", color);
         control.addEventListener("click", () => pick(color));
@@ -179,7 +181,7 @@ class ThemeColorModal extends Modal {
       button.addEventListener("click", () => { active = name; renderPalette(); });
     }
     refreshRecent = renderPalette;
-    const restore = this.contentEl.createEl("button", { cls: "simple-theme-color-restore", attr: { type: "button", title: "恢复预设" } });
+    const restore = styleActionButton(this.contentEl.createEl("button", { cls: "simple-theme-color-restore", attr: { type: "button", title: "恢复预设" } }), "bordered");
     setIcon(restore, "rotate-ccw");
     restore.addEventListener("click", () => {
       const colors = this.plugin.settings.themeFavoriteColors ?? FAVORITE_COLORS;
@@ -236,10 +238,6 @@ class ThemeColorModal extends Modal {
       if (!element.title) element.title = element.getAttribute("aria-label")!;
       element.removeAttribute("aria-label");
     });
-    if (this.confirmSelection) {
-      const apply = this.contentEl.createEl("button", { text: this.confirmSelection === "manage" ? "添加" : "应用到选中文字", cls: "mod-cta simple-theme-color-confirm", attr: { type: "button" } });
-      apply.addEventListener("click", () => { this.changed(this.value); this.close(); });
-    }
   }
   onClose(): void { this.closed(); }
 }

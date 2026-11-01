@@ -22,6 +22,9 @@ import {
   refreshRenderedHtmlPreviews,
 } from "./features/htmlPreview";
 import { registerCurrentNoteLinkConverter } from "./features/currentNoteLinkConverter";
+import { initializeAttachmentDefaults } from "./features/attachmentOrganizer";
+import { registerAttachmentAutomation } from "./features/attachmentAutomation";
+import { registerAttachmentReferenceJump } from "./features/attachmentReferenceJump";
 import { registerImageZoom } from "./features/imageZoom";
 import { registerMermaidEnhancer } from "./features/mermaidEnhancer";
 import { registerLinkFilter } from "./features/linkFilter";
@@ -31,7 +34,7 @@ import { registerPopupWindowSizing } from "./features/popupWindowSizing";
 import { registerWindowPositionOptimization } from "./features/windowPositionOptimization";
 import { registerQuickCopyLink } from "./features/quickCopyLink";
 import { registerNotionColumns } from "./features/notionColumns";
-import { applyQuickFormatStyles, registerQuickFormat } from "./features/quickFormat";
+import { applyQuickFormatStyles, repairHeadingFontSizes, registerQuickFormat } from "./features/quickFormat";
 import { registerSearchFolderFilter } from "./features/searchFolderFilter";
 import { registerTemplateFillAction, TEMPLATE_FILL_ICON } from "./features/templateFillAction";
 import { TemplateFillView, VIEW_TYPE } from "./features/templateFill";
@@ -45,6 +48,7 @@ import { normalizePopupScalePercent } from "./shared/popupSizing";
 import { activeDisplayProfile, displayParameterEnabled, loadMobileDisplayProfile } from "./shared/displayProfile";
 import { normalizeTypography } from "./shared/typography";
 import { registerTypography } from "./features/typography";
+import { registerTranslationCards } from "./features/translationCards";
 import { registerThemeAppearance } from "./features/themeAppearance";
 import { applySwitchStates, collectSwitchStates, isSharedSwitchPath, mobileSettingsForSave, type SwitchStates } from "./shared/platformSwitches";
 import {
@@ -93,6 +97,8 @@ export default class SimplePlugin extends Plugin {
   refreshPopupWindowSizing: () => void = () => {};
   refreshTypography: () => void = () => {};
   refreshThemeAppearance: () => void = () => {};
+  refreshAttachmentAutomation: () => void = () => {};
+  refreshAttachmentReferenceActions: () => void = () => {};
   private readableLineWidthDocuments = new Set<Document>();
   private templateFolder = "";
   private desktopSwitchStates: SwitchStates = {};
@@ -106,11 +112,17 @@ export default class SimplePlugin extends Plugin {
     this.register(() => document.body.classList.remove("simple-one-active"));
     await this.loadSettings();
     if (loadCancelled) return;
+    await initializeAttachmentDefaults(this).catch(reportError);
+    if (loadCancelled) return;
     if (this.needsPlatformSwitchSave) await this.saveSettings();
     if (loadCancelled) return;
+    this.refreshAttachmentAutomation = registerAttachmentAutomation(this);
+    this.refreshAttachmentReferenceActions = registerAttachmentReferenceJump(this);
     applyQuickFormatStyles(this);
+    registerTranslationCards(this);
     this.applyReadableLineWidth();
-    this.refreshTypography = registerTypography(this);
+    const refreshTypography = registerTypography(this);
+    this.refreshTypography = () => { refreshTypography(); void repairHeadingFontSizes(this).catch(reportError); };
     this.refreshThemeAppearance = registerThemeAppearance(this);
     this.applyImageHeightLimit();
     this.applyMobileHeaderButtons();
@@ -137,7 +149,7 @@ export default class SimplePlugin extends Plugin {
         ]) doc.body.style.removeProperty(property);
       }
     });
-    this.registerEvent(this.app.workspace.on("css-change", () => this.applyMobileHeaderButtons()));
+    this.registerEvent(this.app.workspace.on("css-change", () => { this.applyMobileHeaderButtons(); void repairHeadingFontSizes(this, true).catch(reportError); }));
     this.register(() => {
       document.body.classList.remove("simple-mobile-header-size", "simple-mobile-native-header", "simple-mobile-compact-bottom");
       document.body.style.removeProperty("--simple-mobile-header-button-size");
@@ -244,6 +256,7 @@ export default class SimplePlugin extends Plugin {
     this.register(() => { unloaded = true; if (sidebarTimer !== undefined) window.clearTimeout(sidebarTimer); });
     this.app.workspace.onLayoutReady(() => {
       if (unloaded) return;
+      void repairHeadingFontSizes(this, true).catch(reportError);
       sidebarTimer = window.setTimeout(() => {
         void (async () => {
           if (unloaded) return;

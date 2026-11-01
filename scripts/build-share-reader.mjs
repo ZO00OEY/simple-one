@@ -20,7 +20,7 @@ export async function buildReaderFiles() {
     loader: { ".woff2": "dataurl", ".woff": "dataurl", ".ttf": "dataurl" }, logLevel: "warning",
     plugins: [{ name: "modern-fonts", setup(build) {
       build.onLoad({ filter: /katex\.min\.css$/ }, async args => ({
-        contents: (await fs.readFile(args.path, "utf8")).replace(/,url\([^)]*\.(?:woff|ttf)\) format\([^)]*\)/g, ""), loader: "css", resolveDir: path.dirname(args.path),
+        contents: (await fs.readFile(args.path, "utf8")).replace(/@font-face\s*\{[^}]*\}/g, ""), loader: "css", resolveDir: path.dirname(args.path),
       }));
     } }],
   });
