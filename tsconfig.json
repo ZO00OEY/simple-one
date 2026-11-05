@@ -11,11 +11,15 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": ".",
     "baseUrl": ".",
     "paths": {
-      "obsidian": ["./node_modules/obsidian/obsidian.d.ts"]
+      "obsidian": [
+        "./node_modules/obsidian/obsidian.d.ts"
+      ]
     }
   },
-  "include": ["src/**/*.ts"]
+  "include": [
+    "src/**/*.ts"
+  ]
 }

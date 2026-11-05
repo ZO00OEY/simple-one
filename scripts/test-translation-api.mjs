@@ -56,4 +56,5 @@ const plugin={manifest:{id:'simple-one'},settings:{enhancements:{quickFormat:{tr
 reply={choices:[{message:{content:'new'}}]};assert.equal(await translationService(plugin).translateSelection({modelId:'one',text:'x',prompt:'p',sourceId:'custom'}),'new');
 assert(!JSON.stringify(plugin.settings).includes('secret'));
 config.provider='simple-ai';assert.equal(translationService(plugin),legacyBridge);delete config.provider;config.sourceId='legacy';assert.equal(translationService(plugin),legacyBridge);
+plugin.app.plugins.plugins['simple-one']={ai:{core:legacyBridge}};delete plugin.app.plugins.plugins['simple-ai'];assert.equal(translationService(plugin),legacyBridge,'integrated AI remains available without the standalone plugin');
 console.log('Translation API passed: URL completion, model fetching, both protocols, errors/redaction, cancellation, secret storage, custom routing and legacy Simple AI compatibility.');

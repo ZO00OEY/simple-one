@@ -2,6 +2,8 @@
 // Types & defaults — no dependency on other src files
 // ============================================================
 
+import type { ApiSource } from "../modules/ai/src/api/types";
+
 export interface FilterRule {
   id: string;
   enabled: boolean;
@@ -131,6 +133,8 @@ export interface SimplePluginSettings {
   lastSettingsTab?: string;
   showSyncSharingEntry: boolean;
   showSharingEntry: boolean;
+  enableAI: boolean;
+  aiSources: ApiSource[];
   showCalendarDiaryEntry: boolean;
   displayParameterSwitches: {
     desktop: Partial<Record<DisplayParameter, boolean>>;
@@ -761,6 +765,8 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   attachmentFolderMode: "note",
   showSyncSharingEntry: true,
   showSharingEntry: true,
+  enableAI: false,
+  aiSources: [],
   showCalendarDiaryEntry: true,
   displayParameterSwitches: { desktop: {}, mobile: {} },
   desktopTypography: { latinFontEnabled: true, latinFont: "Segoe UI", interfaceFontEnabled: true, textFontEnabled: true, interfaceFont: "yahei", textFont: "jinkai", enabled: true, fontSize: 15, lineHeight: 1.7, letterSpacing: 0.04, latinLetterSpacing: 0, latinLetterSpacingEnabled: true, letterSpacingUnit: "em", paragraphSpacing: 0.8, paragraphStyle: "spaced" },

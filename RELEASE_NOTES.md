@@ -1,3 +1,14 @@
+# Simple One 1.0.31
+
+- 内置可选 AI 功能，在“拓展”中使用机器人图标的 AI 开关；启用后，AI 标签位于日程和拓展之间。
+- 设置按模型管理、助手设置、模型协作、上下文压缩、缓存维护、用量统计排列，不再分基础／高级设置。
+- AI 模块独立管理生命周期，关闭时停止任务、释放事件与关闭聊天视图；旧版 Obsidian 保持其他功能可用，AI 需要 1.11.4+。
+- 模型来源随 Simple One 配置保存；聊天和本机偏好保存在插件私有目录，API 密钥使用独立的 SecretStorage 命名空间。无自动读取或迁移旧插件数据的逻辑。
+- 选区翻译可直接使用内置 AI，保留独立自定义 API 和旧 Simple AI 的兼容入口。
+- Release 只包含插件程序、清单与样式，不包含个人配置、聊天、图片或密钥。
+
+English: optional built-in AI with a unified settings page, independent lifecycle and private storage, and direct selection-translation integration. AI requires Obsidian 1.11.4+; other features retain their existing minimum version. No automatic standalone-plugin data migration.
+
 # Simple One 1.0.30
 
 - 分享阅读页将文件列表和文章目录并列放在左侧，正文标题固定显示；提供简洁的目录折叠、日夜模式、强调色与本地偏好保存。

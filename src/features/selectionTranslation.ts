@@ -28,7 +28,9 @@ function trackTranslationModal(plugin: SimplePlugin, modal: Modal): void {
 }
 export { TRANSLATION_PROMPTS } from "./translationPreferences";
 export function translationBridge(app: App): TranslationBridge | undefined {
-  const plugin = (app as unknown as { plugins?: { plugins?: Record<string, unknown> } }).plugins?.plugins?.["simple-ai"] as Partial<TranslationBridge> | undefined;
+  const plugins = (app as unknown as { plugins?: { plugins?: Record<string, unknown> } }).plugins?.plugins;
+  const embedded = (plugins?.["simple-one"] as { ai?: { core?: Partial<TranslationBridge> } } | undefined)?.ai?.core;
+  const plugin = embedded ?? plugins?.["simple-ai"] as Partial<TranslationBridge> | undefined;
   if (typeof plugin?.getTranslationModels === "function" && typeof plugin.translateSelection === "function" && plugin.getTranslationModels().length) return plugin as TranslationBridge;
   return undefined;
 }
@@ -86,7 +88,7 @@ export class TranslationSettingsModal extends Modal {
       });
       source.addDropdown(dropdown => {
         dropdown.selectEl.setAttribute("aria-label", "模型来源");
-        dropdown.addOptions({ custom: "自定义 API", "simple-ai": "引用 Simple AI" }).setValue(draft.provider!).onChange(value => { draft.provider = value as typeof draft.provider; renderModels(); });
+        dropdown.addOptions({ custom: "自定义 API", "simple-ai": this.plugin.ai?.core ? "内置 AI" : "引用 Simple AI" }).setValue(draft.provider!).onChange(value => { draft.provider = value as typeof draft.provider; renderModels(); });
       });
       const models = draft.provider === "custom" ? (draft.api?.models ?? []).map(modelId => ({ sourceId: "custom", modelId, label: modelId })) : translationBridge(this.app)?.getTranslationModels() ?? [];
       const selected = models.find(model => model.sourceId === draft.sourceId && model.modelId === draft.modelId) ?? models[0];

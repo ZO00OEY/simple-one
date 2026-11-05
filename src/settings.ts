@@ -225,6 +225,7 @@ export class SimpleSettingTab extends PluginSettingTab {
   private diaryPathSuggestions: DiaryPathSuggest[] = [];
 
   hide(): void {
+    this.plugin.ai?.hideSettings();
     this.diaryPathSuggestions.forEach(suggest => suggest.close());
     this.diaryPathSuggestions = [];
     this.syncTab.hide();
@@ -269,6 +270,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     this.syncTab.hide();
     containerEl.empty();
+    this.plugin.ai?.hideSettings();
     containerEl.addClass("simple-settings");
 
     if (this.page.type === "overview") {
@@ -467,6 +469,11 @@ export class SimpleSettingTab extends PluginSettingTab {
       });
       checkboxRowIcon(row, key === "showSyncSharingEntry" ? "refresh-cw" : key === "showSharingEntry" ? "share-2" : "calendar-days");
     }
+    const aiRow = this.renderDisplayCheckbox(extensions, "AI", "在设置首页显示 AI，并启用聊天与模型功能。", this.plugin.settings.enableAI, async value => {
+      await this.plugin.ai.setEnabled(value);
+      this.renderSettings();
+    });
+    checkboxRowIcon(aiRow, "bot");
 
     const search = settingsFieldset(container, "搜索增强");
     const config = this.plugin.settings.searchFolders;
@@ -716,6 +723,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       ...(this.plugin.settings.showSyncSharingEntry ? [{ id: "sync-sharing", name: "同步", icon: "refresh-cw" } as const] : []),
       ...(this.plugin.settings.showSharingEntry ? [{ id: "sharing", name: "分享", icon: "share-2" } as const] : []),
       ...(this.plugin.settings.showCalendarDiaryEntry ? [{ id: "calendar-diary", name: "日程", icon: "calendar-days" } as const] : []),
+      ...(this.plugin.settings.enableAI ? [{ id: "ai", name: "AI", icon: "bot" } as const] : []),
       { id: "basic", name: "拓展", icon: "settings-2" },
       { id: "shortcuts", name: "编辑", icon: "keyboard" },
       { id: "display", name: "显示", icon: "monitor" },
@@ -788,6 +796,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     };
     const loaded = new Set<number>();
     const select = (index: number): void => preserveLayout(() => {
+      this.plugin.ai?.hideSettings();
       const sharing = tabs[index].id === "sharing";
       if (tabs[index].id === "sync-sharing" || sharing) {
         const panel = panels[index];
@@ -808,7 +817,10 @@ export class SimpleSettingTab extends PluginSettingTab {
         this.syncTab.hide();
         tabList.style.removeProperty("display");
       }
-      if (tabs[index].id !== "sync-sharing" && !sharing && !loaded.has(index)) {
+      if (tabs[index].id === "ai") {
+        const panel = panels[index]; panel.empty(); this.plugin.ai.renderInto(panel);
+      }
+      if (tabs[index].id !== "sync-sharing" && tabs[index].id !== "ai" && !sharing && !loaded.has(index)) {
         loaded.add(index);
         const panel = panels[index];
         if (tabs[index].id === "display") this.renderDisplayPanel(panel);

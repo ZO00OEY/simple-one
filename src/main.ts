@@ -1,6 +1,7 @@
 // ============================================================
 // Simple One — entry point
 // ============================================================
+import AiFeature from "./features/ai";
 import {
   Editor,
   MarkdownView,
@@ -82,6 +83,7 @@ export default class SimplePlugin extends Plugin {
   settings!: SimplePluginSettings;
   sync!: SyncFeature;
   share!: ShareFeature;
+  ai!: AiFeature;
   readonly isMobile = Platform.isMobile;
 
   get displaySettings() {
@@ -255,6 +257,9 @@ export default class SimplePlugin extends Plugin {
     this.addRibbonIcon("share-2", "分享", () => {
       void this.share.open().catch(reportError);
     });
+    this.ai = this.addChild(new AiFeature(this));
+    await this.ai.initialize().catch(reportError);
+    if (loadCancelled) return;
     this.addSettingTab(new SimpleSettingTab(this.app, this));
     let sidebarTimer: number | undefined, unloaded = false;
     this.register(() => { unloaded = true; if (sidebarTimer !== undefined) window.clearTimeout(sidebarTimer); });

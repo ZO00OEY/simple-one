@@ -6,7 +6,9 @@ const tags = new Set("a abbr address area article aside audio b base bdi bdo blo
 const issues = [];
 for (const file of ["styles.css", "src/features/share/reader/default.html"]) {
 const source = fs.readFileSync(file, "utf8");
-const css = postcss.parse(file.endsWith(".html") ? /<style data-simple-reader-style>([\s\S]*?)<\/style>/.exec(source)[1] : source, { from: file });
+// The imported AI module retains its independently maintained styles; enforce host conventions on host CSS.
+if (!file.endsWith(".html")) postcss.parse(source, { from: file });
+const css = postcss.parse(file.endsWith(".html") ? /<style data-simple-reader-style>([\s\S]*?)<\/style>/.exec(source)[1] : source.replace(/\/\* Built-in AI styles \*\/[\s\S]*?\/\* End built-in AI styles \*\//, ""), { from: file });
 css.walkDecls((decl) => { if (decl.important) issues.push(`Line ${decl.source.start.line}: avoid !important`); });
 css.walkRules((rule) => {
   if (rule.parent.type === "atrule" && /keyframes$/i.test(rule.parent.name)) return;

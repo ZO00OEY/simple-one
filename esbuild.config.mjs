@@ -5,6 +5,12 @@ import { watch } from "node:fs";
 import { writeDefaultReader } from "./scripts/build-share-reader.mjs";
 
 const prod = process.argv[2] === "production";
+async function writeAIStyles() {
+  const source = await fs.readFile("modules/ai/styles.css", "utf8");
+  const css = (await fs.readFile("styles.css", "utf8")).replace(/\n\/\* Built-in AI styles \*\/[\s\S]*?\/\* End built-in AI styles \*\//, "");
+  await fs.writeFile("styles.css", css.trimEnd() + "\n/* Built-in AI styles */\n" + source.trim() + "\n/* End built-in AI styles */\n");
+}
+await writeAIStyles();
 
 const context = await esbuild.context({
   entryPoints: ["src/main.ts"],

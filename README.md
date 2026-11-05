@@ -66,6 +66,10 @@ Desktop Git sync obtains credentials through GitHub CLI. If you switch between m
 
 See the [user guide](USAGE.md), [personal files and credentials](docs/private-files.md) and [technical review notes](docs/automated-review-notes.md).
 
+## What's new in 1.0.31
+
+- **Built-in AI:** enable AI under Extensions to use models, chat, skills, memory and cooperation in a unified settings page. AI requires Obsidian 1.11.4+; no standalone AI plugin is needed. Selection translation can use built-in models. Private configuration, chats and secrets are excluded from releases.
+
 ## What's new in 1.0.30
 
 - Standalone translation APIs, left-side navigation and fixed-file sharing templates; refined native tooltips, reading modes and typography safeguards.
