@@ -1,5 +1,6 @@
+import { ButtonComponent, Setting } from "../ui";
 import { setNativeTooltip } from "../tooltipText";
-import { App, ButtonComponent, Modal, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, Modal, Notice, PluginSettingTab } from "obsidian";
 import type SimpleAIPlugin from "../main";
 import { ApiClient, endpoint, safeError, completeSourceAddresses } from "./client";
 import { ApiSource, label, ModelEntry, newSource, validateSource } from "./types";

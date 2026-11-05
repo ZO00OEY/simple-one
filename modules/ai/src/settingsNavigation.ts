@@ -1,4 +1,6 @@
-import { Setting, setIcon } from "obsidian";
+import { Setting } from "./ui";
+import { setIcon } from "obsidian";
+import { styleSettingIconAction } from "../../../src/shared/actionButton";
 
 export function settingsNavigation(setting: Setting, open: () => void): void {
   const row = setting.settingEl;
@@ -9,6 +11,7 @@ export function settingsNavigation(setting: Setting, open: () => void): void {
   row.removeAttribute("role");
   row.removeAttribute("tabindex");
   setIcon(arrow, "settings");
+  styleSettingIconAction(arrow);
   row.addEventListener("click", open);
 
 }

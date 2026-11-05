@@ -9,7 +9,7 @@ globalThis.document = doc; globalThis.window = window;
 const notices = [];
 class MarkdownView {}
 class Modal { constructor() { this.titleEl=doc.createElement('div'); this.contentEl=doc.createElement('div'); } open() {} close() {} }
-const obsidian = { getLanguage:()=>"zh", MarkdownView, Modal, Notice: class { constructor(message) { notices.push(message); } }, setIcon(el, name) { el.dataset.icon=name;el.replaceChildren(doc.createElementNS('http://www.w3.org/2000/svg','svg')); }, setTooltip(el, text) { el.setAttribute('aria-label',text); } };
+const obsidian = { Setting:class{}, ButtonComponent:class{}, getLanguage:()=>"zh", MarkdownView, Modal, Notice: class { constructor(message) { notices.push(message); } }, setIcon(el, name) { el.dataset.icon=name;el.replaceChildren(doc.createElementNS('http://www.w3.org/2000/svg','svg')); }, setTooltip(el, text) { el.setAttribute('aria-label',text); } };
 function create(parent, tag, options={}) { const el=doc.createElement(tag); if(options.cls) el.className=options.cls; if(options.text) el.textContent=options.text; for(const [k,v] of Object.entries(options.attr||{}))el.setAttribute(k,v); parent.append(el); return el; }
 window.HTMLElement.prototype.createEl=function(tag,o){return create(this,tag,o);};
 window.HTMLElement.prototype.createDiv=function(o){return create(this,'div',o);};
@@ -280,14 +280,14 @@ plugin.app.workspace.revealLeaf=async()=>{revealed=true;};
 doc.querySelector('.simple-selection-toolbox [data-icon="search"]').click();await Promise.resolve();await Promise.resolve();
 assert.equal(searchState.type,'search');assert.equal(searchState.state.query,JSON.stringify(value));assert(revealed);
 assert.equal(value,'中文 & search','search actions do not alter the note');
-const {translationBridge}=await load('src/features/selectionTranslation.ts');
-assert.equal(translationBridge(plugin.app),undefined,'Simple AI bridge is unavailable without that plugin');
-await update();assert(doc.querySelector('.simple-selection-translation-row'),'translation settings entry remains available without Simple AI');
-plugin.app.plugins={plugins:{'simple-ai':{getTranslationModels:()=>[],translateSelection:async()=>''}}};
-assert.equal(translationBridge(plugin.app),undefined,'Simple AI bridge requires usable models');
-plugin.app.plugins.plugins['simple-ai'].getTranslationModels=()=>[{sourceId:'source',modelId:'model',label:'Model'}];
-assert(translationBridge(plugin.app),'enabled compatible plugin exposes translation');
-await update();assert(doc.querySelector('.simple-selection-translation-row [data-icon="languages"]'),'translation appears when Simple AI is available');
+const {translationService}=await load('src/features/selectionTranslation.ts');
+assert.equal(translationService(plugin),undefined);
+await update();assert(doc.querySelector('.simple-selection-translation-row'));
+plugin.ai={getTranslationModels:()=>[],translateSelection:async()=>''};
+assert.equal(translationService(plugin),undefined);
+plugin.ai.getTranslationModels=()=>[{sourceId:'source',modelId:'model',label:'Model'}];
+plugin.settings.enableAI=false;assert(translationService(plugin),'AI switch does not hide configured translation models');
+await update();assert(doc.querySelector('.simple-selection-translation-row [data-icon="languages"]'));
 config.selectionTranslation=false;await update();assert.equal(doc.querySelector('.simple-selection-translation-row'),null,'translation checkbox hides the entry even with Simple AI available');
 config.selectionTranslation=true;await update();assert(doc.querySelector('.simple-selection-translation-row'),'reenabling restores translation');
 for(const cleanup of cleanups)cleanup();await update();assert.equal(doc.querySelector('.simple-selection-toolbar'),null);

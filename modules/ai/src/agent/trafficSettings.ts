@@ -1,4 +1,5 @@
-import { ButtonComponent } from "obsidian";
+import { ButtonComponent } from "../ui";
+
 import type SimpleAIPlugin from "../main";
 import type { WorkRecord } from "./cooperation";
 import { modelUsage, usageRecords } from "./usage";

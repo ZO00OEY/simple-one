@@ -1,4 +1,5 @@
-import { Modal, Notice, Setting, setIcon } from "obsidian";
+import { Setting } from "../ui";
+import { Modal, Notice, setIcon } from "obsidian";
 import { childPolicy } from "./workPolicies";
 import type SimpleAIPlugin from "../main";
 import { type CooperationSettings } from "./types";

@@ -2,16 +2,18 @@ import { migrateAuxiliary } from "./agent/types";
 import { Notice, Plugin, requestUrl } from "obsidian";
 import { ApiClient } from "./api/client";
 import { LibraryPicker } from "./api/settings";
-import { ApiSource, defaults, Settings } from "./api/types";
+import { ApiSource, defaults, Settings, translationModels } from "./api/types";
 import { agentDefaults, cooperationDefaults, defaultAuxiliaryUsage } from "./agent/types";
 import { Cooperation } from "./agent/cooperation";
 import { AgentRuntime } from "./agent/runtime";
 import { ChatView, CHAT_VIEW } from "./agent/view";
 
+class AIInterface extends Plugin { onload(): void {} }
+
 export default class SimpleAIPlugin extends Plugin {
   openSettings: () => void = () => {};
   getTranslationModels(): { sourceId: string; modelId: string; label: string }[] {
-    return this.settings.sources.flatMap(source => source.models.map(model => ({ sourceId: source.id, modelId: model.id, label: `[${source.name}] ${model.alias || model.id}` })));
+    return translationModels(this.settings.sources);
   }
   async translateSelection(input: { text: string; prompt: string; sourceId: string; modelId: string }, signal?: AbortSignal, onUpdate?: (text: string) => void): Promise<string> {
     if (!input.text.trim()) throw new Error("翻译内容不能为空。");
@@ -32,6 +34,15 @@ export default class SimpleAIPlugin extends Plugin {
   private lastCacheCheck = 0;
   private startupStage = "初始化";
   private active = true;
+  private ui?: Plugin;
+  private requestsReady?: Promise<void>;
+  prepareRequests(): Promise<void> {
+    return this.requestsReady ??= this.initializeRequests().catch(error => { this.requestsReady = undefined; throw error; });
+  }
+  stopUI(): void {
+    this.runtime.stop(); this.cooperation.stop();
+    if (this.ui) { const ui = this.ui; this.ui = undefined; this.removeChild(ui); }
+  }
   onload(): void {}
   async start(): Promise<void> {
     try { await this.initialize(); }
@@ -42,7 +53,7 @@ export default class SimpleAIPlugin extends Plugin {
       throw error;
     }
   }
-  private async initialize(): Promise<void> {
+  private async initializeRequests(): Promise<void> {
     this.startupStage = "读取设置";
     this.settings = { ...defaults(), ...await this.loadData() };
     const localPath = `${this.manifest.dir}/private/settings.json`;
@@ -73,14 +84,20 @@ export default class SimpleAIPlugin extends Plugin {
     if (!this.active) return;
     await this.update(this.settings);
     if (!this.active) return;
+  }
+  private async initialize(): Promise<void> {
+    await this.prepareRequests();
+    if (!this.active || this.ui) return;
+    const ui = this.addChild(new AIInterface(this.app, this.manifest));
+    this.ui = ui;
     this.startupStage = "注册界面与命令";
     const rememberNote = () => { const file = this.app.workspace.getActiveFile(); if (file?.extension === "md") this.lastFocusedNote = file.path; };
     rememberNote();
-    this.registerEvent(this.app.workspace.on("file-open", file => { if (file?.extension === "md") this.lastFocusedNote = file.path; }));
-    this.registerEvent(this.app.workspace.on("active-leaf-change", rememberNote));
-    this.registerEvent(this.app.vault.on("modify", file => this.runtime.search.invalidate(file.path)));
-    this.registerEvent(this.app.vault.on("delete", file => this.runtime.search.invalidate(file.path)));
-    this.registerEvent(this.app.vault.on("rename", (file, old) => {
+    ui.registerEvent(this.app.workspace.on("file-open", file => { if (file?.extension === "md") this.lastFocusedNote = file.path; }));
+    ui.registerEvent(this.app.workspace.on("active-leaf-change", rememberNote));
+    ui.registerEvent(this.app.vault.on("modify", file => this.runtime.search.invalidate(file.path)));
+    ui.registerEvent(this.app.vault.on("delete", file => this.runtime.search.invalidate(file.path)));
+    ui.registerEvent(this.app.vault.on("rename", (file, old) => {
       this.runtime.search.invalidate(old); this.runtime.search.invalidate(file.path);
       const moved = (path: string) => path === old ? file.path : path.startsWith(old + "/") ? file.path + path.slice(old.length) : path;
       this.lastFocusedNote = moved(this.lastFocusedNote);
@@ -88,25 +105,25 @@ export default class SimpleAIPlugin extends Plugin {
       for (const session of this.runtime.state.sessions) if (session.references?.some(path => moved(path) !== path)) { session.references = session.references.map(moved); changed = true; }
       if (changed) { this.runtime.changed(); void this.runtime.save().catch(() => new Notice("关联笔记路径保存失败。")); }
     }));
-    this.registerView(CHAT_VIEW, leaf => new ChatView(leaf, this));
-    this.addRibbonIcon("bot", "AI", () => { void this.openChat(); });
-    this.addCommand({ id: "open-chat", name: "打开聊天", callback: () => { void this.openChat(); } });
+    ui.registerView(CHAT_VIEW, leaf => new ChatView(leaf, this));
+    ui.addRibbonIcon("bot", "AI", () => { void this.openChat(); });
+    ui.addCommand({ id: "open-chat", name: "打开聊天", callback: () => { void this.openChat(); } });
     const memoryCheck = () => { void (async () => { await this.checkAttachmentCleanup(); await this.runtime.checkMemory(); await this.cooperation.autoCheck(); })().catch(() => new Notice("闲时任务状态保存失败。")); };
-    this.registerInterval(window.setInterval(memoryCheck, 60000));
-    this.registerDomEvent(document, "pointerdown", () => this.runtime.userActive());
-    this.registerDomEvent(document, "keydown", () => this.runtime.userActive());
-    this.registerDomEvent(document, "visibilitychange", () => { if (document.hidden) this.runtime.stop(); else { this.runtime.userActive(); memoryCheck(); } });
-    let alive = true; this.register(() => { alive = false; });
+    ui.registerInterval(window.setInterval(memoryCheck, 60000));
+    ui.registerDomEvent(document, "pointerdown", () => this.runtime.userActive());
+    ui.registerDomEvent(document, "keydown", () => this.runtime.userActive());
+    ui.registerDomEvent(document, "visibilitychange", () => { if (document.hidden) this.runtime.stop(); else { this.runtime.userActive(); memoryCheck(); } });
+    let alive = true; ui.register(() => { alive = false; });
     this.app.workspace.onLayoutReady(() => { if (alive) memoryCheck(); });
 
-    this.addCommand({
+    ui.addCommand({
       id: "show-status",
       name: "查看 AI 状态",
       callback: () => {
         new Notice("AI：聊天、笔记工具、技能库与记忆。设置 → Simple One → AI。");
       },
     });
-    this.addCommand({ id: "select-model", name: "切换默认模型", callback: () => {
+    ui.addCommand({ id: "select-model", name: "切换默认模型", callback: () => {
       const entries = this.settings.sources.flatMap(source => source.models.map(model => ({ source, model })));
       if (!entries.length) { new Notice("请先在 AI 设置中添加来源和模型。"); return; }
       new LibraryPicker(this, entries, entry => {
@@ -129,7 +146,7 @@ export default class SimpleAIPlugin extends Plugin {
     try { await this.runtime.cleanAttachments(days, archivedDays); }
     catch { new Notice("图片及附件自动清理失败，稍后会重试。"); }
   }
-  onunload(): void { this.active = false; this.runtime.stop(); this.cooperation.stop(); }
+  onunload(): void { this.active = false; this.stopUI(); }
   getKeys(id: string): { id: string; value: string }[] {
     const source = this.settings.sources.find(s => s.id === id);
     return (source?.keyIds ?? [id]).map(keyId => ({ id: keyId, value: this.app.secretStorage.getSecret(`simple-one-ai-${keyId}`) ?? "" }));

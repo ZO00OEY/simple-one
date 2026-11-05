@@ -1,8 +1,9 @@
+import { Setting, ButtonComponent } from "../ui";
 import { settingsCheckbox } from "../settingsLayout";
 import { prepareChatMarkdown } from "./markdown";
 import { historyGroups } from "./history";
 import { bottomOverlap, viewportBottomOverlap } from "./layout";
-import { Platform, setIcon, Menu, Component, FuzzySuggestModal, Setting, ItemView, MarkdownRenderer, Notice, WorkspaceLeaf, ButtonComponent, Modal } from "obsidian";
+import { Platform, setIcon, Menu, Component, FuzzySuggestModal, ItemView, MarkdownRenderer, Notice, WorkspaceLeaf, Modal } from "obsidian";
 import type SimpleAIPlugin from "../main";
 import { ModelPopover } from "./modelPopover";
 import { label } from "../api/types";

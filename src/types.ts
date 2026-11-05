@@ -285,17 +285,7 @@ export interface QuickFormatCustomCallout {
   color: string;
 }
 
-export interface TranslationApiSettings {
-  modelsUrlMode?: "base" | "full";
-  urlMode?: "base" | "full";
-  protocol: "openai" | "anthropic";
-  url: string;
-  modelsUrl: string;
-  models: string[];
-}
 export interface TranslationSettings {
-  provider?: "custom" | "simple-ai";
-  api?: TranslationApiSettings;
   sourceId: string;
   modelId: string;
   preset: string;

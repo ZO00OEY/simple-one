@@ -20,7 +20,7 @@ const notices = [];
 let supportsLanguageApi = true, languageCalls = 0, momentCalls = 0;
 const bundled = await build({ stdin: { contents: 'export * from "./src/features/inlineTranslation"; export { translationLocale } from "./src/features/selectionTranslation";', resolveDir: process.cwd() }, bundle: true, format: 'cjs', platform: 'node', write: false, external: ['obsidian', '@codemirror/state', '@codemirror/view'] });
 const module = { exports: {} };
-new Function('require', 'module', 'exports', bundled.outputFiles[0].text)(name => name === 'obsidian' ? { setIcon: (el, name) => { el.dataset.icon = name; },
+new Function('require', 'module', 'exports', bundled.outputFiles[0].text)(name => name === 'obsidian' ? { Setting:class{}, ButtonComponent:class{}, setIcon: (el, name) => { el.dataset.icon = name; },
   requireApiVersion: version => { assert.equal(version, '1.8.7'); return supportsLanguageApi; },
   getLanguage: () => { languageCalls++; assert(supportsLanguageApi, 'old Obsidian must not call the missing language API'); return 'zh'; },
   moment: { locale: () => { momentCalls++; return 'en'; } },
@@ -53,7 +53,7 @@ function fixture() {
     signal = abort; update = onUpdate;
     return new Promise((resolve, failure) => { finish = resolve; reject = failure; });
   } };
-  const plugin = { app: { plugins: { plugins: { 'simple-ai': bridge } } }, settings: { enhancements: { quickFormat: { translation: { sourceId: 's', modelId: 'm', prompt: 'translate', languageA: '中文', languageB: '英语' } } } }, register: callback => cleanups.push(callback) };
+  const plugin = { ai:bridge, app: { plugins: { plugins: { 'simple-ai': bridge } } }, settings: { enhancements: { quickFormat: { translation: { sourceId: 's', modelId: 'm', prompt: 'translate', languageA: '中文', languageB: '英语' } } } }, register: callback => cleanups.push(callback) };
   const selection = { view: { containerEl: node, file: { path: 'note.md' } }, editor, from: { line: 0, ch: 0 }, to: { line: 0, ch: 2 }, text: '原文', document: '原文', file: 'note.md' };
   startInlineTranslation(plugin, selection);
   return { cm, node, get signal() { return signal; }, update: text => update(text), finish: text => finish(text), fail: error => reject(error), get value() { return value; }, get writes() { return writes; }, cleanups };

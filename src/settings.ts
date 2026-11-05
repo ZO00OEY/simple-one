@@ -214,6 +214,12 @@ export class SimpleSettingTab extends PluginSettingTab {
       appWithSettings.setting.openTabById(plugin.manifest.id);
       this.openPage({ type: "automatic-reformat" });
     };
+    plugin.openAISettings = () => {
+      this.displayPreviewTab = "ai";
+      const settings = (app as App & { setting: { open(): void; openTabById(id: string): void } }).setting;
+      settings.open(); settings.openTabById(plugin.manifest.id);
+      this.openPage({ type: "overview" });
+    };
     plugin.sync.openSettings = (share = false) => {
       this.displayPreviewTab = share ? "sharing" : "sync-sharing";
       this.syncNavigationTab = this.displayPreviewTab;
@@ -469,7 +475,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       });
       checkboxRowIcon(row, key === "showSyncSharingEntry" ? "refresh-cw" : key === "showSharingEntry" ? "share-2" : "calendar-days");
     }
-    const aiRow = this.renderDisplayCheckbox(extensions, "AI", "在设置首页显示 AI，并启用聊天与模型功能。", this.plugin.settings.enableAI, async value => {
+    const aiRow = this.renderDisplayCheckbox(extensions, "AI", "显示 AI 标签页并启用聊天和后台任务；关闭后仍可使用选区翻译。", this.plugin.settings.enableAI, async value => {
       await this.plugin.ai.setEnabled(value);
       this.renderSettings();
     });

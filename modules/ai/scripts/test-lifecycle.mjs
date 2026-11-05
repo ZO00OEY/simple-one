@@ -16,3 +16,10 @@ for(const stage of ['catalogue','sessions']){
  assert.equal(stopped,2);assert.equal(plugin.active,false);
 }
 console.log('AI startup cancellation: unloading during catalogue/session reads cannot register background tasks or save stale settings.');
+
+{
+ const plugin=Object.create(Plugin.prototype);let reads=0;
+ Object.assign(plugin,{active:true,manifest:{dir:'.obsidian/plugins/simple-one/private/ai'},app:{vault:{adapter:{exists:async()=>false}}},loadData:async()=>({sources:[]}),runtime:{load:async()=>{reads++;}},cooperation:{load:async()=>{reads++;},initializeTraffic:async()=>{}},update:async()=>{},addChild(){assert.fail('request-only preparation must not create an interface plugin');}});
+ await plugin.prepareRequests();await plugin.prepareRequests();assert.equal(reads,2,'request state initializes once, with no interface, note events, ribbon or timers');
+}
+console.log('Request-only initialization is reusable and does not start the AI interface or background work.');

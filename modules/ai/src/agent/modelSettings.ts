@@ -1,5 +1,6 @@
+import { Setting } from "../ui";
 import { settingsSection, settingsCheckbox } from "../settingsLayout";
-import { Notice, Setting, setIcon } from "obsidian";
+import { Notice, setIcon } from "obsidian";
 import { settingsNavigation } from "../settingsNavigation";
 import type SimpleAIPlugin from "../main";
 import { label } from "../api/types";

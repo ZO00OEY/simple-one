@@ -96,6 +96,7 @@ export default class SimplePlugin extends Plugin {
   refreshQuickCopyLinkActions: () => void = () => {};
   refreshReformatActions: () => void = () => {};
   openReformatSettings: () => void = () => {};
+  openAISettings: () => void = () => {};
   refreshPopupWindowSizing: () => void = () => {};
   refreshTypography: () => void = () => {};
   refreshThemeAppearance: () => void = () => {};

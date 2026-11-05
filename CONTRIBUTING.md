@@ -4,6 +4,7 @@ Report bugs through GitHub Issues with your Obsidian version, platform, theme,
 and steps to reproduce. Never include private notes or plugin configuration.
 
 For development, use Node.js 22, run `npm ci`, then `npm run check`.
+AI settings import `Setting` and `ButtonComponent` from their local `ui.ts`, which forwards to `src/shared/settingControls.ts`. Use the host fieldset, native-checkbox and tooltip helpers; do not copy widget implementations or add a second description line. Regular dropdowns use Obsidian's DropdownComponent. Selection translation uses the shared AI catalogue and request service and must work with the AI interface disabled.
 Keep changes focused and preserve desktop, mobile, and popout-window behavior.
 Test changes in a disposable vault before using attachment operations.
 

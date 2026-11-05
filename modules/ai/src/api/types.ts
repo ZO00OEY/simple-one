@@ -39,3 +39,8 @@ export function validateSource(source: ApiSource): void {
   if (ids.some(id => !id)) throw new Error("请填写模型名称，或移除空白模型行。");
   if (new Set(ids).size !== ids.length) throw new Error("同一来源不能重复添加相同模型。");
 }
+
+/** Shared model catalogue for chat and selection translation. */
+export function translationModels(sources: ApiSource[]): {sourceId: string; modelId: string; label: string}[] {
+  return sources.flatMap(source => source.models.map(model => ({sourceId: source.id, modelId: model.id, label: `[${source.name}] ${model.alias || model.id}`})));
+}

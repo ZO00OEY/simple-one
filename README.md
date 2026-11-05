@@ -66,6 +66,10 @@ Desktop Git sync obtains credentials through GitHub CLI. If you switch between m
 
 See the [user guide](USAGE.md), [personal files and credentials](docs/private-files.md) and [technical review notes](docs/automated-review-notes.md).
 
+## What's new in 1.0.32
+
+- Translation shares the AI catalogue and works with the AI interface disabled. AI settings reuse host controls and show descriptions in native hover tooltips.
+
 ## What's new in 1.0.31
 
 - **Built-in AI:** enable AI under Extensions to use models, chat, skills, memory and cooperation in a unified settings page. AI requires Obsidian 1.11.4+; no standalone AI plugin is needed. Selection translation can use built-in models. Private configuration, chats and secrets are excluded from releases.
@@ -85,7 +89,7 @@ See the [user guide](USAGE.md), [personal files and credentials](docs/private-fi
 ## Quick start
 
 1. **Format:** select text in a note to open the floating toolbar. Configure tools under Editing; display and theme settings control font sizes, spacing and format colors.
-2. **Translate (optional):** enable translation under Editing, then use its settings button to configure a custom API or select a model from **Simple AI**, languages and a prompt. Saving custom API keys requires Obsidian 1.11.4 or later. Generated previews do not change the note until you insert them. Translation sends the selected text to your configured model provider.
+2. **Translate (optional):** enable translation under Editing, then use its settings button to select an AI model, languages and a prompt. Configure API sources once under AI → Model management. Translation still works with the AI interface disabled and requires Obsidian 1.11.4 or later. Generated previews do not change the note until you insert them. Translation sends the selected text to your configured model provider.
 3. **Share:** enable the Sharing tab, authorize GitHub and configure a separate sharing repository. Add selected notes, review them, then click Publish. Optionally associate an EdgeOne project. The library selector, refresh, history, copy and website buttons are in the sharing sidebar.
 4. **Update an existing website:** choose the current default sharing template and publish again. Custom HTML templates are preserved and do not automatically receive reader changes.
 5. **Sync privately:** choose Desktop Git or Lightweight sync on the Sync tab, review scope and differences, then synchronize. Both modes support the optional sync-performance switch; sharing has its own switch.
@@ -114,4 +118,4 @@ Include reproduction steps, platform and Obsidian version in [Issues](https://gi
 
 ## Floating editing toolbar
 
-Select text to format it, choose custom colors, search your vault or the web, and customize toolbar controls. Optional Simple AI 0.0.2 integration translates numbered paragraphs using your existing model catalogue; preview preserves the original text and inserts each translation below its paragraph. API credentials remain in Simple AI. Configure the model, language pair and prompt under Editing → Floating toolbar. Neither plugin is required for the other to run.
+Select text to format it, choose custom colors, search your vault or the web, and customize toolbar controls. Translation uses the built-in AI catalogue, credentials and usage records; preview preserves the original text and inserts each translation below its paragraph. API credentials stay in Obsidian SecretStorage. Configure the model, language pair and prompt under Editing → Floating toolbar. No standalone AI plugin is required, and translation works with the AI interface disabled.

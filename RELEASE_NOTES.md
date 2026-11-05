@@ -1,3 +1,14 @@
+# Simple One 1.0.32
+
+- AI 翻译直接使用统一的 AI 模型列表，移除独立模型来源和翻译 API 设置；模型、语言和提示词仍可单独选择。
+- 请求服务与 AI 界面分离。关闭 AI 后仍可手动翻译，不启动聊天界面、笔记监听或后台定时任务；共享密钥轮询与用量记录。
+- 翻译预览和已保存卡片的重新翻译统一使用同一服务，保留取消与确认后才写入笔记的行为。
+- AI 设置使用 Simple One 共享的按钮、原生复选框、分组和悬浮提示；普通下拉框使用原生 Obsidian 控件。
+- 设置项说明移入原生悬浮提示，清理重复控件样式和自绘复选框；保留必要的多行文本编辑及特殊模型选择布局。
+- 修正聊天菜单进入 AI 设置时的标签选择，移除旧翻译 API 界面的代码与样式。
+
+English: translation shares the AI catalogue without separate provider/API settings and works while the AI interface is disabled. Reused host controls and native tooltips, compact setting rows, shared request/usage state, and unified card regeneration.
+
 # Simple One 1.0.31
 
 - 内置可选 AI 功能，在“拓展”中使用机器人图标的 AI 开关；启用后，AI 标签位于日程和拓展之间。

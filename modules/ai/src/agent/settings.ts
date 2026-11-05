@@ -1,5 +1,6 @@
+import { ButtonComponent, Setting } from "../ui";
 import { settingsSection, settingsCheckbox } from "../settingsLayout";
-import { AbstractInputSuggest, ButtonComponent, FuzzySuggestModal, Modal, Notice, Setting, TFile } from "obsidian";
+import { AbstractInputSuggest, FuzzySuggestModal, Modal, Notice, TFile } from "obsidian";
 import { settingsNavigation } from "../settingsNavigation";
 import type SimpleAIPlugin from "../main";
 import { builtins } from "./skills";

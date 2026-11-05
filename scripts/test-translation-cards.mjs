@@ -16,7 +16,7 @@ const output = await build({ entryPoints: ['src/features/translationCards.ts'], 
 class Component { load() {} unload() {} }
 const module = { exports: {} }, rendered = [];
 new Function('require', 'module', 'exports', output.outputFiles[0].text)(name => name === 'obsidian' ? {
-  Component, Modal: Component, Notice: Component, requireApiVersion: () => true, getLanguage: () => 'zh', MarkdownRenderChild: Component, setIcon: () => {}, MarkdownRenderer: { render: async (_app, source, el) => { rendered.push(source); el.textContent = source; } },
+  Setting:Component, ButtonComponent:Component, Component, Modal: Component, Notice: Component, requireApiVersion: () => true, getLanguage: () => 'zh', MarkdownRenderChild: Component, setIcon: () => {}, MarkdownRenderer: { render: async (_app, source, el) => { rendered.push(source); el.textContent = source; } },
 } : require(name), module, module.exports);
 const { translationCardSource, translationCardRanges, registerTranslationCards } = module.exports;
 const source = translationCardSource('original\n\ntranslation\n```js\ncode\n```');
@@ -43,10 +43,10 @@ element.querySelector('[aria-label="转为普通文字"]').click();
 assert.equal(state.doc.toString(), 'original\n\ntranslation', 'text conversion removes all card markers');
 let requested;
 plugin.settings = { enhancements: { quickFormat: { translation: { sourceId: 'test', modelId: 'test' } } } };
-plugin.app.plugins = { plugins: { 'simple-ai': {
+plugin.ai = {
   getTranslationModels: () => [{ sourceId: 'test', modelId: 'test' }],
   translateSelection: async input => { requested = JSON.parse(input.text); return '[{"id":1,"translation":"fresh result"}]'; },
-} } };
+};
 state = EditorState.create({ doc: translationCardSource('original\n\nold result', 'original'), extensions: [field] });
 state.field(field).decorations.between(0, state.doc.length, (_from, _to, value) => { widget = value.spec.widget; });
 widget.toDOM(view).querySelector('[aria-label="重新翻译"]').click();

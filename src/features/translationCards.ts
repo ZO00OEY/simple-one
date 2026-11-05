@@ -1,7 +1,7 @@
 import { StateEffect, StateField, type EditorState } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
 import { Component, MarkdownRenderChild, MarkdownRenderer, Notice, setIcon } from "obsidian";
-import { translationBridge, translationLocale } from "./selectionTranslation";
+import { translationService, translationLocale } from "./selectionTranslation";
 import { translationPreferences } from "./translationPreferences";
 import { paragraphTranslationRequest, interleaveTranslation } from "./translationParagraphs";
 import { styleActionButton } from "../shared/actionButton";
@@ -75,7 +75,7 @@ class SavedCard extends WidgetType {
         view.dispatch({ changes: { from: this.range.from, to: this.range.to, insert: text } });
       };
       const retry = action("rotate-cw", "重新翻译", () => {
-        const bridge = translationBridge(this.plugin.app), config = this.plugin.settings.enhancements.quickFormat.translation;
+        const bridge = translationService(this.plugin), config = this.plugin.settings.enhancements.quickFormat.translation;
         if (!bridge || !config) { new Notice("请先配置翻译模型。"); return; }
         try {
           const preferences = translationPreferences(config, translationLocale());

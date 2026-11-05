@@ -1,4 +1,5 @@
-import { ButtonComponent, Component, MarkdownRenderer, Modal, Notice, Setting } from "obsidian";
+import { ButtonComponent, Setting } from "../ui";
+import { Component, MarkdownRenderer, Modal, Notice } from "obsidian";
 import type SimpleAIPlugin from "../main";
 import { roleNames, type Assessment, type Recommendation, type WorkRecord } from "./cooperation";
 import { usageText } from "./usage";

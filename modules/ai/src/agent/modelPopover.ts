@@ -1,4 +1,5 @@
-import { ButtonComponent, Notice } from "obsidian";
+import { ButtonComponent } from "../ui";
+import { Notice } from "obsidian";
 import type SimpleAIPlugin from "../main";
 import { label } from "../api/types";
 import type { Session } from "./types";
