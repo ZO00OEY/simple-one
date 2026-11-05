@@ -14,7 +14,7 @@ const obsidian = { requestUrl };
 const bundle = await esbuild.build({ entryPoints: ['src/features/share/apiRepository.ts'], bundle: true, write: false, platform: 'node', format: 'cjs', external: ['obsidian'] });
 const context = vm.createContext({ module: { exports: {} }, require: () => obsidian, crypto: webcrypto, TextEncoder, TextDecoder, Uint8Array, ArrayBuffer, atob, btoa, setTimeout, clearTimeout, console }); context.window = context;
 vm.runInContext(bundle.outputFiles[0].text, context);
-const { ApiShareRepository, FallbackShareRepository } = context.module.exports;
+const { ApiShareRepository, FallbackShareRepository, canFallbackToApi } = context.module.exports;
 // No vault adapter, CLI, main sync engine, or prior baseline is needed.
 const create = () => new ApiShareRepository({}, { owner: 'test', repo: 'public', branch: 'main' }, 'fixture-token');
 let repo = create(); await repo.verify(); await repo.refresh();
@@ -96,6 +96,17 @@ let unsafeFallbacks = 0;
 const uncertainCli = new FallbackShareRepository({ sync: { exec: async () => { throw Error('connection reset'); } } }, { owner: 'test', repo: 'public', branch: 'main' }, 'fixture-token', () => { unsafeFallbacks++; });
 await assert.rejects(() => uncertainCli.api(['repos/test/public/git/blobs', '--method', 'POST', '--input', '-'], JSON.stringify({ content: 'x' })), /connection reset/);
 assert.equal(unsafeFallbacks, 0, 'an uncertain write is not replayed through the fallback transport');
+const eofMessage = 'Get "https://api.github.com/repos/test/public": EOF';
+assert.equal(canFallbackToApi(Error(eofMessage)), true, 'GET EOF can switch transport');
+assert.equal(canFallbackToApi(Error('unexpected EOF'), 'POST'), false, 'EOF does not replay an uncertain write');
+assert.equal(canFallbackToApi(Error('EOF'), 'PATCH'), false, 'EOF does not replay a branch update');
+let eofCliCalls = 0, eofFallbacks = 0;
+const eofCli = new FallbackShareRepository({ sync: { exec: async () => { eofCliCalls++; throw Error(eofMessage); } } }, { owner: 'test', repo: 'public', branch: 'main' }, 'fixture-token', () => { eofFallbacks++; });
+await eofCli.verify(); await eofCli.refresh();
+assert.equal(eofCliCalls, 1, 'GET EOF switches subsequent requests away from CLI');
+assert.equal(eofFallbacks, 1);
+const eofWrite = new FallbackShareRepository({ sync: { exec: async () => { throw Error(eofMessage); } } }, { owner: 'test', repo: 'public', branch: 'main' }, 'fixture-token');
+await assert.rejects(() => eofWrite.api(['repos/test/public/git/blobs', '--method', 'POST'], JSON.stringify({ content: 'x' })), /EOF/);
 // Upload independent blobs together, but publish no tree if any upload fails.
 const parallelRemote = shareRemoteFixture({ 'index.html': 'old', 'publish-state.json': JSON.stringify(initialState) });
 const parallelRepo = create();

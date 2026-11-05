@@ -1,3 +1,4 @@
+import { tooltipText } from "../../shared/tooltipText";
 import { isReviewImage, type ReviewImage } from "./reviewImage";
 import { textParts } from "./textDiff";
 import { createFileListLayout, renderLayoutToggle, FileListLayout, renderFileTree } from "./fileTree";
@@ -149,14 +150,14 @@ export class ZoeySyncConflictPreviewModal extends Modal {
       button.toggleClass("is-selected", this.fileChoices.get(file.path) === side);
       button.setAttr("aria-pressed", String(this.fileChoices.get(file.path) === side));
       button.setAttr("aria-label", this.choiceLabel(file, side) + "：" + (file.label ?? file.path));
-      button.setAttr("title", this.choiceLabel(file, side));
+      button.setAttribute("aria-label", this.choiceLabel(file, side));
     }
   }
 
   private renderFile(list: HTMLElement, file: PreviewFile, fullPath: boolean): void {
     const displayPath = file.label ?? file.path;
-    const row = list.createDiv({ cls: "simple-one-sync-view__change simple-one-sync-version-row", attr: { "data-path": file.path, title: displayPath } });
-    const name = row.createEl("button", { cls: "simple-one-sync-version-row__file", attr: { type: "button", "aria-label": "查看文件差异：" + displayPath, title: displayPath } });
+    const row = list.createDiv({ cls: "simple-one-sync-view__change simple-one-sync-version-row", attr: { "data-path": file.path, "aria-label": displayPath } });
+    const name = row.createEl("button", { cls: "simple-one-sync-version-row__file", attr: { type: "button", "aria-label": tooltipText("查看文件差异：" + displayPath, displayPath) } });
     name.createSpan({ text: fullPath ? displayPath : displayPath.split("/").pop() ?? displayPath, cls: "simple-one-sync-view__path" });
     name.addEventListener("click", () => { this.listScroll = this.scroller().scrollTop; this.clearImage(); this.detailPath = file.path; this.detailTab = this.fileChoices.get(file.path) ?? "local"; this.render(false); });
     this.renderChoices(row, file, true);

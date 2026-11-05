@@ -3,7 +3,7 @@ import { Modal, Notice, setIcon } from "obsidian";
 import type SimplePlugin from "../main";
 import { colorRgb, hsvHex, parseColorValue } from "./colorValues";
 
-export const FAVORITE_COLORS = ["#f6f7f9", "#e60f61", "#ed393b", "#de7802", "#2ea121", "#168c54", "#2f80ed", "#824ce6"];
+export const FAVORITE_COLORS = ["#f6f7f9", "#e60f61", "#ed393b", "#de7802", "#478f14", "#2f80ed", "#824ce6"];
 
 export function readThemePalette(context: HTMLElement, plugin: SimplePlugin): string[] {
   const doc = context.ownerDocument;
@@ -92,7 +92,7 @@ export class ThemeColorPicker {
     }
     this.value = color || "#808080";
     this.buttonEl.style.setProperty("--simple-color-swatch", this.value);
-    this.buttonEl.title = this.value.toUpperCase();
+    this.buttonEl.setAttribute("aria-label", "选择颜色：" + this.value.toUpperCase());
     return this;
   }
   onChange(callback: (color: string) => void | Promise<void>): this { this.changed = callback; return this; }
@@ -165,7 +165,7 @@ class ThemeColorModal extends Modal {
       const colors = active === "最近" ? this.plugin.settings.themeRecentColors || [] : active === "收藏" ? this.plugin.settings.themeFavoriteColors ?? FAVORITE_COLORS : themeColors;
       const pinned = this.confirmSelection === "manage" ? [initial, "#f6f7f9"] : [initial];
       for (const color of [...new Set([...pinned, ...colors])].filter(color => /^#[0-9a-f]{6}$/i.test(color))) {
-        const control = swatches.createEl("button", { cls: "simple-theme-color-swatch", attr: { type: "button", title: color.toUpperCase(), "aria-pressed": String(color === this.value) } });
+        const control = swatches.createEl("button", { cls: "simple-theme-color-swatch", attr: { type: "button", "aria-pressed": String(color === this.value), "aria-label": color.toUpperCase() } });
         control.style.setProperty("--simple-color-swatch", color);
         control.addEventListener("click", () => pick(color));
       }
@@ -181,7 +181,7 @@ class ThemeColorModal extends Modal {
       button.addEventListener("click", () => { active = name; renderPalette(); });
     }
     refreshRecent = renderPalette;
-    const restore = styleActionButton(this.contentEl.createEl("button", { cls: "simple-theme-color-restore", attr: { type: "button", title: "恢复预设" } }), "bordered");
+    const restore = styleActionButton(this.contentEl.createEl("button", { cls: "simple-theme-color-restore", attr: { type: "button", "aria-label": "恢复预设" } }), "bordered");
     setIcon(restore, "rotate-ccw");
     restore.addEventListener("click", () => {
       const colors = this.plugin.settings.themeFavoriteColors ?? FAVORITE_COLORS;
@@ -229,15 +229,10 @@ class ThemeColorModal extends Modal {
       preview.style.setProperty("--simple-color-swatch", this.value);
       const favorite = (this.plugin.settings.themeFavoriteColors ?? FAVORITE_COLORS).includes(this.value);
       preview.setAttribute("aria-pressed", String(favorite));
-      preview.removeAttribute("aria-label");
-      preview.title = favorite ? "点击取消收藏" : "点击收藏";
+      preview.setAttribute("aria-label", favorite ? "点击取消收藏" : "点击收藏");
     };
     this.refresh();
-    // Native titles provide one tooltip; Obsidian also renders aria-label tooltips.
-    this.contentEl.querySelectorAll<HTMLElement>("[aria-label]").forEach(element => {
-      if (!element.title) element.title = element.getAttribute("aria-label")!;
-      element.removeAttribute("aria-label");
-    });
+
   }
   onClose(): void { this.closed(); }
 }

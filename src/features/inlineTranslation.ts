@@ -5,7 +5,7 @@ import { Notice, setIcon, type Editor, type EditorPosition, type MarkdownView } 
 import { translationPreferences } from "./translationPreferences";
 import type SimplePlugin from "../main";
 import { interleaveTranslation, paragraphTranslationRequest, partialTranslations } from "./translationParagraphs";
-import { translationBridge, translationLocale, TranslationSettingsModal } from "./selectionTranslation";
+import { translationService, translationLocale, TranslationSettingsModal } from "./selectionTranslation";
 import { translationCardSource } from "./translationCards";
 
 type Selection = { view: MarkdownView; editor: Editor; from: EditorPosition; to: EditorPosition; text: string; document: string; file?: string };
@@ -47,7 +47,7 @@ export function previewRange(state: EditorState, from: number, to: number): { fr
 export function startInlineTranslation(plugin: SimplePlugin, selected: Selection): void {
   const cm = (selected.editor as Editor & { cm?: EditorView }).cm;
   if (!cm) { new Notice("当前编辑器不支持原位预览，请在编辑模式中翻译。"); return; }
-  const bridge = translationBridge(plugin.app), config = plugin.settings.enhancements.quickFormat.translation;
+  const bridge = translationService(plugin), config = plugin.settings.enhancements.quickFormat.translation;
   if (!bridge || !config || !bridge.getTranslationModels().some(model => model.sourceId === config.sourceId && model.modelId === config.modelId)) {
     new TranslationSettingsModal(plugin).open(); return;
   }
@@ -73,7 +73,7 @@ export function startInlineTranslation(plugin: SimplePlugin, selected: Selection
   const card = stack.createDiv({ cls: "simple-inline-translation-card" });
   const header = card.createDiv({ cls: "simple-inline-translation-header" });
   header.createSpan({ text: "翻译" });
-  const cancelButton = header.createEl("button", { cls: "simple-inline-translation-close", attr: { type: "button", title: "关闭预览" } });
+  const cancelButton = header.createEl("button", { cls: "simple-inline-translation-close", attr: { type: "button", "aria-label": "关闭预览" } });
   setIcon(cancelButton, "x");
   const body = card.createDiv({ cls: "simple-inline-translation-body", attr: { "aria-label": "翻译对照预览" } });
   const translations = new Map<number, HTMLElement>();
@@ -92,7 +92,7 @@ export function startInlineTranslation(plugin: SimplePlugin, selected: Selection
   const actions = footer.createDiv({ cls: "simple-inline-translation-actions" });
   actions.hidden = true;
   const iconButton = (icon: string, label: string, cls: string): HTMLButtonElement => {
-    const button = styleActionButton(actions.createEl("button", { cls, attr: { type: "button", title: label } }), "bordered");
+    const button = styleActionButton(actions.createEl("button", { cls, attr: { type: "button", "aria-label": label } }), "bordered");
     setIcon(button, icon); return button;
   };
   const retry = iconButton("rotate-cw", "重新生成", "simple-inline-translation-retry");

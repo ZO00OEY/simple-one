@@ -4,7 +4,7 @@ export type ActionButtonStyle = "plain" | "bordered" | "danger" | "text";
 export const DELETE_ICON = "trash-2";
 
 export function createActionButton(parent: HTMLElement, icon: string, label: string, style: ActionButtonStyle = "plain"): HTMLButtonElement {
-  const button = parent.createEl("button", { cls: "clickable-icon", attr: { type: "button", title: label, "aria-label": label } });
+  const button = parent.createEl("button", { cls: "clickable-icon", attr: { type: "button", "aria-label": label } });
   setActionIcon(button, icon, style);
   return button;
 }

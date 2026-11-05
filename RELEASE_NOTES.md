@@ -1,3 +1,14 @@
+# Simple One 1.0.30
+
+- 分享阅读页将文件列表和文章目录并列放在左侧，正文标题固定显示；提供简洁的目录折叠、日夜模式、强调色与本地偏好保存。
+- 默认模板作为固定文件发布，按内容差异上传；插件升级时仅更新一次内置模板，备份手动修改过的默认文件，保留导入的自定义模板。
+- AI 翻译支持自定义 OpenAI 兼容／Anthropic API，或引用 Simple AI 模型；密钥保存在 Obsidian SecretStorage（需 Obsidian 1.11.4+）。
+- 请求地址与模型列表地址独立锁定；保存后显示完整地址，保留版本路径，模型拉取采用放大镜按钮与行内错误提示。
+- 统一原生提示、精简工具栏说明，调整分享按钮与手机设置布局；优化字体别名、弹窗比例、主题颜色与标题字号兜底。
+- 个人配置、API 密钥、聊天、同步／分享状态和自定义模板均不包含在公开源码或 Release 附件中。
+
+English: refreshed left-hand navigation and sticky reading title; fixed-file sharing templates with upgrade recovery; independent translation API configuration; native tooltips, typography and responsive UI improvements. Private settings and chat files are excluded.
+
 # Simple One 1.0.29
 
 - 翻译预览采用临时装饰，确认后选择文本或标记卡片；卡片支持源码编辑、按原始输入重新翻译和转为普通文字。

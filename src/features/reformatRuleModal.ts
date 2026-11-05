@@ -73,7 +73,7 @@ export class ReformatRuleModal extends Modal {
       });
     }
     if (this.options.onImport) {
-      const button = left.createEl("button", { cls: "clickable-icon", attr: { type: "button", title: "导入单条规则", "aria-label": "导入单条规则" } });
+      const button = left.createEl("button", { cls: "clickable-icon", attr: { type: "button", "aria-label": "导入单条规则" } });
       setActionIcon(button, "download", "bordered");
       button.addEventListener("click", () => {
         void this.options.onImport!(this.contentEl.ownerDocument).then(imported => {
@@ -89,7 +89,7 @@ export class ReformatRuleModal extends Modal {
       });
     }
     if (this.options.onExport) {
-      const button = left.createEl("button", { cls: "clickable-icon", attr: { type: "button", title: "导出单条规则", "aria-label": "导出单条规则" } });
+      const button = left.createEl("button", { cls: "clickable-icon", attr: { type: "button", "aria-label": "导出单条规则" } });
       setActionIcon(button, "upload", "bordered");
       button.addEventListener("click", () => {
         try {

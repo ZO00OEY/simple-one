@@ -59,10 +59,10 @@ assert.equal(value.textContent,'#824CE6');
 value.click();const input=root.querySelector('.simple-theme-color-value-row input');
 input.value='#f6f7f9';input.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
 assert.equal(changes.at(-1),'#f6f7f9');
-for(const tab of tabs){tab.click();assert.equal(root.querySelector('.simple-theme-color-options button').title.toLowerCase(),'#824ce6');}
+for(const tab of tabs){tab.click();assert.equal(root.querySelector('.simple-theme-color-options button').getAttribute("aria-label").toLowerCase(),'#824ce6');}
 tabs[1].click();
 assert.equal(root.querySelectorAll('.simple-theme-color-options [aria-pressed="true"]').length,1);
-assert.equal(root.querySelector('.simple-theme-color-options [aria-pressed="true"]').title.toLowerCase(),'#f6f7f9');
+assert.equal(root.querySelector('.simple-theme-color-options [aria-pressed="true"]').getAttribute("aria-label").toLowerCase(),'#f6f7f9');
 const preview=root.querySelector('.simple-theme-color-preview');preview.click();assert(!plugin.settings.themeFavoriteColors.includes('#f6f7f9'));preview.click();assert(plugin.settings.themeFavoriteColors.includes('#f6f7f9'));
 assert.equal(root.querySelector('[aria-label="从屏幕取色"]'),null);
 const confirmed=[];
@@ -94,5 +94,5 @@ tabs[0].click();root.querySelector('.simple-theme-color-restore').click();
 assert(plugin.settings.themeFavoriteColors.includes('#123456'));
 for(const color of FAVORITE_COLORS) assert(plugin.settings.themeFavoriteColors.includes(color));
 const count=plugin.settings.themeFavoriteColors.length;root.querySelector('.simple-theme-color-restore').click();assert.equal(plugin.settings.themeFavoriteColors.length,count);
-assert.equal(preview.title,'点击取消收藏');
-assert.equal(preview.hasAttribute('aria-label'),false);
+assert.equal(preview.getAttribute('aria-label'),'点击取消收藏');
+assert.equal(preview.hasAttribute('title'),false);

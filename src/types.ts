@@ -138,6 +138,8 @@ export interface SimplePluginSettings {
   };
   desktopTypography: TypographySettings;
   themeBackgroundColor: string;
+  themeTagsFollowAccent: boolean;
+  themeInlineCodeFollowsBody: boolean;
   themeRecentColors: string[];
   themeFavoriteColors: string[];
   autoProcessPaste: boolean;
@@ -165,6 +167,7 @@ export interface SimplePluginSettings {
   enableHtmlPreview: boolean;
   enableTextDisplayReplacement: boolean;
   enableReadableCustomTags: boolean;
+  themeFormattingDefaultsVersion: number;
   themeFormatting: ThemeFormattingSettings;
   enableNotionColumns: boolean;
   enableNotionColumnsMouseGesture: boolean;
@@ -278,6 +281,25 @@ export interface QuickFormatCustomCallout {
   color: string;
 }
 
+export interface TranslationApiSettings {
+  modelsUrlMode?: "base" | "full";
+  urlMode?: "base" | "full";
+  protocol: "openai" | "anthropic";
+  url: string;
+  modelsUrl: string;
+  models: string[];
+}
+export interface TranslationSettings {
+  provider?: "custom" | "simple-ai";
+  api?: TranslationApiSettings;
+  sourceId: string;
+  modelId: string;
+  preset: string;
+  prompt: string;
+  languageA?: string;
+  languageB?: string;
+}
+
 export interface EnhancementSettings {
   quickCopyLink: QuickCopyLinkSettings;
   quickFormat: QuickFormatSettings;
@@ -301,7 +323,7 @@ export interface QuickCopyLinkSettings {
 }
 
 export interface QuickFormatSettings {
-  translation?: { sourceId: string; modelId: string; preset: string; prompt: string; languageA?: string; languageB?: string };
+  translation?: TranslationSettings;
   selectionToolbar: boolean;
   selectionTranslation: boolean;
   highlightPairing: boolean;
@@ -314,6 +336,7 @@ export interface QuickFormatSettings {
   showCalloutsInParagraphMenu: boolean;
   lastMode: QuickFormatMode;
   visibleModes: QuickFormatMode[];
+  headingDefaultsVersion: number;
   headingColors: Record<QuickFormatHeadingLevel, string>;
   headingSizes: Record<QuickFormatHeadingLevel, string>;
   calloutColors: Record<QuickFormatCalloutType, string>;
@@ -742,8 +765,10 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   displayParameterSwitches: { desktop: {}, mobile: {} },
   desktopTypography: { latinFontEnabled: true, latinFont: "Segoe UI", interfaceFontEnabled: true, textFontEnabled: true, interfaceFont: "yahei", textFont: "jinkai", enabled: true, fontSize: 15, lineHeight: 1.7, letterSpacing: 0.04, latinLetterSpacing: 0, latinLetterSpacingEnabled: true, letterSpacingUnit: "em", paragraphSpacing: 0.8, paragraphStyle: "spaced" },
   themeBackgroundColor: "#f6f7f9",
+  themeTagsFollowAccent: false,
+  themeInlineCodeFollowsBody: true,
   themeRecentColors: [],
-  themeFavoriteColors: ["#f6f7f9", "#e60f61", "#ed393b", "#de7802", "#2ea121", "#168c54", "#2f80ed", "#824ce6"],
+  themeFavoriteColors: ["#f6f7f9", "#e60f61", "#ed393b", "#de7802", "#478f14", "#2f80ed", "#824ce6"],
   autoProcessPaste: true,
   autoProcessObsidian: true,
   autoProcessPastedTextLinks: false,
@@ -762,6 +787,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   enableHtmlPreview: true,
   enableTextDisplayReplacement: true,
   enableReadableCustomTags: true,
+  themeFormattingDefaultsVersion: 0,
   themeFormatting: {
     textColor: "",
     underlineColor: "",
@@ -796,6 +822,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
       showCalloutsInParagraphMenu: true,
       lastMode: "h3",
       visibleModes: ["h3", "h4", "h5", "quote", "callout-note", "callout-important", "callout-tip", "callout-question", "callout-warning", "callout-example", "custom-callout:simple-default-tips"],
+      headingDefaultsVersion: 0,
       headingColors: {
         h1: "",
         h2: "",

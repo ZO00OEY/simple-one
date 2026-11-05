@@ -6,7 +6,7 @@ import { ShareRepository } from "./repository";
 export function canFallbackToApi(error: unknown, method = "GET"): boolean {
   const message = String(error);
   if (/(?:\bHTTP\s+(?:401|403)\b|\b(?:TLS|SSL)\s+handshake\b|handshake (?:failed|timeout)|握手失败|failed to connect|could not connect|连接失败|connection refused|network is unreachable|no such host|dial tcp)/i.test(message)) return true;
-  return method === "GET" && /connection (?:reset|timed out)/i.test(message);
+  return method === "GET" && /connection (?:reset|timed out)|\bEOF\b/i.test(message);
 }
 
 async function apiRequest(token: string, args: string[], input?: string): Promise<string> {

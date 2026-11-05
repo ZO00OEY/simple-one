@@ -66,6 +66,10 @@ Desktop Git sync obtains credentials through GitHub CLI. If you switch between m
 
 See the [user guide](USAGE.md), [personal files and credentials](docs/private-files.md) and [technical review notes](docs/automated-review-notes.md).
 
+## What's new in 1.0.30
+
+- Standalone translation APIs, left-side navigation and fixed-file sharing templates; refined native tooltips, reading modes and typography safeguards.
+
 ## What's new in 1.0.29
 
 - **Editable translation cards:** optional Simple AI integration streams paragraph-aligned translation before you insert it. Choose **T** for normal text or **✓** for a marked card. Cards retain source editing, regeneration and conversion to text; newly saved cards retain their original input for regeneration.
@@ -77,7 +81,7 @@ See the [user guide](USAGE.md), [personal files and credentials](docs/private-fi
 ## Quick start
 
 1. **Format:** select text in a note to open the floating toolbar. Configure tools under Editing; display and theme settings control font sizes, spacing and format colors.
-2. **Translate (optional):** install and configure a compatible **Simple AI** plugin, enable translation in Simple One's outer Editing settings, then use the adjacent settings button to choose a model, languages and prompt. Generated previews do not change the note until you insert them. Translation sends the selected text to your configured model provider.
+2. **Translate (optional):** enable translation under Editing, then use its settings button to configure a custom API or select a model from **Simple AI**, languages and a prompt. Saving custom API keys requires Obsidian 1.11.4 or later. Generated previews do not change the note until you insert them. Translation sends the selected text to your configured model provider.
 3. **Share:** enable the Sharing tab, authorize GitHub and configure a separate sharing repository. Add selected notes, review them, then click Publish. Optionally associate an EdgeOne project. The library selector, refresh, history, copy and website buttons are in the sharing sidebar.
 4. **Update an existing website:** choose the current default sharing template and publish again. Custom HTML templates are preserved and do not automatically receive reader changes.
 5. **Sync privately:** choose Desktop Git or Lightweight sync on the Sync tab, review scope and differences, then synchronize. Both modes support the optional sync-performance switch; sharing has its own switch.

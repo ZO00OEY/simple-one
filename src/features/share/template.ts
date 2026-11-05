@@ -1,6 +1,7 @@
 import { gunzipSync, strFromU8 } from "fflate";
 import { base64Bytes } from "../../shared/desktopNode";
 import { readerPayload } from "./readerPayload";
+export { readerRevision } from "./readerPayload";
 
 export function bundledReaderFiles(): { template: string; licenses: string } {
   return JSON.parse(strFromU8(gunzipSync(base64Bytes(readerPayload)))) as { template: string; licenses: string };

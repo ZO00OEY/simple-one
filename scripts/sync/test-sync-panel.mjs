@@ -395,7 +395,7 @@ assert(imageUrls.created.every(({ url }) => imageUrls.revoked.includes(url)), 'a
   assert.equal(groups[0].querySelectorAll('.simple-one-sync-view__change').length, 1);
   await switchLayout(modal.contentEl);
   assert.equal(groups[0].querySelectorAll('.simple-one-sync-view__change').length, 1, 'tracking layout keeps its current page');
-  assert(groups[0].querySelector('[title="cache/state/100.json"]'));
+  assert(groups[0].querySelector('[aria-label="cache/state/100.json"]'));
   assert.equal(repairs, 0, 'layout changes never apply tracking repair');
   modal.contentEl.remove(); modal.modalEl.remove();
 }
@@ -525,7 +525,7 @@ const pageReads = reads;
 [...leaf.containerEl.querySelectorAll('button')].find(button => button.textContent === '下一页').click();
 await new Promise(resolve => setTimeout(resolve, 0));
 assert.equal(reads, pageReads, 'paging reuses repository snapshot');
-assert(leaf.containerEl.querySelector('.simple-one-sync-view__change[title="bulk/100.md"]'));
+assert(leaf.containerEl.querySelector('.simple-one-sync-view__change[aria-label="bulk/100.md"]'));
 fail = true; await view.render();
 assert.equal(leaf.containerEl.querySelectorAll('.simple-one-sync-view__change').length, 100, 'error fallback stays bounded');
 fail = false; changes = []; await view.render();
@@ -565,7 +565,7 @@ plugin.getMobileGithub=()=>taskEngine;plugin.useLightweightSync=()=>true;plugin.
 await view.render();
 assert(leaf.containerEl.querySelector('.simple-one-sync-view__status-meta .simple-one-sync-view__quota'));
 assert(!leaf.containerEl.querySelector('.view-content > .simple-one-sync-view__quota'));
-assert(leaf.containerEl.querySelector('[aria-label="下载待办尚未完成"]'));
+assert(leaf.containerEl.querySelector('[aria-label^="下载待办尚未完成"]'));
 await view.showDownloadTask();
 assert.equal(leaf.containerEl.querySelectorAll('.simple-one-sync-view__quota').length, 1);
 assert(leaf.containerEl.querySelector('.simple-one-sync-view__status-meta .simple-one-sync-view__quota'));

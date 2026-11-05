@@ -1,3 +1,4 @@
+import { tooltipText } from "../shared/tooltipText";
 import { setDeleteIcon, setActionIcon, styleActionFooter, styleActionButton } from "../shared/actionButton";
 import { AbstractInputSuggest, App, Modal, Notice, Setting, TFolder, normalizePath } from "obsidian";
 import { nextId, type TemplateCategory } from "../types";
@@ -72,9 +73,9 @@ export class TemplateCreateModal extends Modal {
     const editor = tags.createSpan({ cls: "simple-template-property-editor" });
     editor.hidden = true;
     const input = editor.createEl("input", { type: "text", attr: { placeholder: "属性名称", "aria-label": "新增属性名称" } });
-    const confirm = editor.createEl("button", { attr: { type: "button", title: "确认添加属性", "aria-label": "确认添加属性" } });
+    const confirm = editor.createEl("button", { attr: { type: "button", "aria-label": "确认添加属性" } });
     setActionIcon(confirm, "check", "bordered");
-    const add = tags.createEl("button", { cls: "clickable-icon simple-template-property-add", attr: { type: "button", title: "添加属性", "aria-label": "添加属性" } });
+    const add = tags.createEl("button", { cls: "clickable-icon simple-template-property-add", attr: { type: "button", "aria-label": "添加属性" } });
     setActionIcon(add, "plus", "bordered");
     const renderTags = () => {
       propertySection.toggleClass("is-empty", properties.length === 0);
@@ -95,7 +96,7 @@ export class TemplateCreateModal extends Modal {
         const choose = tag.createEl("button", { text: property, attr: { type: "button", "aria-pressed": String(property === filenameField), "aria-label": `${property}，${property === filenameField ? "当前用于文件名" : "设为文件名"}` } });
         if (property === filenameField) choose.createSpan({ text: "文件名", cls: "simple-template-property-badge" });
         choose.addEventListener("click", () => { filenameField = property; renderTags(); });
-        choose.title = "单击设为文件名，长按拖动排序；alt + 上下方向键排序";
+        choose.setAttribute("aria-label", "单击设为文件名，长按拖动排序；alt + 上下方向键排序");
         choose.addEventListener("keydown", event => {
           if (!event.altKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
           event.preventDefault();
@@ -106,7 +107,7 @@ export class TemplateCreateModal extends Modal {
           renderTags();
           (tagList.children[to]?.firstElementChild as HTMLElement)?.focus();
         });
-        const removeProperty = tag.createEl("button", { cls: "simple-template-property-remove", attr: { type: "button", "aria-label": `移除属性 ${property}`, title: "删除属性" } });
+        const removeProperty = tag.createEl("button", { cls: "simple-template-property-remove", attr: { type: "button", "aria-label": tooltipText(`移除属性 ${property}`, "删除属性") } });
         setDeleteIcon(removeProperty, "plain");
         removeProperty.addEventListener("click", () => { properties.splice(properties.indexOf(property), 1); renderTags(); });
       }
@@ -141,7 +142,7 @@ export class TemplateCreateModal extends Modal {
       footer.querySelectorAll("button").forEach(button => { button.disabled = busy; });
     };
     if (this.template && this.onDelete) {
-      const remove = footer.createEl("button", { cls: "simple-template-delete", attr: { type: "button", "aria-label": "删除模板", title: "删除模板" } });
+      const remove = footer.createEl("button", { cls: "simple-template-delete", attr: { type: "button", "aria-label": "删除模板" } });
       setDeleteIcon(remove, "danger");
       remove.addEventListener("click", runAsync(async () => {
         setBusy(true);
@@ -152,12 +153,12 @@ export class TemplateCreateModal extends Modal {
     }
     if (this.onExport) {
       footer.addClass("simple-template-export-footer");
-      const download = footer.createEl("button", { cls: "clickable-icon simple-template-export", attr: { type: "button", title: "导出已保存模板", "aria-label": "导出已保存模板" } });
+      const download = footer.createEl("button", { cls: "clickable-icon simple-template-export", attr: { type: "button", "aria-label": "导出已保存模板" } });
       setActionIcon(download, "upload", "bordered");
       download.addEventListener("click", this.onExport);
     }
     if (this.onImport) {
-      const upload = footer.createEl("button", { cls: "clickable-icon simple-template-import", attr: { type: "button", title: "导入当前模板组", "aria-label": "导入当前模板组" } });
+      const upload = footer.createEl("button", { cls: "clickable-icon simple-template-import", attr: { type: "button", "aria-label": "导入当前模板组" } });
       setActionIcon(upload, "download", "bordered");
       upload.addEventListener("click", runAsync(async () => {
         setBusy(true);

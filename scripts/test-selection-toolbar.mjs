@@ -167,7 +167,7 @@ boldGroup.querySelector('.simple-selection-submenu').dispatchEvent(new window.Ev
 await new Promise(resolve=>setTimeout(resolve,120));assert(boldGroup.classList.contains('is-open'),'entering submenu cancels pending close');
 boldGroup.dispatchEvent(new window.Event('pointerleave'));
 await new Promise(resolve=>setTimeout(resolve,130));assert(!boldGroup.classList.contains('is-open'),'menu closes after the grace period');
-tool('highlight').parentElement.dispatchEvent(new window.Event('pointerenter'));assert.equal(doc.querySelectorAll('[data-selection-color]').length,18);
+tool('highlight').parentElement.dispatchEvent(new window.Event('pointerenter'));assert.equal(doc.querySelectorAll('[data-selection-color]').length,selectionColors(['#478f14']).length*2);
 assert(selectionColors().includes('#1f2329'),'dark gray preset is restored');
 assert(doc.querySelector('.simple-selection-highlight-pair').firstElementChild.classList.contains('simple-selection-pairing-toggle'),'pairing toggle starts the first row');
 assert(doc.querySelector('.simple-selection-highlight-spacer'),'space below pairing toggle stays empty');
@@ -281,9 +281,10 @@ doc.querySelector('.simple-selection-toolbox [data-icon="search"]').click();awai
 assert.equal(searchState.type,'search');assert.equal(searchState.state.query,JSON.stringify(value));assert(revealed);
 assert.equal(value,'中文 & search','search actions do not alter the note');
 const {translationBridge}=await load('src/features/selectionTranslation.ts');
-assert.equal(translationBridge(plugin.app),undefined,'translation stays hidden without Simple AI');
+assert.equal(translationBridge(plugin.app),undefined,'Simple AI bridge is unavailable without that plugin');
+await update();assert(doc.querySelector('.simple-selection-translation-row'),'translation settings entry remains available without Simple AI');
 plugin.app.plugins={plugins:{'simple-ai':{getTranslationModels:()=>[],translateSelection:async()=>''}}};
-assert.equal(translationBridge(plugin.app),undefined,'translation stays hidden without usable models');
+assert.equal(translationBridge(plugin.app),undefined,'Simple AI bridge requires usable models');
 plugin.app.plugins.plugins['simple-ai'].getTranslationModels=()=>[{sourceId:'source',modelId:'model',label:'Model'}];
 assert(translationBridge(plugin.app),'enabled compatible plugin exposes translation');
 await update();assert(doc.querySelector('.simple-selection-translation-row [data-icon="languages"]'),'translation appears when Simple AI is available');

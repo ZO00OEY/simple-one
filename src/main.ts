@@ -46,7 +46,7 @@ import { reportError } from "./shared/async";
 import { SimpleSettingTab } from "./settings";
 import { normalizePopupScalePercent } from "./shared/popupSizing";
 import { activeDisplayProfile, displayParameterEnabled, loadMobileDisplayProfile } from "./shared/displayProfile";
-import { normalizeTypography } from "./shared/typography";
+import { initializeFormattingDefaults, initializeHeadingDefaults, normalizeTypography } from "./shared/typography";
 import { registerTypography } from "./features/typography";
 import { registerTranslationCards } from "./features/translationCards";
 import { registerThemeAppearance } from "./features/themeAppearance";
@@ -111,6 +111,10 @@ export default class SimplePlugin extends Plugin {
     document.body.classList.add("simple-one-active");
     this.register(() => document.body.classList.remove("simple-one-active"));
     await this.loadSettings();
+    if (loadCancelled) return;
+    const initializedHeadings = initializeHeadingDefaults(this.settings.enhancements.quickFormat);
+    const initializedFormatting = initializeFormattingDefaults(this.settings);
+    if (initializedHeadings || initializedFormatting) await this.saveSettings();
     if (loadCancelled) return;
     await initializeAttachmentDefaults(this).catch(reportError);
     if (loadCancelled) return;
@@ -295,6 +299,13 @@ export default class SimplePlugin extends Plugin {
     const templates = await this.readVaultConfig("templates.json");
     this.templateFolder = vaultRelativePath(templates?.folder);
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+    const legacyInlineCode = data?.desktopTypography as { inlineCodeFontEnabled?: boolean } | undefined;
+    this.settings.themeInlineCodeFollowsBody = typeof data?.themeInlineCodeFollowsBody === "boolean"
+      ? data.themeInlineCodeFollowsBody : legacyInlineCode?.inlineCodeFontEnabled ?? true;
+    if (Array.isArray(this.settings.themeFavoriteColors)) {
+      this.settings.themeFavoriteColors = [...new Set(this.settings.themeFavoriteColors.map(color =>
+        typeof color === "string" && ["#2ea121", "#168c54"].includes(color.toLowerCase()) ? "#478f14" : color))];
+    }
 
     normalizeEnhancements(this.settings, data);
     normalizeDiarySettings(this.settings, data);

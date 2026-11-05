@@ -298,7 +298,7 @@ class ColumnsSurface {
     this.root.addClass("simple-columns");
     const toolbar = this.root.createDiv({ cls: "simple-columns-toolbar" });
     const atColumnLimit = this.draft.content.length >= 4;
-    const addColumn = styleActionButton(toolbar.createEl("button", { cls: "simple-columns-add-column", attr: { title: atColumnLimit ? "最多四列" : "在右侧添加一列", "aria-label": atColumnLimit ? "最多四列" : "在右侧添加一列" } }), "bordered");
+    const addColumn = styleActionButton(toolbar.createEl("button", { cls: "simple-columns-add-column", attr: { "aria-label": atColumnLimit ? "最多四列" : "在右侧添加一列" } }), "bordered");
     setIcon(addColumn, "plus");
     addColumn.classList.toggle("is-at-limit", atColumnLimit);
     addColumn.addEventListener("pointerdown", (event) => event.preventDefault());
@@ -319,7 +319,7 @@ class ColumnsSurface {
       if (index) this.addDivider(layout, index);
       const column = layout.createDiv({ cls: "simple-columns-editor-column" });
       const body = column.createDiv({ cls: "simple-columns-editor-body markdown-rendered" });
-      const handle = column.createEl("button", { cls: "simple-columns-move-handle", attr: { type: "button", title: "列拖拽把手" } });
+      const handle = column.createEl("button", { cls: "simple-columns-move-handle", attr: { type: "button", "aria-label": "列拖拽把手" } });
       setIcon(handle, COLUMN_DRAG_ICON);
       setTooltip(handle, `拖拽第 ${index + 1} 列，可左右调整或删除`);
       column.prepend(handle);
@@ -654,7 +654,7 @@ class ColumnsSurface {
     this.stageCleanup?.();
     const doc = this.root.ownerDocument;
     const card = doc.body.createDiv({ cls: "simple-columns-stage" });
-    card.setAttribute("title", "移动到目标行，左键插入左侧，右键插入右侧；Esc 取消");
+    card.setAttribute("aria-label", "移动到目标行，左键插入左侧，右键插入右侧；Esc 取消");
     const grid = card.createDiv({ cls: "simple-columns-stage-grid" });
     grid.createDiv({ cls: "simple-columns-stage-preview", text: this.draft.content[index].trim().slice(0, 90) || "空白列" });
     grid.createDiv({ cls: "simple-columns-stage-empty" });
@@ -721,7 +721,7 @@ class ColumnsSurface {
   }
 
   private addDivider(layout: HTMLElement, index: number): void {
-    const divider = layout.createDiv({ cls: "simple-columns-divider", attr: { title: "拖动调整宽度", role: "separator" } });
+    const divider = layout.createDiv({ cls: "simple-columns-divider", attr: { role: "separator", "aria-label": "拖动调整宽度" } });
     divider.addEventListener("pointerdown", (event) => {
       event.preventDefault();
       const start = event.clientX;
@@ -735,7 +735,7 @@ class ColumnsSurface {
         this.draft.widths[index] = before[index - 1] + before[index] - left;
         changed = changed || left !== before[index - 1];
         layout.style.gridTemplateColumns = this.draft.widths.map((n) => `minmax(0, ${n}fr)`).join(" 8px ");
-        divider.title = `${this.draft.widths[index - 1]}% : ${this.draft.widths[index]}%`;
+        divider.setAttribute("aria-label", `${this.draft.widths[index - 1]}% : ${this.draft.widths[index]}%`);
       };
       divider.addEventListener("pointermove", move);
       const stop = (up: PointerEvent) => {
@@ -768,11 +768,11 @@ class ColumnsSurface {
       this.addImagePreview(holder, source);
       const actions = holder.createDiv({ cls: "simple-columns-image-actions" });
       if (this.plugin.settings.enableImageZoom) {
-        const zoom = styleActionButton(actions.createEl("button", { cls: "simple-columns-image-zoom", attr: { title: "放大图片", "aria-label": "放大图片" } }), "bordered");
+        const zoom = styleActionButton(actions.createEl("button", { cls: "simple-columns-image-zoom", attr: { "aria-label": "放大图片" } }), "bordered");
         setIcon(zoom, "zoom-in");
         zoom.addEventListener("pointerdown", (event) => event.stopPropagation());
       }
-      const edit = styleActionButton(actions.createEl("button", { cls: "simple-columns-image-edit", attr: { title: "编辑这个区块", "aria-label": "编辑这个区块" } }), "bordered");
+      const edit = styleActionButton(actions.createEl("button", { cls: "simple-columns-image-edit", attr: { "aria-label": "编辑这个区块" } }), "bordered");
       setIcon(edit, "code-2");
       edit.addEventListener("pointerdown", (event) => event.stopPropagation());
       return;
@@ -1423,7 +1423,7 @@ export function registerNotionColumns(plugin: SimplePlugin): void {
     const doc = selection.view.dom.ownerDocument;
     const card = doc.win.createDiv();
     card.className = "simple-columns-stage";
-    card.setAttribute("title", "移动到目标行，左键插入左侧，右键插入右侧；Esc 取消");
+    card.setAttribute("aria-label", "移动到目标行，左键插入左侧，右键插入右侧；Esc 取消");
     const grid = doc.win.createDiv();
     grid.className = "simple-columns-stage-grid";
     const preview = doc.win.createDiv();

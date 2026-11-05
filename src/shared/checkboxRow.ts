@@ -12,7 +12,7 @@ export function checkboxRowIcon(row: HTMLElement, icon: string): void {
 export function checkboxRow(parent: HTMLElement, name: string, description: string, checked: boolean): {
   row: HTMLElement; input: HTMLInputElement;
 } {
-  const row = parent.createDiv({ cls: "simple-preview-checkbox-row simple-display-option-row", attr: { title: description } });
+  const row = parent.createDiv({ cls: "simple-preview-checkbox-row simple-display-option-row", attr: { "aria-label": description } });
   const label = row.createEl("label", { cls: "simple-display-checkbox-label" });
   const input = label.createEl("input", { type: "checkbox", attr: { "aria-description": description } });
   input.checked = checked;

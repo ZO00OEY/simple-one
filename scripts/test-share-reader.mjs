@@ -1,19 +1,31 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join, resolve, sep } from "node:path";
 import { createRequire } from "node:module";
 import esbuild from "esbuild";
 import { buildReaderFiles, standaloneReader } from "./build-share-reader.mjs";
 import { JSDOM } from "jsdom";
 
-const folder = await mkdtemp(join(tmpdir(), "simple-reader-test-"));
+const outputRoot = resolve("../../../.codex/output");
+await mkdir(outputRoot, { recursive: true });
+const folder = await mkdtemp(join(outputRoot, "simple-reader-test-"));
 const id = "k7m2x9a4w8p3";
-const dom = new JSDOM('<!doctype html><header></header><main><h1 id="note-title"></h1><input id="search"><nav id="note-list"></nav><article id="content"></article></main>', { url: `https://example.github.io/share/#/notes/${id}` });
+const dom = new JSDOM('<!doctype html><header></header><div class="layout"><aside><input id="search"><nav id="note-list"></nav></aside><main><h1 id="note-title"></h1><article id="content"></article></main></div>', { url: `https://example.github.io/share/#/notes/${id}` });
 const names = ["window", "document", "navigator", "location", "Node", "NodeFilter", "HTMLElement", "HTMLAnchorElement", "Element", "SVGElement", "DOMParser"];
 const prior = new Map(names.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
 const fixture = `# 双列与安全\n\n> [!note] 提示\n> 正文 **加粗**。\n\n- [x] 完成任务\n\n==高亮== 与 $x^2$\n\n$$\n\\frac{1}{2}\n$$\n\n\`\`\`simple-columns\nwidths: 40:60\n## 左侧\n左侧正文\n---column---\n## 右侧\n右侧正文\n\`\`\`\n\n<script>window.stolen=true</script><img src=x onerror="window.stolen=true"><iframe src="https://evil.example"></iframe>\n\n[危险](javascript:alert(1))\n\n脚注[^1]\n\n[^1]: 注释内容`;
 try {
+  const formattingOutput=join(folder,'selection-format.cjs');
+  await esbuild.build({entryPoints:['src/features/selectionFormatText.ts'],bundle:true,platform:'node',format:'cjs',outfile:formattingOutput,logLevel:'silent'});
+  const formatting=createRequire(import.meta.url)(formattingOutput);
+  const toolbarSource=[
+    formatting.colorSelection('工具栏彩色文字','color','#478f14'),
+    ...['bold','italic','underline','strike'].map(tool=>formatting.applyInlineStyle('工具栏'+tool,tool,'#478f14')),
+    formatting.highlightSelection('工具栏双色高亮','#222222','#ffd00066'),
+    formatting.applyInlineStyle('工具栏默认高亮','highlight'),
+    '> [!小贴士] 中文提示\n> 中文自定义 Callout 内容',
+    '> [!unlisted-type]- 未定义提示\n> 折叠内容',
+  ].join('\n\n');
   for (const name of names) Object.defineProperty(globalThis, name, { value: dom.window[name], configurable: true });
   globalThis.matchMedia = () => ({ matches: false });
   globalThis.CSS = { escape: value => value.replace(/["\\]/g, "\\$&") };
@@ -29,7 +41,7 @@ try {
       { id: invalidId, title: '异常路径', category: '444 人工智障管理处/001 AI渠道与账号/其他', path: `notes/../${invalidId}.md` }
     ] }));
     const response = await fallbackFetch(path);
-    return new Response(await response.text() + '\n\n```simple-translation\n<!-- simple-translation-original:source -->\n原文\n\n译文 **加粗**\n```\n\n<span style="color: #e60f61;">彩色文字</span>\n');
+    return new Response(await response.text() + "\n\n" + toolbarSource + '\n\n```simple-translation\n<!-- simple-translation-original:source -->\n原文\n\n译文 **加粗**\n```\n\n<span style="color: #e60f61;">彩色文字</span>\n\n##### 五级标题\n\n###### 六级标题\n\n###### 六级标题\n\n<h6>无锚点标题</h6>\n');
   };
   const { files } = await buildReaderFiles();
   assert(!/\bimport\s*\(/.test(files["reader/app.js"]), "standalone reader must not load JavaScript chunks");
@@ -63,7 +75,10 @@ try {
   standalone.window.close();
   createRequire(import.meta.url)(output);
   assert.equal(document.querySelector('.reader-font-control select'), null, 'theme settings do not offer font selection');
-  assert.equal(document.querySelectorAll('.accent-colors button').length, 4, 'four theme colors');
+  assert.equal(document.querySelectorAll('.accent-colors button').length, 5, 'five theme colors including purple');
+  document.querySelector('button[data-color="purple"]').click();
+  assert.equal(document.documentElement.style.getPropertyValue('--share-accent'), '#7c3aed');
+  assert.equal(dom.window.localStorage.getItem('simple-reader-theme-color'), 'purple');
   document.querySelector('button[data-color="blue"]').click();
   assert.equal(document.documentElement.style.getPropertyValue('--reader-font'), '', 'theme settings keep the built-in font stack');
   const wait = async check => { for (let i = 0; i < 100; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 10)); } throw new Error("Reader did not complete"); };
@@ -85,6 +100,12 @@ try {
   assert.equal(await copy('pre.share-html-source + .share-block-copy'), sourceBlock.querySelector('code').textContent, 'code copy preserves the complete original source');
   assert(!document.querySelector('.share-translation').textContent.includes('simple-translation-original'));
   assert(document.querySelector('span[style*="#e60f61"]'), 'custom text colors survive sanitization');
+  for(const tag of ['span','strong','em','u','del'])assert([...document.querySelectorAll('#content '+tag)].some(node=>node.textContent.startsWith('工具栏')&&node.style.color==='rgb(71, 143, 20)'), 'toolbar '+tag+' color survives the reader');
+  const paired=[...document.querySelectorAll('#content mark')].find(node=>node.textContent==='工具栏双色高亮');
+  assert.equal(paired.style.color,'rgb(34, 34, 34)');
+  assert.equal(paired.style.background,'rgba(255, 208, 0, 0.4)');
+  assert(document.querySelector('.callout[data-callout="小贴士"]'), 'Chinese Callouts render instead of remaining raw markers');
+  assert.equal(document.querySelector('.callout[data-callout="unlisted-type"] details').open,false, 'unknown Callouts support folding');
   assert(requested.includes(`notes/${encodeURIComponent('写作')}/${encodeURIComponent('人物')}/${id}.md`), 'reader resolves mapped UTF-8 paths while keeping the original ID route');
   assert.equal(document.getElementById("note-title").textContent, "双列与安全");
   const folderNames = Array.from(document.querySelectorAll('#note-list summary'), summary => summary.textContent);
@@ -112,6 +133,70 @@ try {
   assert.equal(document.querySelector('img[width="300"]').style.aspectRatio, "300 / 180");
   assert(!dom.window.stolen);
   const first = document.getElementById("第一节"), child = document.getElementById("子节"), deep = document.getElementById("深层标题"), second = document.getElementById("第二节");
+  const outline = document.querySelector('.note-outline');
+  assert(!outline.hidden, 'loaded headings show the current note outline');
+  const outlineLinks = Array.from(outline.querySelectorAll('a'));
+  assert.deepEqual(outlineLinks.map(link => link.textContent), Array.from(document.querySelectorAll('#content h1,#content h2,#content h3,#content h4,#content h5,#content h6'), heading => heading.textContent.replace(/^▾/, '')), 'outline preserves document order without folding arrows');
+  const deepLink = outlineLinks.find(link => link.textContent === '深层标题');
+  assert.equal(deepLink.style.getPropertyValue('--outline-depth'), '3', 'heading levels control indentation');
+  assert.equal(deepLink.getAttribute('href'), `#/notes/${id}/${encodeURIComponent('深层标题')}`, 'outline links retain shareable note routes');
+  assert.equal(outlineLinks.find(link => link.textContent === '五级标题').style.getPropertyValue('--outline-depth'), '2');
+  const sixthLevel = outlineLinks.filter(link => link.textContent === '六级标题');
+  assert.equal(sixthLevel[0].style.getPropertyValue('--outline-depth'), '3');
+  assert.notEqual(sixthLevel[0].href, sixthLevel[1].href, 'duplicate headings have distinct jump targets');
+  const rawHeadingLink = outlineLinks.find(link => link.textContent === '无锚点标题');
+  const rawHeadingId = decodeURIComponent(rawHeadingLink.getAttribute('href').split('/').at(-1));
+  assert.equal(document.getElementById(rawHeadingId).textContent.replace(/^▾/, ''), '无锚点标题', 'raw HTML headings receive a usable anchor');
+  const sidebarToggle = document.querySelector('.sidebar-toggle');
+  assert.equal(document.querySelector('.reader-navigation-tools').firstElementChild, sidebarToggle, 'sidebar toggle stays at the top left');
+  const sidebar = document.querySelector('aside');
+  const outlineSidebar = document.querySelector('.outline-sidebar');
+  assert.equal(outline.parentElement, outlineSidebar, 'headings use a separate sidebar in the second left track');
+  assert.equal(outlineSidebar.previousElementSibling.tagName, 'MAIN', 'DOM retains a separate outline pane; CSS places it in column 2');
+  assert(!sidebar.contains(outline));
+  const rightToggle = document.querySelector('.outline-sidebar-toggle');
+  assert(outlineSidebar.hidden, 'outline starts closed until requested');
+  assert.equal(rightToggle.parentElement.className, 'reader-titlebar');
+  assert(outline.querySelector('.outline-toolbar .outline-fold-all'), 'fold-all belongs inside the outline toolbar');
+  rightToggle.click();
+  assert(!outlineSidebar.hidden, 'outline opens on request');
+  rightToggle.click();
+  assert(outlineSidebar.hidden && !sidebar.hidden, 'right sidebar collapses independently');
+  assert(document.querySelector('.layout').classList.contains('outline-collapsed'));
+  assert.equal(dom.window.localStorage.getItem('simple-reader-outline-collapsed'), 'true');
+  rightToggle.click();
+  assert(!outlineSidebar.hidden);
+  const leftHandle = sidebar.querySelector('.sidebar-resizer');
+  const rightHandle = outlineSidebar.querySelector('.sidebar-resizer');
+  const width = property => parseFloat(document.documentElement.style.getPropertyValue(property));
+  const initialRightWidth = width('--share-outline-width');
+  const initialLeftWidth = width('--share-sidebar-width');
+  for (const [handle, start, end] of [[leftHandle, 200, 240], [rightHandle, 760, 800]]) {
+    handle.setPointerCapture = () => {};
+    handle.dispatchEvent(new dom.window.MouseEvent('pointerdown', { button:0, clientX:start }));
+    handle.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX:end }));
+    handle.dispatchEvent(new dom.window.MouseEvent('pointerup'));
+  }
+  assert.equal(width('--share-sidebar-width'), initialLeftWidth + 40, 'left divider widens when dragged right');
+  assert.equal(width('--share-outline-width'), initialRightWidth + 40, 'outline divider widens when dragged right');
+  assert.equal(dom.window.localStorage.getItem('simple-reader-sidebar-width'), String(initialLeftWidth + 40));
+  assert.equal(dom.window.localStorage.getItem('simple-reader-outline-width'), String(initialRightWidth + 40));
+  rightHandle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key:'ArrowRight' }));
+  assert.equal(width('--share-outline-width'), initialRightWidth + 56, 'outline divider also supports keyboard resizing');
+  assert.equal(width('--share-sidebar-width'), initialLeftWidth + 40, 'resizing right leaves left width intact');
+  Object.defineProperty(dom.window, 'innerWidth', { value:360, writable:true, configurable:true });
+  dom.window.dispatchEvent(new dom.window.Event('resize'));
+  assert(width('--share-sidebar-width') + width('--share-outline-width') <= 360 * .55 + 1, 'portrait resizing reserves width for the central reading pane');
+  dom.window.innerWidth = 1024;
+  dom.window.dispatchEvent(new dom.window.Event('resize'));
+  sidebarToggle.click();
+  assert(sidebar.hidden && document.querySelector('.layout').classList.contains('sidebar-collapsed'));
+  assert.equal(sidebarToggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(dom.window.localStorage.getItem('simple-reader-sidebar-collapsed'), 'true');
+  sidebarToggle.click();
+  assert(!sidebar.hidden && !document.querySelector('.layout').classList.contains('sidebar-collapsed'));
+  assert.equal(sidebarToggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(document.querySelector(`#note-list a[href="#/notes/${id}"]`), nestedLink, 'sidebar toggling retains catalog state');
   const firstBody = first.nextElementSibling, childBody = child.nextElementSibling;
   first.querySelector("button").click();
   assert(firstBody.hidden); assert.equal(first.querySelector("button").getAttribute("aria-expanded"), "false");
@@ -123,6 +208,12 @@ try {
   Array.from(document.querySelectorAll("#content a")).find(link => decodeURIComponent(link.getAttribute("href")) === "#深层标题").click();
   assert(!firstBody.hidden && !childBody.hidden, "anchor navigation opens all folded ancestors");
   assert.equal(deep.dataset.scrolled, "true");
+  first.querySelector('button').click(); child.querySelector('button').click();
+  delete deep.dataset.scrolled;
+  deepLink.click();
+  assert(!firstBody.hidden && !childBody.hidden, 'outline navigation opens all folded ancestors');
+  assert.equal(deep.dataset.scrolled, 'true');
+  assert.equal(location.hash, `#/notes/${id}/${encodeURIComponent(deep.id)}`, 'outline clicks preserve a shareable heading route without reloading the note');
   const left = document.querySelector(".simple-column h2"), right = document.querySelectorAll(".simple-column h2")[1];
   left.querySelector("button").click();
   assert(left.nextElementSibling.hidden); assert(!right.nextElementSibling.hidden, "column folding must not affect another column");
@@ -134,17 +225,19 @@ try {
   assert.equal(document.querySelectorAll("#note-list a").length, 0);
   dom.window.location.hash = "#/notes/p8n4w2a7b9c6";
   await wait(() => document.getElementById("note-title").textContent.includes("已删除"));
+  assert(outline.hidden && !outline.querySelector('a'), 'missing notes clear the previous outline');
   dom.window.location.hash = `#/notes/${legacyId}`;
   await wait(() => document.getElementById('note-title').textContent === '旧版路径' && document.querySelector('.simple-columns'));
   assert(requested.includes(`notes/${legacyId}.md`), 'legacy flat paths remain readable');
   dom.window.location.hash = `#/notes/${invalidId}`;
   await wait(() => document.getElementById('content').textContent.includes('Invalid note path'));
+  assert(outline.hidden && !outline.querySelector('a'), 'failed loads clear the previous outline');
   assert(!requested.includes(`notes/../${invalidId}.md`), 'invalid catalog paths cannot escape the notes directory');
   console.log("Reader DOM checks passed: direct route, columns, callout inline content, task list, math, footnotes, search and HTML filtering. Visual appearance still requires user confirmation.");
 } finally {
   dom.window.close();
   for (const [name, descriptor] of prior) if (descriptor) Object.defineProperty(globalThis, name, descriptor); else delete globalThis[name];
   const target = resolve(folder);
-  if (!target.startsWith(resolve(tmpdir()))) throw new Error("Invalid temporary cleanup target");
+  if (!target.startsWith(outputRoot + sep)) throw new Error("Invalid temporary cleanup target");
   await rm(target, { recursive: true, force: true });
 }

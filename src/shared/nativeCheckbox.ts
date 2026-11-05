@@ -1,3 +1,4 @@
+import { setNativeTooltip } from "./tooltipText";
 import { type ToggleComponent } from "obsidian";
 
 /** Use a native input, like Simple One; preserve the existing settings callbacks. */
@@ -17,6 +18,6 @@ export function nativeCheckbox(toggle: ToggleComponent): ToggleComponent {
   toggle.setValue = value => { input.checked = value; return toggle; };
   toggle.setDisabled = value => { input.disabled = value; return toggle; };
   toggle.onChange = callback => { changed = callback; return toggle; };
-  toggle.setTooltip = value => { input.title = value; return toggle; };
+  toggle.setTooltip = value => { setNativeTooltip(input, value); return toggle; };
   return toggle;
 }

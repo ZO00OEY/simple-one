@@ -127,7 +127,6 @@ export function mobileCheckbox(root: HTMLElement, name: string, description: str
 export function renderMobileSyncRules(root: HTMLElement, options: MobileOptions, save: () => Promise<void> | void,
   _loadPlugins: () => Promise<string[]>, _currentPluginId = "simple-one", host?: MobileHost): void {
   root = root.createDiv({ cls: "simple-one-sync-sync-rules" });
-  root.createEl("p", { text: "常规内容默认参与同步，本机自定义排除会保留。高级选项不影响接入是否完成。" });
   if (host) {
     new Setting(root).setName("本机自定义规则").setDesc("仅在需要自定义排除时编辑；已有规则会保留。")
       .addButton(button => { styleSettingIconAction(button.buttonEl); button.setIcon("settings").setTooltip("编辑本机 .gitignore").onClick(() => {
@@ -160,7 +159,7 @@ export function renderMobileSyncRules(root: HTMLElement, options: MobileOptions,
   mobileCheckbox(root, "追踪文件改名与移动", "识别文件改名和移动，关联移动前后的内容。", options.trackPaths, async value => { options.trackPaths = value; await save(); });
 }
 
-export function renderMobileSettings(root: HTMLElement, host: MobileHost, guide = false): void {
+export function renderMobileSettings(root: HTMLElement, host: MobileHost, guide = false): HTMLElement | void {
   const options = host.options;
   if (!guide) root.addClass("simple-lightweight-sync-settings");
   const section = (title: string): HTMLElement => guide ? settingsSection(root, title) : compactSettingsSection(root, title);
@@ -229,7 +228,8 @@ export function renderMobileSettings(root: HTMLElement, host: MobileHost, guide 
   if (!guide) {
     for (const row of Array.from(root.querySelectorAll<HTMLElement>(".setting-item"))) {
       const desc = row.querySelector<HTMLElement>(".setting-item-description");
-      if (desc?.textContent) row.title = desc.textContent;
+      if (desc?.textContent) row.setAttribute("aria-label", desc.textContent);
     }
   }
+  return rules;
 }

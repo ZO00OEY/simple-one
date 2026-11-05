@@ -28,6 +28,7 @@ share-local.json*
 share-template*.html
 custom-*.html
 share-template-selection.json*
+default-template-version.json*
 `;
 
 let gitRoot;

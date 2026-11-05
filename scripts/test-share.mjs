@@ -245,10 +245,20 @@ try {
     assert.equal(await freshInstall.readDefaultTemplate(), await readFile('default.html', 'utf8'), 'market installation restores the bundled default HTML without network access');
     assert.equal(installed.get(prefix + 'reader-licenses.txt'), await readFile('reader-licenses.txt', 'utf8'), 'market installation includes reader licenses');
     installed.set(prefix + 'default.html', defaultTemplate);
-    assert.equal(await freshInstall.readDefaultTemplate(), defaultTemplate, 'existing default HTML edits are preserved');
+    assert.equal(await freshInstall.readDefaultTemplate(), defaultTemplate, 'existing default is read directly from its file, without decoding the embedded template');
+    assert.equal(installed.get(prefix + 'default.html'), defaultTemplate, 'disk edits are preserved for explicit import');
     installed.set(prefix + 'default.html', '<html><body>broken template</body></html>');
-    await assert.rejects(freshInstall.readDefaultTemplate(), /content/);
+    await assert.rejects(freshInstall.readDefaultTemplate(), /content/, 'invalid default files are reported instead of silently regenerating a different template');
     assert.equal(installed.get(prefix + 'default.html'), '<html><body>broken template</body></html>', 'invalid existing templates are reported without overwriting user content');
+    installed.set(prefix + 'default.html', defaultTemplate);
+    installed.set(prefix + 'default-template-version.json', 'old-template-revision');
+    const upgraded = new combined.ShareFeature({ manifest: { id: 'simple-one' }, app: { vault: { configDir: '.obsidian', adapter } } });
+    assert.equal(await upgraded.readDefaultTemplate(), await readFile('default.html', 'utf8'), 'three-file update refreshes the bundled default once');
+    assert.equal(installed.get(prefix + 'custom-default-backup.html'), defaultTemplate, 'modified defaults are backed up before upgrading');
+    assert.equal(installed.get(prefix + 'default-template-version.json'), templates.readerRevision);
+    const restarted = new combined.ShareFeature({ manifest: { id: 'simple-one' }, app: { vault: { configDir: '.obsidian', adapter } } });
+    installed.set(prefix + 'default.html', defaultTemplate);
+    assert.equal(await restarted.readDefaultTemplate(), defaultTemplate, 'same-version restart reads the fixed file');
     console.log('Community installation: three standard files restore HTML and licenses offline; existing templates are preserved.');
   }
   assert.throws(() => templates.validateShareTemplate(defaultTemplate.replace('id="content"', 'id="missing-content"')), /content/);
@@ -296,7 +306,7 @@ try {
     setting.addSearch = setting.addText;
     setting.addButton = configure => {
       const buttonEl = setting.controlEl.createEl("button");
-      const control = { buttonEl, setClass(value) { buttonEl.classList.add(value); return this; }, setButtonText(text) { buttonEl.textContent = text; return this; }, setIcon(value) { buttonEl.dataset.icon = value; return this; }, setTooltip(value) { buttonEl.title = value; return this; }, setDisabled(value) { buttonEl.disabled = value; return this; }, setCta() { return this; }, onClick(callback) { buttonEl.addEventListener("click", callback); return this; } };
+      const control = { buttonEl, setClass(value) { buttonEl.classList.add(value); return this; }, setButtonText(text) { buttonEl.textContent = text; return this; }, setIcon(value) { buttonEl.dataset.icon = value; return this; }, setTooltip(value) { buttonEl.setAttribute("aria-label",value); return this; }, setDisabled(value) { buttonEl.disabled = value; return this; }, setCta() { return this; }, onClick(callback) { buttonEl.addEventListener("click", callback); return this; } };
       configure(control); return setting;
     };
     return setting;
@@ -871,7 +881,7 @@ try {
     panel.rows = panel.rows.map(row => ({ ...row, state: '推送成功' })); view.updateStatus();
     assert.equal(rootEl.querySelector('.simple-share-progress').textContent, 'GitHub / EdgeOne 已部署 · 上次推送 19 分钟前');
     panel.rows = savedRows;
-    assert(rootEl.querySelector('.simple-share-progress').title.includes('最近检查：'), 'complete check information remains available on hover');
+    assert(rootEl.querySelector('.simple-share-progress').getAttribute('aria-label').includes('最近检查：'), 'complete check information remains available on hover');
     panel.status = ''; panel.lastPushedAt = 0; view.updateStatus();
     assert.equal(rootEl.querySelector('.simple-one-panel-switch'), null, 'sharing has no sync switch');
     assert.equal(view.getDisplayText(), '分享');
@@ -1029,8 +1039,8 @@ try {
     assert.equal(rootEl.querySelectorAll('.simple-share-selection').length, 0, 'leaving edit mode hides checkboxes');
     ui.manifest.enabled = false; ui.renderSettings(rootEl, false, false);
     assert.deepEqual([...rootEl.querySelectorAll("fieldset > legend")].map(title => title.textContent), ["分享设置", "分享库管理"]);
-    assert.equal(rootEl.querySelectorAll('button[title^="管理分享库："]').length, 1);
-    assert(rootEl.querySelector('button[title="管理分享模板"]'), 'template manager remains accessible while disabled');
+    assert.equal(rootEl.querySelectorAll('button[aria-label^="管理分享库："]').length, 1);
+    assert(rootEl.querySelector('button[aria-label="管理分享模板"]'), 'template manager remains accessible while disabled');
     assert.equal(rootEl.querySelectorAll('.simple-share-library-add button[data-icon="plus"]').length, 1);
     assert(![...rootEl.querySelectorAll('button')].some(button => button.textContent === '删除记录'), 'delete action is inside library management');
     assert([...rootEl.querySelectorAll("select")].slice(1).every(select => select.disabled), "template and path edits are disabled while sharing is off");
@@ -1041,7 +1051,7 @@ try {
     assert(!rootEl.textContent.includes("分享预览"));
     const templatePopup = dom.window.document.body.createDiv();
     globalThis.shareModalElements = () => ({ modalEl: templatePopup, titleEl: templatePopup.createDiv(), contentEl: templatePopup.createDiv() });
-    rootEl.querySelector('button[title="管理分享模板"]').click();
+    rootEl.querySelector('button[aria-label="管理分享模板"]').click();
     assert.deepEqual([...templatePopup.querySelectorAll('button')].map(button => button.dataset.icon), ['download', 'upload', 'rotate-ccw']);
     assert([...templatePopup.querySelectorAll('button')].every(button => button.disabled), 'template mutations stay disabled while sharing is off');
     ui.templateMessage = '模板已导入'; ui.renderViews();
@@ -1074,7 +1084,7 @@ try {
         : detailCache.get(path) ?? detailAdapter.read(path),
       write: async (path, content) => { detailCache.set(path, content); },
     };
-    const detailButton = rootEl.querySelector('button[title^="管理分享库："]');
+    const detailButton = rootEl.querySelector('button[aria-label^="管理分享库："]');
     assert(detailButton, 'each library offers a detail entry');
     detailButton.click();
     assert.equal(ui.isLibraryManagementOpen, true);
@@ -1154,7 +1164,7 @@ try {
     edgeArea = 'overseas';
     const callsBeforeCachedOpen = detailCalls.length;
     const domainCallsBeforeCachedOpen = domainCalls;
-    rootEl.querySelector('button[title^="管理分享库："]').click();
+    rootEl.querySelector('button[aria-label^="管理分享库："]').click();
     for (let attempt = 0; rootEl.textContent.includes('正在读取') && attempt < 100; attempt++) await new Promise(resolve => setTimeout(resolve, 0));
     assert(rootEl.textContent.includes('当前仓库为私有，GitHub Pages 不可用。'), 'a later opening shows the saved visibility');
     assert(!rootEl.querySelectorAll('.simple-share-library-detail__section')[1].querySelector('.simple-share-library-detail__notice'), 'overseas-only area has no mainland preview warning');
@@ -1164,7 +1174,7 @@ try {
     ui.manifest.edgeOneDomains = { projectId: 'makers-test-project', domains: [{ domain: 'updated.example.com', status: 'online' }] };
     domainResult = ui.manifest.edgeOneDomains.domains;
     assert.equal(ui.backFromShareLibraryManagement(), true);
-    rootEl.querySelector('button[title^="管理分享库："]').click();
+    rootEl.querySelector('button[aria-label^="管理分享库："]').click();
     for (let attempt = 0; rootEl.textContent.includes('正在读取') && attempt < 100; attempt++) await new Promise(resolve => setTimeout(resolve, 0));
     assert(rootEl.querySelector('a[href="https://updated.example.com"]'), 'the current manifest wins over an older local details cache');
     assert.equal(domainCalls, domainCallsBeforeCachedOpen + 2, 'reopening refreshes the custom domain list');
@@ -1640,6 +1650,7 @@ try {
   const manifestPath = '.obsidian/plugins/simple-one/share-manifest.json';
   await adapter.mkdir('.obsidian/plugins/simple-one');
   await adapter.write('.obsidian/plugins/simple-one/default.html', defaultTemplate);
+  await adapter.write('.obsidian/plugins/simple-one/default-template-version.json', templates.readerRevision);
   const registry = model.emptyManifest(); registry.site = { owner: 'test', repo: 'public', branch: 'main' };
   registry.notes[id] = { enabled: true, sourcePath: sourceFiles[0].path, category: '写作', revision: 1 };
   registry.notes[other] = { enabled: true, sourcePath: sourceFiles[1].path, category: '', revision: 1 };
@@ -1704,11 +1715,17 @@ try {
   assert.equal(cloud.head, safeIdentityHead, 'a delayed metadata cache is recovered by checking the actual source ID');
   repoHost.app.metadataCache.getFileCache = originalCacheLookup;
   const appearance = cloud.files.get('reader/appearance.css').toString();
-  assert(appearance.includes('--share-image-max-height:320px'));
-  assert(appearance.includes('.callout[data-callout="caution"]{--callout-color:#aabbcc}'));
+  assert.equal(appearance,'', 'publication never generates appearance CSS from local settings');
+  assert.equal(cloud.files.get('index.html').toString(), defaultTemplate, 'ready-made default file is uploaded unchanged');
+  const fixedTemplateHead=cloud.head;
+  repoHost.settings.themeFormatting={highlightBackground:'#010203',boldColor:'#ff0000'};
+  repoHost.settings.desktopTypography={enabled:true,fontSize:36};
+  repoHost.settings.enhancements.quickFormat.calloutColors.warning='#ff0000';
+  await feature.publish();
+  assert.equal(cloud.head,fixedTemplateHead,'local appearance changes do not produce an upload or commit');
   const customTemplate = defaultTemplate.replace('<title>分享笔记</title>', '<title>自定义分享</title>');
   await feature.saveTemplate(customTemplate, '已导入', '我的主题.html');
-  await feature.publish(); assert(cloud.files.get('index.html').toString().includes('自定义分享'));
+  await feature.publish(); assert.equal(cloud.files.get('index.html').toString(),customTemplate,'selected custom template is published byte-for-byte');
   assert.equal(await adapter.read('.obsidian/plugins/simple-one/default.html'), defaultTemplate);
   await assert.rejects(() => feature.saveTemplate('<html><body>损坏</body></html>', ''), /content/);
   await feature.restoreDefaultTemplate(); await feature.publish();
@@ -1716,7 +1733,10 @@ try {
   assert.equal(await adapter.read('.obsidian/plugins/simple-one/custom-我的主题.html'), customTemplate);
   const replaced = defaultTemplate.replace('分享笔记', '替换默认');
   await adapter.write('.obsidian/plugins/simple-one/default.html', replaced); await feature.publish();
-  assert(cloud.files.get('index.html').toString().includes('替换默认'));
+  assert.equal(cloud.files.get('index.html').toString(),replaced,'changed default file is compared and uploaded directly');
+  const updatedTemplateHead=cloud.head;
+  await feature.publish();
+  assert.equal(cloud.head,updatedTemplateHead,'same default file produces no upload or new commit');
   await adapter.write('.obsidian/plugins/simple-one/default.html', defaultTemplate);
   await feature.moveShares([id, other], '写作/人物');
   await feature.publish();

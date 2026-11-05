@@ -157,7 +157,7 @@ function createIconActionButton(icon: string, label: string, onPointerDown: (eve
   const button = createActionButton("", onPointerDown);
   button.classList.add("simple-html-preview-icon-toggle");
   button.setAttribute("aria-label", label);
-  button.setAttribute("title", label);
+  button.setAttribute("aria-label", label);
   const svg = createSvg("svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("width", "16");

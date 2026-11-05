@@ -389,7 +389,7 @@ class SearchFolderPickerModal extends Modal {
           render();
         });
         const name = parent.createSpan({ cls: "simple-search-folder-picker-name", text: label });
-        name.setAttr("title", path);
+        name.setAttribute("aria-label", path);
         name.addEventListener("click", () => checkbox.click());
       };
 

@@ -1,3 +1,4 @@
+import { tooltipText, setNativeTooltip } from "./shared/tooltipText";
 import { CHINESE_FONTS, LATIN_FONTS, updateFontDownload } from "./shared/fontOptions";
 import { nativeCheckbox } from "./shared/nativeCheckbox";
 import { createActionButton, setDeleteIcon, setActionIcon, styleActionFooter, styleActionButton } from "./shared/actionButton";
@@ -35,7 +36,7 @@ import { checkTemplateSiteRule } from "./features/templateRuleCheck";
 import { testTemplateSiteRule } from "./features/templateFill";
 import { importTemplateGroup, mergeSiteImports, mergeTemplateImports, type ImportCounts } from "./features/templateImportMerge";
 import { getNotebookNavigatorPlugin } from "./features/diary";
-import { applyQuickFormatStyles, quickFormatIconColor, QUICK_FORMAT_ICON, QUICK_FORMAT_NAME } from "./features/quickFormat";
+import { applyQuickFormatStyles, repairHeadingFontSizes, quickFormatIconColor, QUICK_FORMAT_ICON, QUICK_FORMAT_NAME } from "./features/quickFormat";
 import { setFormatIcon } from "./shared/formatIcon";
 import { openSearchFolderPicker } from "./features/searchFolderFilter";
 import { POPUP_SCALE_MAX } from "./shared/popupSizing";
@@ -142,6 +143,17 @@ const QUICK_FORMAT_HEADING_LABELS: Record<QuickFormatHeadingLevel, string> = {
   h6: "六级标题",
 };
 
+function renderedColorHex(color: string): string {
+  const canvas = createEl("canvas");
+  canvas.width = canvas.height = 1;
+  const context = canvas.getContext("2d");
+  if (!context) return "#808080";
+  context.fillStyle = color;
+  context.fillRect(0, 0, 1, 1);
+  const channels = [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
+  return rgbTripletToHex(channels.join(","));
+}
+
 function readRenderedFormatColor(
   tag: "strong" | "em" | "mark" | "del" | "span" | "u",
   property: "color" | "backgroundColor"
@@ -153,11 +165,7 @@ function readRenderedFormatColor(
   const color = getComputedStyle(element)[property];
   sample.remove();
 
-  const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number);
-  if (!channels || channels.length < 3 || channels.some((channel) => !Number.isFinite(channel))) {
-    return "#808080";
-  }
-  return `#${channels.map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("")}`;
+  return renderedColorHex(color);
 }
 
 export class SimpleSettingTab extends PluginSettingTab {
@@ -177,8 +185,7 @@ export class SimpleSettingTab extends PluginSettingTab {
 
   private updateThemeReset(reset: HTMLButtonElement, customized: boolean): void {
     reset.disabled = !customized;
-    reset.title = customized ? "已自定义，点击恢复当前主题" : "跟随当前主题";
-    reset.setAttribute("aria-label", reset.title);
+    reset.setAttribute("aria-label", customized ? "已自定义，点击恢复当前主题" : "跟随当前主题");
   }
   plugin: SimplePlugin;
   private syncTab: SyncSettingsTab;
@@ -332,7 +339,7 @@ export class SimpleSettingTab extends PluginSettingTab {
         this.plugin.refreshReformatActions();
       });
     automaticRow.addClass("simple-reformat-option");
-    const automaticManage = automaticRow.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", title: "自动排版设置", "aria-label": "自动排版设置" } });
+    const automaticManage = automaticRow.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", "aria-label": "自动排版设置" } });
     setActionIcon(automaticManage, "settings", "bordered");
     automaticManage.addEventListener("click", () => this.openPage({ type: "automatic-reformat" }));
     checkboxRowIcon(automaticRow, REFORMAT_ICON);
@@ -344,7 +351,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       });
     templateRow.addClass("simple-shortcut-option");
     templateRow.addClass("simple-reformat-option");
-    const templateManage = templateRow.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", title: "快速新建笔记设置", "aria-label": "快速新建笔记设置" } });
+    const templateManage = templateRow.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", "aria-label": "快速新建笔记设置" } });
     setActionIcon(templateManage, "settings", "bordered");
     templateManage.addEventListener("click", () => this.openPage({ type: "template-rules" }));
     checkboxRowIcon(templateRow, TEMPLATE_FILL_ICON);
@@ -422,7 +429,7 @@ export class SimpleSettingTab extends PluginSettingTab {
 
   private renderEditingOptimizationSettings(container: HTMLElement): void {
     const basic = settingsFieldset(container, "编辑优化");
-    const translationRow = this.renderDisplayCheckbox(basic, "在浮动工具栏中启用 AI 翻译（需要 Simple AI 插件）",
+    const translationRow = this.renderDisplayCheckbox(basic, "在浮动工具栏中启用 AI 翻译",
       "控制浮动工具栏中的翻译入口；右侧设置模型、语言和提示词。",
       this.plugin.settings.enhancements.quickFormat.selectionTranslation !== false, async value => {
         this.plugin.settings.enhancements.quickFormat.selectionTranslation = value;
@@ -430,7 +437,7 @@ export class SimpleSettingTab extends PluginSettingTab {
         this.plugin.refreshQuickFormatActions();
       });
     translationRow.addClass("simple-reformat-option");
-    const translationSettings = translationRow.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", title: "AI 翻译设置", "aria-label": "AI 翻译设置" } });
+    const translationSettings = translationRow.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", "aria-label": "AI 翻译设置" } });
     setActionIcon(translationSettings, "settings", "bordered");
     translationSettings.addEventListener("click", () => new TranslationSettingsModal(this.plugin).open());
     this.renderDisplayCheckbox(basic, "新建笔记自动补全属性", "沿用现有规则，按当前目录关联的 Obsidian 数据库视图自动补全属性。",
@@ -445,7 +452,7 @@ export class SimpleSettingTab extends PluginSettingTab {
         this.plugin.refreshHtmlPreviews();
       });
     replacementRow.addClass("simple-reformat-option");
-    const replacementManage = replacementRow.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", title: "文本显示替换设置", "aria-label": "文本显示替换设置" } });
+    const replacementManage = replacementRow.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", "aria-label": "文本显示替换设置" } });
     setActionIcon(replacementManage, "settings", "bordered");
     replacementManage.addEventListener("click", () => this.openPage({ type: "html-preview" }));
   }
@@ -478,7 +485,7 @@ export class SimpleSettingTab extends PluginSettingTab {
         attr: { type: "button", "aria-label": name + "：选择文件夹" },
       }), "bordered");
       setIcon(choose, "settings-2");
-      choose.title = "选择文件夹";
+      choose.setAttribute("aria-label", "选择文件夹");
       choose.addEventListener("click", () => {
         openSearchFolderPicker(this.plugin, config[foldersKey], async folders => {
           config[foldersKey] = folders;
@@ -573,7 +580,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     });
     row.addClass("simple-display-parameter-row", "simple-letter-spacing-row");
     const input = row.createEl("input", { type: "number", cls: "simple-display-parameter-input", attr: { "aria-label": name } });
-    const label = row.createEl("button", { cls: "simple-display-parameter-unit", attr: { type: "button", "aria-label": "切换字间距 em/px", title: "点击切换 em / px，保持实际字间距" } });
+    const label = row.createEl("button", { cls: "simple-display-parameter-unit", attr: { type: "button", "aria-label": tooltipText("切换字间距 em/px", "点击切换 em / px，保持实际字间距") } });
     const refresh = (): void => {
       const scale = unit === "px" ? fontSize() : 1;
       input.value = String(Number(((settings.desktopTypography[spacingKey] ?? 0) * scale).toFixed(6)));
@@ -616,8 +623,8 @@ export class SimpleSettingTab extends PluginSettingTab {
             await save();
           });
         row.addClass("simple-font-option-row");
-        const download = row.createEl("a", { cls: "simple-font-download", href: "https://tsanger.cn/product/4", attr: {
-          "aria-label": "下载仓耳今楷01", title: "下载解压后，双击字体文件安装，重启 Obsidian 生效；未安装时回退微软雅黑。", target: "_blank", rel: "noopener noreferrer",
+        const download = row.createEl("a", { cls: "simple-font-download", attr: {
+          target: "_blank", rel: "noopener noreferrer",
         } });
         setIcon(download, "download");
         const select = row.createEl("select", { attr: { "aria-label": name } });
@@ -642,9 +649,7 @@ export class SimpleSettingTab extends PluginSettingTab {
           this.plugin.refreshTypography();
         });
       latinRow.addClass("simple-font-option-row");
-      const latinDownload = latinRow.createEl("a", { cls: "simple-font-download", href: "https://raw.githubusercontent.com/adobe-fonts/source-sans/release/TTF/SourceSans3-Regular.ttf", attr: {
-        "aria-label": "下载英文字体", title: "安装字体后，完全退出并重新打开 Obsidian。未安装时使用系统后备字体。", target: "_blank", rel: "noopener noreferrer",
-      } });
+      const latinDownload = latinRow.createEl("a", { cls: "simple-font-download", href: "https://raw.githubusercontent.com/adobe-fonts/source-sans/release/TTF/SourceSans3-Regular.ttf", attr: { target: "_blank", rel: "noopener noreferrer", "aria-label": tooltipText("下载英文字体", "安装字体后，完全退出并重新打开 Obsidian。未安装时使用系统后备字体。") } });
       setIcon(latinDownload, "download");
       const latinSelect = latinRow.createEl("select", { attr: { "aria-label": "英文字体" } });
       for (const { value } of LATIN_FONTS) latinSelect.createEl("option", { value, text: value === "default" ? "跟随正文" : value });
@@ -722,11 +727,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       attr: { role: "tabpanel", id: `simple-display-panel-${tab.id}`, "aria-labelledby": `simple-display-tab-${tab.id}` },
     }));
     const buttons = tabs.map((tab, index) => {
-      const button = tabList.createEl("button", { cls: "simple-display-tab", attr: {
-        type: "button", role: "tab", id: `simple-display-tab-${tab.id}`,
-        "aria-controls": `simple-display-panel-${tab.id}`,
-        "aria-label": tab.name, title: tab.name,
-      } });
+      const button = tabList.createEl("button", { cls: "simple-display-tab", attr: { type: "button", role: "tab", id: `simple-display-tab-${tab.id}`, "aria-controls": `simple-display-panel-${tab.id}`, "aria-label": tab.name } });
       setIcon(button.createSpan({ attr: { "aria-hidden": "true" } }), tab.icon);
       button.createSpan({ text: tab.name });
       button.addEventListener("click", () => select(index));
@@ -869,7 +870,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     for (const option of options) {
       const label = group.createEl("label", {
         cls: "simple-preview-checkbox-row",
-        attr: { title: option.desc },
+        attr: { "aria-label": option.desc },
       });
       const checkbox = label.createEl("input", {
         type: "checkbox",
@@ -1044,7 +1045,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     modeControls.createSpan({ cls: "simple-attachment-mode-value", text: describeAttachmentLocation(location) });
     const configure = styleActionButton(modeControls.createEl("button", {
       cls: "clickable-icon simple-attachment-action",
-      attr: { type: "button", title: "打开 Obsidian 附件存放设置", "aria-label": "打开 Obsidian 附件存放设置" },
+      attr: { type: "button", "aria-label": "打开 Obsidian 附件存放设置" },
     }), "bordered");
     setIcon(configure, "settings-2");
     configure.addEventListener("click", () => {
@@ -1057,7 +1058,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     });
     referenceCheckbox.checked = this.plugin.settings.enableAttachmentReferenceJump !== false;
     referenceJump.createSpan({ text: "从附件快速跳转到引用笔记" });
-    referenceJump.title = "附件右键菜单与预览顶部右侧显示搜索图标，在新标签页打开引用笔记；多篇引用时可选择笔记或全部打开。";
+    referenceJump.setAttribute("aria-label", "附件右键菜单与预览顶部右侧显示搜索图标，在新标签页打开引用笔记；多篇引用时可选择笔记或全部打开。");
     referenceCheckbox.addEventListener("change", runAsync(async () => {
       this.plugin.settings.enableAttachmentReferenceJump = referenceCheckbox.checked;
       await this.plugin.saveSettings();
@@ -1127,7 +1128,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     const vault = this.app.vault as App["vault"] & { getConfig(key: string): unknown; setConfig(key: string, value: string): void | Promise<void> };
     const colorRow = (name: string, description: string, value: string, customized: boolean,
       save: (color: string) => Promise<void>, read: () => string, isCustomized: () => boolean): void => {
-      const row = group.createDiv({ cls: "simple-preview-checkbox-row simple-display-option-row simple-theme-format-row", attr: { title: description } });
+      const row = group.createDiv({ cls: "simple-preview-checkbox-row simple-display-option-row simple-theme-format-row", attr: { "aria-label": description } });
       row.createSpan({ text: name });
       const controls = row.createDiv({ cls: "simple-theme-format-controls" });
       const picker = new ThemeColorPicker(controls, this.plugin).setValue(value).onChange(async color => {
@@ -1135,9 +1136,7 @@ export class SimpleSettingTab extends PluginSettingTab {
         await save(color); this.updateThemeReset(reset, true);
       });
       picker.buttonEl.setAttribute("aria-label", name);
-      const reset = controls.createEl("button", { cls: "clickable-icon simple-format-reset", attr: {
-        type: "button", title: "恢复当前主题", "aria-label": `${name}：恢复当前主题`,
-      } });
+      const reset = controls.createEl("button", { cls: "clickable-icon simple-format-reset", attr: { type: "button", "aria-label": tooltipText(`${name}：恢复当前主题`, "恢复当前主题") } });
       setActionIcon(reset, "rotate-ccw"); this.updateThemeReset(reset, customized);
       reset.addEventListener("click", runAsync(async () => {
         await save(""); this.setThemeColor(picker, read()); this.updateThemeReset(reset, false);
@@ -1155,6 +1154,17 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.plugin.settings.themeBackgroundColor = color;
       await this.plugin.saveSettings(); this.plugin.refreshThemeAppearance();
     }, () => this.plugin.settings.themeBackgroundColor || background(), () => !!this.plugin.settings.themeBackgroundColor);
+    this.renderDisplayCheckbox(group, "标签跟随强调色", "让顶部属性中的 tags 标签和正文 #标签使用当前强调色及浅色底；关闭后跟随主题。",
+      this.plugin.settings.themeTagsFollowAccent, async checked => {
+        this.plugin.settings.themeTagsFollowAccent = checked;
+        await this.plugin.saveSettings(); this.plugin.refreshThemeAppearance();
+      });
+    this.renderDisplayCheckbox(group, "优化正文短代码样式", "为反引号包住的文字统一使用界面字体、正文 87.5% 的字号、细边框、圆角和浅底色。关闭后恢复主题样式，不影响代码块和属性标签。",
+      this.plugin.settings.themeInlineCodeFollowsBody, async checked => {
+        this.plugin.settings.themeInlineCodeFollowsBody = checked;
+        await this.plugin.saveSettings(); this.plugin.refreshThemeAppearance();
+      });
+
   }
 
   private renderThemeFormattingSettings(container: HTMLElement, standalone = true): void {
@@ -1174,7 +1184,7 @@ export class SimpleSettingTab extends PluginSettingTab {
         property: "color" | "backgroundColor"
       ): void => {
         const value = formatting[key];
-        const row = group.createDiv({ cls: "simple-preview-checkbox-row simple-display-option-row simple-theme-format-row", attr: { title: description } });
+        const row = group.createDiv({ cls: "simple-preview-checkbox-row simple-display-option-row simple-theme-format-row", attr: { "aria-label": description } });
         const label = row.createDiv({ cls: "simple-theme-format-label" });
         const symbol = label.createSpan({ cls: "simple-theme-format-symbol", attr: { "aria-hidden": "true" } });
         setFormatIcon(symbol, { strong: "bold", em: "italic", del: "strikethrough", u: "underline", span: "baseline", mark: property === "backgroundColor" ? "highlighter" : "baseline" }[tag]);
@@ -1201,9 +1211,7 @@ export class SimpleSettingTab extends PluginSettingTab {
               refreshIcon();
             });
         picker.buttonEl.setAttribute("aria-label", name);
-        const reset = controls.createEl("button", { cls: "clickable-icon simple-format-reset", attr: {
-          type: "button", title: "恢复当前主题", "aria-label": `${name}：恢复当前主题`,
-        } });
+        const reset = controls.createEl("button", { cls: "clickable-icon simple-format-reset", attr: { type: "button", "aria-label": tooltipText(`${name}：恢复当前主题`, "恢复当前主题") } });
         setActionIcon(reset, "rotate-ccw");
         this.updateThemeReset(reset, !!value);
         reset.addEventListener("click", runAsync(async () => {
@@ -1295,7 +1303,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     select.createEl("option", { value: "note", text: "笔记名目录" });
     select.value = this.plugin.settings[key] === "note" ? "note" : "category";
     select.disabled = disabled;
-    if (disabled) select.title = "目录选择仅适用于指定附件文件夹模式。";
+    if (disabled) select.setAttribute("aria-label", "目录选择仅适用于指定附件文件夹模式。");
     select.addEventListener("change", runAsync(async () => {
       this.plugin.settings[key] = select.value === "note" ? "note" : "category";
       await this.plugin.saveSettings();
@@ -1315,12 +1323,12 @@ export class SimpleSettingTab extends PluginSettingTab {
   ): HTMLElement {
     const row = container.createDiv({
       cls: "simple-preview-checkbox-row simple-attachment-action-row",
-      attr: { title: description },
+      attr: { "aria-label": description },
     });
     if (automaticKey) {
       const checkbox = row.createEl("input", {
         type: "checkbox",
-        attr: { "aria-label": `自动静默处理：${name}`, title: "勾选后自动静默处理；右侧按钮可手动预览并执行" },
+        attr: { "aria-label": tooltipText(`自动静默处理：${name}`, "勾选后自动静默处理；右侧按钮可手动预览并执行") },
       });
       checkbox.checked = Boolean(this.plugin.settings[automaticKey]);
       checkbox.disabled = Boolean(disabledReason);
@@ -1334,7 +1342,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     copy.createSpan({ text: name });
     const button = styleActionButton(row.createEl("button", {
       cls: "clickable-icon simple-attachment-action",
-      attr: { type: "button", title: disabledReason || `${buttonText}：${name}`, "aria-label": `${buttonText}：${name}` },
+      attr: { type: "button", "aria-label": tooltipText(`${buttonText}：${name}`, disabledReason || `${buttonText}：${name}`) },
     }), "bordered");
     setIcon(button, "play");
     button.disabled = Boolean(disabledReason);
@@ -1376,8 +1384,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.plugin.refreshHtmlPreviews();
       this.renderSettings();
     }));
-    importButton.title = "导入整组或单条替换规则";
-    importButton.setAttribute("aria-label", importButton.title);
+    importButton.setAttribute("aria-label", "导入整组或单条替换规则");
     const exportAll = createActionButton(headerActions, "upload", "导出整组替换规则");
     exportAll.addEventListener("click", () => downloadJsonFile("simple-display-replacement-rules.json", {
       type: "simple-one.display-replacement-rules", version: 1, rules: this.plugin.settings.htmlPreviewRules.map(exportHtmlPreviewRule)
@@ -1474,7 +1481,7 @@ export class SimpleSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         });
       row.addClass("simple-reformat-option");
-      const manage = row.createEl("button", { cls: "simple-reformat-rule-link", attr: { title: "编辑提取规则", "aria-label": "编辑提取规则" } });
+      const manage = row.createEl("button", { cls: "simple-reformat-rule-link", attr: { "aria-label": "编辑提取规则" } });
       row.addClass("simple-reformat-title-option");
       setActionIcon(manage.createSpan(), "settings", "bordered");
       manage.addEventListener("click", () => this.openPage({ type: "link-rules" }));
@@ -1496,7 +1503,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       text: "按顺序匹配，命中即停止。URL 留空 = 全部，提取正则为空 = 不过滤。替换为留空 = 全部捕获组拼接。",
     });
     const actions = header.createDiv({ cls: "simple-template-manager-actions" });
-    const add = actions.createEl("button", { cls: "clickable-icon", attr: { type: "button", title: "添加规则", "aria-label": "添加规则" } });
+    const add = actions.createEl("button", { cls: "clickable-icon", attr: { type: "button", "aria-label": "添加规则" } });
     setActionIcon(add, "plus", "plain");
     add.addEventListener("click", runAsync(async () => {
       this.plugin.settings.filterRules.push(makeFilterRule());
@@ -1541,7 +1548,7 @@ export class SimpleSettingTab extends PluginSettingTab {
 
       const del = styleActionButton(row.createEl("button", {
         cls: "simple-rule-del",
-        attr: { title: "删除规则", "aria-label": "删除规则" },
+        attr: { "aria-label": "删除规则" },
       }), "bordered");
       setIcon(del, "x");
       del.addEventListener("click", runAsync(async () => {
@@ -1604,7 +1611,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       legend.createSpan({ text: `模板 · ${cat.name || "未命名模板"}` });
       const editTemplate = createActionButton(legend, "pencil", `编辑模板：${cat.name}`);
       editTemplate.addClass("simple-template-edit");
-      editTemplate.title = "模板设置";
+      editTemplate.setAttribute("aria-label", "模板设置");
       editTemplate.addEventListener("click", () => this.openTemplateCreator(cat));
       card.createDiv({ cls: "setting-item-description simple-template-source-output", text: `保存位置：${cat.outputFolder || "当前库根目录"}；基础属性：${templatePropertyNames(cat).join("、") || "未设置"}` });
       for (const site of cat.siteRules) {
@@ -1749,7 +1756,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     const header = container.createDiv({ cls: "simple-page-header" });
     const back = styleActionButton(header.createEl("button", {
       cls: "simple-back-button",
-      attr: { title: "返回", "aria-label": "返回" },
+      attr: { "aria-label": "返回" },
     }), "bordered");
     setIcon(back, "arrow-left");
     back.addEventListener("click", onBack);
@@ -1817,7 +1824,7 @@ export class SimpleSettingTab extends PluginSettingTab {
         this.plugin.refreshDiaryViews();
       });
       row.addClass("simple-reformat-option");
-      const manage = row.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", title: "纪念日设置", "aria-label": "纪念日设置" } });
+      const manage = row.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", "aria-label": "纪念日设置" } });
       setActionIcon(manage, "settings", "bordered");
       manage.addEventListener("click", () => this.openPage({ type: "date-management" }));
     });
@@ -1863,16 +1870,18 @@ export class SimpleSettingTab extends PluginSettingTab {
     const input = controls.createEl("input", { type: "number", cls: "simple-display-parameter-input",
       attr: { min: "10", max: "96", step: "0.5", placeholder: stripPx(currentSize), "aria-label": `${level} 字号` } });
     input.value = size;
-    input.title = `当前字号 ${currentSize}${compareFontSizes(currentSize, bodyFontSize)}`;
+    setNativeTooltip(input, `当前字号 ${currentSize}${compareFontSizes(currentSize, bodyFontSize)}`);
     controls.createSpan({ text: "px", cls: "simple-display-parameter-unit" });
     input.addEventListener("change", runAsync(async () => {
       if (input.value && (!Number.isFinite(Number(input.value)) || Number(input.value) < 10 || Number(input.value) > 96)) return;
-      quickFormat.headingSizes[level] = input.value;
+      quickFormat.headingSizes[level] = input.value ? String(Math.max(Number(input.value), Number.parseFloat(readRenderedFontSize()) || 0)) : "";
       this.updateThemeReset(reset, !!(input.value || quickFormat.headingColors[level]));
       await this.plugin.saveSettings();
       applyQuickFormatStyles(this.plugin);
+      await repairHeadingFontSizes(this.plugin, true);
+      input.value = quickFormat.headingSizes[level];
     }));
-    const picker = new ThemeColorPicker(controls, this.plugin).setValue(color || fallback).onChange(async value => {
+    const picker = new ThemeColorPicker(controls, this.plugin).setValue(color === "var(--text-normal)" ? fallback : color || fallback).onChange(async value => {
       if (this.refreshingThemeColor) return;
       quickFormat.headingColors[level] = value;
       this.updateThemeReset(reset, true);
@@ -1880,17 +1889,15 @@ export class SimpleSettingTab extends PluginSettingTab {
       applyQuickFormatStyles(this.plugin);
     });
     picker.buttonEl.setAttribute("aria-label", `${level} 颜色`);
-    const reset = controls.createEl("button", { cls: "clickable-icon simple-format-reset", attr: {
-      type: "button", title: "恢复当前主题", "aria-label": `${level}：恢复当前主题字号和颜色`,
-    } });
+    const reset = controls.createEl("button", { cls: "clickable-icon simple-format-reset", attr: { type: "button", "aria-label": tooltipText(`${level}：恢复当前主题字号和颜色`, "恢复当前主题") } });
     setActionIcon(reset, "rotate-ccw");
     const refresh = (): void => {
       if (input.ownerDocument.activeElement !== input) input.value = quickFormat.headingSizes[level];
       this.updateThemeReset(reset, !!(quickFormat.headingSizes[level] || quickFormat.headingColors[level]));
       const current = readRenderedFontSize(level);
       input.placeholder = stripPx(current);
-      input.title = `当前字号 ${current}${compareFontSizes(current, readRenderedFontSize())}`;
-      this.setThemeColor(picker, quickFormat.headingColors[level] || readThemeColor(QUICK_FORMAT_HEADING_LABELS[level]));
+      setNativeTooltip(input, `当前字号 ${current}${compareFontSizes(current, readRenderedFontSize())}`);
+      this.setThemeColor(picker, quickFormat.headingColors[level] === "var(--text-normal)" ? readThemeColor(QUICK_FORMAT_HEADING_LABELS[level]) : quickFormat.headingColors[level] || readThemeColor(QUICK_FORMAT_HEADING_LABELS[level]));
     };
     this.watchThemeControl(row, refresh);
     reset.addEventListener("click", runAsync(async () => {
@@ -1898,10 +1905,11 @@ export class SimpleSettingTab extends PluginSettingTab {
       quickFormat.headingColors[level] = "";
       await this.plugin.saveSettings();
       applyQuickFormatStyles(this.plugin);
-      input.value = "";
+      await repairHeadingFontSizes(this.plugin, true);
+      input.value = quickFormat.headingSizes[level];
       const restoredSize = readRenderedFontSize(level);
       input.placeholder = stripPx(restoredSize);
-      input.title = `当前字号 ${restoredSize}${compareFontSizes(restoredSize, readRenderedFontSize())}`;
+      setNativeTooltip(input, `当前字号 ${restoredSize}${compareFontSizes(restoredSize, readRenderedFontSize())}`);
       this.setThemeColor(picker, readThemeColor(QUICK_FORMAT_HEADING_LABELS[level]));
       refresh();
     }));
@@ -1934,7 +1942,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       }
       const addButton = card.createEl("button", {
         cls: "simple-custom-callout-add",
-        attr: { type: "button", title: "增加自定义 Callout" },
+        attr: { type: "button", "aria-label": "增加自定义 Callout" },
       });
       setActionIcon(addButton.createSpan(), "plus", "text");
       addButton.createSpan({ text: "增加" });
@@ -1991,9 +1999,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     setting.settingEl.removeClass("setting-item");
     setting.settingEl.classList.toggle("is-editing", isEditing);
     setting.nameEl.empty();
-    const checkbox = setting.nameEl.createEl("input", { type: "checkbox", attr: {
-      title: "勾选后显示在快捷菜单中", "aria-label": callout.label || callout.type,
-    } });
+    const checkbox = setting.nameEl.createEl("input", { type: "checkbox", attr: { "aria-label": tooltipText(callout.label || callout.type, "勾选后显示在快捷菜单中") } });
     checkbox.checked = this.plugin.settings.enhancements.quickFormat.visibleModes.includes(mode);
     checkbox.addEventListener("change", runAsync(async () => {
       this.setQuickFormatModeVisible(mode, checkbox.checked);
@@ -2019,7 +2025,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       const name = setting.nameEl.createSpan({
         cls: "simple-custom-callout-name",
         text: callout.label || callout.type || "未命名",
-        attr: { role: "button", tabindex: "0", title: "点击重命名" },
+        attr: { role: "button", tabindex: "0", "aria-label": "点击重命名" },
       });
       const startEditing = (): void => {
         this.editingCustomCalloutIds.add(callout.id);
@@ -2068,7 +2074,7 @@ export class SimpleSettingTab extends PluginSettingTab {
 
     const deleteButton = setting.controlEl.createEl("button", {
       cls: "clickable-icon simple-danger-icon-button simple-custom-callout-delete",
-      attr: { type: "button", title: "删除自定义 Callout", "aria-label": "删除自定义 Callout" },
+      attr: { type: "button", "aria-label": "删除自定义 Callout" },
     });
     setDeleteIcon(deleteButton, "plain");
     deleteButton.addEventListener("click", () => {
@@ -2118,7 +2124,7 @@ export class SimpleSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings(); this.plugin.refreshDiaryViews(); this.renderSettings();
       });
       row.addClass("simple-reformat-option");
-      const manage = row.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", title: name + "设置", "aria-label": name + "设置" } });
+      const manage = row.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", "aria-label": name + "设置" } });
       setActionIcon(manage, "settings", "bordered");
       manage.addEventListener("click", () => this.openPage({ type: target === config.nationalHolidays ? "holiday-national" : "holiday-company" }));
     };
@@ -2128,7 +2134,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     tips.addClass("simple-diary-tip-row");
     const advance = tips.createDiv({ cls: "simple-diary-advance" });
     advance.createSpan({ text: "提前天数" });
-    const days = advance.createEl("input", { type: "number", attr: { min: "1", max: "365", "aria-label": "下一年度假期安排导入提示的提前天数（自然日）", title: "按自然日提前检查下一年度假期安排" } });
+    const days = advance.createEl("input", { type: "number", attr: { min: "1", max: "365", "aria-label": tooltipText("下一年度假期安排导入提示的提前天数（自然日）", "按自然日提前检查下一年度假期安排") } });
     days.value = String(config.holidaySetupReminder.daysBefore || 7);
     days.addEventListener("change", runAsync(async () => {
       const value = Number(days.value);
@@ -2144,7 +2150,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     });
     importReminder.addClass("simple-reformat-option");
     card.insertBefore(importReminder, tips);
-    const help = importReminder.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", title: "AI 导入假期安排", "aria-label": "AI 导入假期安排" } });
+    const help = importReminder.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", "aria-label": "AI 导入假期安排" } });
     setActionIcon(help, "bot", "bordered");
     help.addEventListener("click", () => {
       const modal = new Modal(this.app);
@@ -2215,7 +2221,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     const calendarHead = tableHead.createDiv({ cls: "simple-anniversary-head-control" });
     const calendarBatchButton = calendarHead.createEl("button", {
       cls: allCalendarVisible ? "simple-state-button is-active" : "simple-state-button",
-      attr: { title: "批量切换日历显示", "aria-label": "批量切换日历显示" },
+      attr: { "aria-label": "批量切换日历显示" },
     });
     setIcon(calendarBatchButton, allCalendarVisible ? "eye" : "eye-off");
     calendarHead.createSpan({ text: "显示" });
@@ -2231,7 +2237,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     const reminderHead = tableHead.createDiv({ cls: "simple-anniversary-head-control" });
     const reminderBatchButton = reminderHead.createEl("button", {
       cls: allReminderEnabled ? "simple-state-button is-active" : "simple-state-button",
-      attr: { title: "批量切换提醒", "aria-label": "批量切换提醒" },
+      attr: { "aria-label": "批量切换提醒" },
     });
     setIcon(reminderBatchButton, allReminderEnabled ? "bell" : "bell-off");
     reminderHead.createSpan({ text: "提醒" });
@@ -2258,7 +2264,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       const isCalendarVisible = anniversary.enabled && anniversary.showInCalendar !== false;
       const calendarButton = actions.createEl("button", {
         cls: isCalendarVisible ? "simple-state-button is-active" : "simple-state-button",
-        attr: { title: isCalendarVisible ? "显示在日历" : "不显示在日历", "aria-label": isCalendarVisible ? "显示在日历" : "不显示在日历" },
+        attr: { "aria-label": isCalendarVisible ? "显示在日历" : "不显示在日历" },
       });
       setIcon(calendarButton, isCalendarVisible ? "eye" : "eye-off");
       calendarButton.addEventListener("click", runAsync(async () => {
@@ -2271,7 +2277,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       const reminderCell = row.createDiv({ cls: "simple-anniversary-detail-cell" });
       const reminderButton = reminderCell.createEl("button", {
         cls: anniversary.reminderEnabled ? "simple-state-button is-active" : "simple-state-button",
-        attr: { title: "提醒详情", "aria-label": "提醒详情" },
+        attr: { "aria-label": "提醒详情" },
       });
       setIcon(reminderButton, anniversary.reminderEnabled ? "bell" : "bell-off");
       reminderButton.addEventListener("click", () => {
@@ -2286,7 +2292,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       if (anniversary.tags?.includes("自定义")) {
         const editButton = editCell.createEl("button", {
           cls: "simple-state-button",
-          attr: { title: "编辑纪念日", "aria-label": "编辑纪念日" },
+          attr: { "aria-label": "编辑纪念日" },
         });
         setActionIcon(editButton, "pencil", "plain");
         editButton.addEventListener("click", () => {
@@ -2314,7 +2320,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     card.addClass("simple-reformat-settings-group");
     const addButton = card.createEl("button", {
       cls: "clickable-icon simple-template-source-add",
-      attr: { title: "新增自定义纪念日", "aria-label": "新增自定义纪念日" },
+      attr: { "aria-label": "新增自定义纪念日" },
     });
     setActionIcon(addButton, "plus", "bordered");
     addButton.addEventListener("click", () => {
@@ -2356,7 +2362,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     const exportButton = styleActionButton(headerActions.createEl("button", {
       cls: "simple-soft-button",
       text: "导出",
-      attr: { title: "导出当前年份筛选下的假期安排", "aria-label": `导出${title}` },
+      attr: { "aria-label": tooltipText(`导出${title}`, "导出当前年份筛选下的假期安排") },
     }), "text");
     exportButton.addEventListener("click", () => {
       if (!filteredSchedules.length) {
@@ -2440,7 +2446,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     const actions = header.createDiv({ cls: "simple-json-actions" });
     const expanded = this.expandedHolidaySchedules.has(schedule.id);
     const expand = styleActionButton(actions.createEl("button", {
-      attr: { title: expanded ? "收起" : "展开", "aria-label": expanded ? "收起" : "展开" },
+      attr: { "aria-label": expanded ? "收起" : "展开" },
     }), "bordered");
     setIcon(expand, expanded ? "chevron-up" : "chevron-down");
     expand.addEventListener("click", () => {
@@ -2450,7 +2456,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     });
     const del = actions.createEl("button", {
       cls: "simple-danger-button",
-      attr: { title: "删除", "aria-label": "删除" },
+      attr: { "aria-label": "删除" },
     });
     setDeleteIcon(del, "plain");
     del.addEventListener("click", runAsync(async () => {
@@ -2495,7 +2501,7 @@ export class SimpleSettingTab extends PluginSettingTab {
         numberLine.createDiv({
           cls: "simple-holiday-diff-badge",
           text: "异",
-          attr: { title: "与国家法定安排不同" },
+          attr: { "aria-label": "与国家法定安排不同" },
         });
       }
       if (item) {
@@ -2507,7 +2513,7 @@ export class SimpleSettingTab extends PluginSettingTab {
 
   private renderRecurringRules(container: HTMLElement): void {
     const card = settingsFieldset(container, "待提醒事件", "simple-recurring-card simple-reformat-settings-group");
-    const addButton = card.createEl("button", { cls: "clickable-icon simple-template-source-add", attr: { type: "button", title: "新增待提醒事件", "aria-label": "新增待提醒事件" } });
+    const addButton = card.createEl("button", { cls: "clickable-icon simple-template-source-add", attr: { type: "button", "aria-label": "新增待提醒事件" } });
     setActionIcon(addButton, "plus", "bordered");
     addButton.addEventListener("click", () => {
       new RecurringRuleModal(this.app, "提醒编辑", makeRecurringRule(), async (rule) => {
@@ -2535,7 +2541,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       });
       row.addClass("simple-reformat-option", "simple-recurring-event-row");
       row.createSpan({ cls: "simple-recurring-event-time", text: recurringRuleSummary(rule) });
-      const edit = row.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", title: "编辑事件", "aria-label": `编辑事件：${rule.text}` } });
+      const edit = row.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", "aria-label": tooltipText(`编辑事件：${rule.text}`, "编辑事件") } });
       setActionIcon(edit, "pencil", "bordered");
       edit.addEventListener("click", () => {
         new RecurringRuleModal(this.app, "提醒编辑", rule, async updated => {
@@ -2647,7 +2653,7 @@ class JsonEditModal extends Modal {
     if (!this.onDelete) {
       const toolbar = contentEl.createDiv({ cls: "simple-json-modal-toolbar" });
       const iconButton = (icon: string, label: string): HTMLButtonElement => {
-        const button = toolbar.createEl("button", { cls: "clickable-icon", attr: { type: "button", title: label, "aria-label": label } });
+        const button = toolbar.createEl("button", { cls: "clickable-icon", attr: { type: "button", "aria-label": label } });
         setActionIcon(button, icon);
         return button;
       };
@@ -2804,7 +2810,7 @@ class JsonEditModal extends Modal {
       footer.querySelectorAll("button").forEach(button => { button.disabled = busy; });
     };
     if (this.onDelete) {
-      const remove = footer.createEl("button", { cls: "simple-template-delete", attr: { type: "button", title: "删除网站规则", "aria-label": "删除网站规则" } });
+      const remove = footer.createEl("button", { cls: "simple-template-delete", attr: { type: "button", "aria-label": "删除网站规则" } });
       setDeleteIcon(remove, "danger");
       remove.addEventListener("click", runAsync(async () => {
         setBusy(true);
@@ -2814,7 +2820,7 @@ class JsonEditModal extends Modal {
     }
     if (this.exportFilename) {
       footer.addClass("simple-template-export-footer");
-      const download = footer.createEl("button", { cls: "clickable-icon simple-template-export", attr: { title: "导出此网站规则", "aria-label": "导出此网站规则" } });
+      const download = footer.createEl("button", { cls: "clickable-icon simple-template-export", attr: { "aria-label": "导出此网站规则" } });
       setActionIcon(download, "upload", "bordered");
       download.addEventListener("click", () => {
         try { downloadJsonFile(this.exportFilename!, JSON.parse(this.textarea.value), contentEl.ownerDocument); }
@@ -2822,9 +2828,7 @@ class JsonEditModal extends Modal {
       });
       if (this.onDelete) {
         footer.addClass("simple-template-import-footer");
-        const importButton = footer.createEl("button", { cls: "clickable-icon simple-template-import", attr: {
-          type: "button", title: "导入此网站规则", "aria-label": "导入此网站规则"
-        } });
+        const importButton = footer.createEl("button", { cls: "clickable-icon simple-template-import", attr: { type: "button", "aria-label": "导入此网站规则" } });
         setActionIcon(importButton, "download", "bordered");
         importButton.addEventListener("click", runAsync(async () => {
           const value = await importJsonFile(contentEl.ownerDocument);
@@ -3263,7 +3267,7 @@ class RecurringRuleModal extends Modal {
       footer.querySelectorAll("button").forEach(button => { button.disabled = busy; });
     };
     if (this.onDelete) {
-      const remove = footer.createEl("button", { cls: "simple-event-delete", attr: { type: "button", title: "删除事件", "aria-label": "删除事件" } });
+      const remove = footer.createEl("button", { cls: "simple-event-delete", attr: { type: "button", "aria-label": "删除事件" } });
       setDeleteIcon(remove, "plain");
       remove.addEventListener("click", runAsync(async () => {
         setBusy(true);
@@ -3273,7 +3277,7 @@ class RecurringRuleModal extends Modal {
     }
     const cancel = styleActionButton(footer.createEl("button"), "bordered");
     cancel.setAttribute("aria-label", "取消");
-    cancel.title = "取消";
+    cancel.setAttribute("aria-label", "取消");
     setIcon(cancel, "undo-2");
     cancel.addEventListener("click", () => this.close());
 
@@ -4178,10 +4182,21 @@ function readThemeColor(name: string): string {
     "五级标题": "--h5-color",
     "六级标题": "--h6-color",
   };
+  if (map[name]) {
+    const sample = document.body.createDiv({ cls: "workspace-leaf-content", attr: { "data-type": "markdown" } });
+    const view = sample.createDiv({ cls: "markdown-preview-view markdown-rendered" });
+    try { return renderedColorHex(getComputedStyle(view.createEl(map[name].slice(2, 4) as "h1", { text: "标题" })).color); }
+    finally { sample.remove(); }
+  }
   const variable = map[name] ?? `--callout-${name.toLowerCase()}`;
   const value = getComputedStyle(document.body).getPropertyValue(variable).trim();
   if (/^#[0-9a-f]{6}$/i.test(value)) return value;
   if (/^\d+,\s*\d+,\s*\d+$/.test(value)) return rgbTripletToHex(value);
+  const probe = document.body.createSpan();
+  probe.style.color = `var(${variable})`;
+  const channels = getComputedStyle(probe).color.match(/[\d.]+/g)?.slice(0, 3);
+  probe.remove();
+  if (channels?.length === 3) return rgbTripletToHex(channels.join(","));
   const fallback: Record<string, string> = {
     "一级标题": "#000000",
     "二级标题": "#000000",

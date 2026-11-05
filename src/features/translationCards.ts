@@ -59,14 +59,14 @@ class SavedCard extends WidgetType {
   toDOM(view: EditorView): HTMLElement {
     const root = view.dom.ownerDocument.win.createDiv();
     const shell = this.expanded ? { host: root, header: root, body: root } : cardShell(root);
-    const button = shell.header.createEl("button", { cls: "simple-saved-translation-source", attr: { type: "button", title: this.expanded ? "预览卡片" : "编辑卡片源码" } });
+    const button = shell.header.createEl("button", { cls: "simple-saved-translation-source", attr: { type: "button", "aria-label": this.expanded ? "预览卡片" : "编辑卡片源码" } });
     setIcon(button, this.expanded ? "eye" : "code");
     button.addEventListener("click", () => view.dispatch({ effects: toggleSource.of(this.range.from) }));
     if (!this.expanded) {
       const footer = shell.body.parentElement!.createDiv({ cls: "simple-inline-translation-footer" });
       const actions = footer.createDiv({ cls: "simple-inline-translation-actions" });
       const action = (icon: string, title: string, run: () => void) => {
-        const button = styleActionButton(actions.createEl("button", { attr: { type: "button", title, "aria-label": title } }), "bordered");
+        const button = styleActionButton(actions.createEl("button", { attr: { type: "button", "aria-label": title } }), "bordered");
         setIcon(button, icon); button.addEventListener("click", run); return button;
       };
       const snapshot = view.state.doc.toString();

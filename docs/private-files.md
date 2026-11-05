@@ -15,6 +15,7 @@
 | `share-manifest.json` | 分享库、目录映射、分享条目及原笔记路径 | 支持在自己的设备间同步 | 排除；网站不接收该私人清单 |
 | `share-local.json*` | 发布状态、部署关联、查询缓存与接入进度，包括 `.edgeone`、`.details` 及库编号后缀 | 排除 | 排除 |
 | `share-template-selection.json*`、`custom-*.html`、`share-template*.html` | 模板选择与自定义模板，可能含个人域名或脚本 | 按同步范围和个人规则 | 排除 |
+| `default-template-version.json*` | 内置模板升级标识，不含正文或凭据 | 无需同步 | 排除 |
 | Obsidian Secret Storage | 1.11.4+ 的轻量同步 GitHub Token、手动接入分享的 GitHub Token、EdgeOne Makers API Token | 插件不通过共享 JSON 迁移；新设备重新授权 | 不在发布文件中 |
 | GitHub CLI／Git 凭据存储 | 本机 GitHub 登录与 Git 授权 | 不属于插件配置同步 | 不在发布文件中 |
 

@@ -7,7 +7,7 @@ import { setFormatIcon } from "../shared/formatIcon";
 import { FAVORITE_COLORS, ThemeColorPicker } from "../shared/themeColorPicker";
 import { readCalloutColor } from "../shared/calloutColor";
 import { selectionColors, tintSelectionColor } from "./selectionPalettes";
-import { translationBridge, TranslationSettingsModal } from "./selectionTranslation";
+import { TranslationSettingsModal } from "./selectionTranslation";
 import { startInlineTranslation } from "./inlineTranslation";
 import { paragraphLinkTarget } from "./paragraphLink";
 
@@ -28,13 +28,13 @@ export function registerSelectionToolbar(plugin: SimplePlugin, changed: () => vo
   const save = () => { void plugin.saveSettings().catch(error => new Notice(String(error))); };
   const labelButton = (el: HTMLElement, label: string) => {
     const name = `simple-selection-label-${++labelId}`;
-    el.removeAttribute("aria-label"); el.removeAttribute("title");
+    el.setAttribute("aria-label", label); el.removeAttribute("title");
     el.setAttribute("aria-labelledby", name);
     const description = el.parentElement!.createSpan({ cls: "simple-selection-control-label", text: label, attr: { id: name } });
     description.hidden = true;
   };
   const button = (parent: HTMLElement, label: string, icon?: string) => {
-    // Obsidian turns aria-label into a hover tooltip; labelledby retains the accessible name without it.
+    // Use the same native tooltip and accessible name as other Obsidian controls.
     const el = parent.createEl("button", { attr: { type: "button" } });
     if (icon) setFormatIcon(el, icon); else el.setText(label);
     labelButton(el, label);
@@ -400,7 +400,7 @@ export function registerSelectionToolbar(plugin: SimplePlugin, changed: () => vo
       const query = target?.text.trim(); if (!query) return;
       window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, "_blank", "noopener"); hide();
     });
-    if (config.selectionTranslation !== false && translationBridge(plugin.app)) {
+    if (config.selectionTranslation !== false) {
       const row = toolboxMenu.createDiv({ cls: "simple-selection-translation-row" });
       const translate = button(row, "翻译", "languages"); translate.classList.add("simple-selection-block-option"); translate.createSpan({ text: "翻译" });
       const configure = button(row, "翻译模型与提示词", "settings");

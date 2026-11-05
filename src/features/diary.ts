@@ -146,14 +146,14 @@ export class DiaryView extends ItemView {
     const navigator = header.createDiv({ cls: "simple-diary-month-nav" });
     const previousMonth = navigator.createEl("button", {
       cls: "simple-diary-month-nav-button",
-      attr: { title: "上个月", "aria-label": "上个月" },
+      attr: { "aria-label": "上个月" },
     });
     setIcon(previousMonth, "chevron-left");
     previousMonth.addEventListener("click", () => this.changeVisibleMonth(-1));
     const todayButton = navigator.createEl("button", {
       cls: "simple-diary-today-button",
       text: "今天",
-      attr: { title: "回到今天", "aria-label": "回到今天" },
+      attr: { "aria-label": "回到今天" },
     });
     todayButton.addEventListener("click", runAsync(async () => {
       const today = startOfDay(new Date());
@@ -164,7 +164,7 @@ export class DiaryView extends ItemView {
     }));
     const nextMonth = navigator.createEl("button", {
       cls: "simple-diary-month-nav-button",
-      attr: { title: "下个月", "aria-label": "下个月" },
+      attr: { "aria-label": "下个月" },
     });
     setIcon(nextMonth, "chevron-right");
     nextMonth.addEventListener("click", () => this.changeVisibleMonth(1));
@@ -290,7 +290,7 @@ export class DiaryView extends ItemView {
     const yearNav = yearSection.createDiv({ cls: "simple-diary-year-nav" });
     const previousYear = yearNav.createEl("button", {
       cls: "simple-diary-year-nav-button",
-      attr: { title: "上一年", "aria-label": "上一年" },
+      attr: { "aria-label": "上一年" },
     });
     setIcon(previousYear, "chevron-left");
     previousYear.addEventListener("click", () => {
@@ -300,7 +300,7 @@ export class DiaryView extends ItemView {
     yearNav.createDiv({ cls: "simple-diary-year-label", text: String(year) });
     const nextYear = yearNav.createEl("button", {
       cls: "simple-diary-year-nav-button",
-      attr: { title: "下一年", "aria-label": "下一年" },
+      attr: { "aria-label": "下一年" },
     });
     setIcon(nextYear, "chevron-right");
     nextYear.addEventListener("click", () => {
@@ -331,7 +331,7 @@ export class DiaryView extends ItemView {
     const toolbar = container.createDiv({ cls: "simple-diary-toolbar" });
     const refresh = toolbar.createEl("button", {
       cls: "simple-diary-icon-button",
-      attr: { title: "待办追踪", "aria-label": "待办追踪" },
+      attr: { "aria-label": "待办追踪" },
     });
     setActionIcon(refresh, "refresh-cw", "plain");
     refresh.addEventListener("click", runAsync(async () => {
@@ -340,7 +340,7 @@ export class DiaryView extends ItemView {
 
     const recurring = styleActionButton(toolbar.createEl("button", {
       cls: this.showRecurringPanel ? "simple-diary-icon-button is-active" : "simple-diary-icon-button",
-      attr: { title: "周期计划", "aria-label": "周期计划" },
+      attr: { "aria-label": "周期计划" },
     }), "bordered");
     setIcon(recurring, "repeat");
     recurring.addEventListener("click", () => {
@@ -350,11 +350,7 @@ export class DiaryView extends ItemView {
 
     const settings = toolbar.createEl("button", {
       cls: this.showSettingsPanel ? "simple-diary-icon-button is-active" : "simple-diary-icon-button",
-      attr: {
-        title: "日记",
-        "aria-label": "日记",
-        "aria-expanded": String(this.showSettingsPanel),
-      },
+      attr: { "aria-expanded": String(this.showSettingsPanel), "aria-label": "日记" },
     });
     setActionIcon(settings, "settings", "plain");
     settings.addEventListener("click", () => {
@@ -591,7 +587,7 @@ export class DiaryView extends ItemView {
       main.createDiv({ cls: "simple-diary-recurring-summary", text: recurringRuleSummary(rule) });
 
       const actions = row.createDiv({ cls: "simple-diary-recurring-actions" });
-      const edit = actions.createEl("button", { attr: { title: "编辑", "aria-label": "编辑" } });
+      const edit = actions.createEl("button", { attr: { "aria-label": "编辑" } });
       setActionIcon(edit, "pencil", "plain");
       edit.addEventListener("click", () => {
         new DiaryRecurringRuleModal(this.app, "周期计划编辑", rule, async (updatedRule) => {
@@ -619,7 +615,7 @@ function renderDateMarkers(container: HTMLElement, settings: DiarySettings, date
     container.createSpan({ cls: "simple-diary-reminder-label", text: festival });
     labels.push(festival);
   }
-  container.setAttr("title", labels.join("、"));
+  container.setAttribute("aria-label", labels.join("、"));
 }
 
 function anniversaryLabelsForDate(settings: DiarySettings, date: Date): string[] {

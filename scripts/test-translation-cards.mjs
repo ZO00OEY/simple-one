@@ -39,7 +39,7 @@ const view = { dom: doc.body, get state() { return state; }, focus() {}, request
 const element = widget.toDOM(view); doc.body.append(element);
 assert(element.querySelector('.simple-inline-translation-card'));
 element.querySelector('button').click(); assert.equal(state.field(field).expanded.size, 1, 'source button exposes editable original Markdown');
-element.querySelector('[title="转为普通文字"]').click();
+element.querySelector('[aria-label="转为普通文字"]').click();
 assert.equal(state.doc.toString(), 'original\n\ntranslation', 'text conversion removes all card markers');
 let requested;
 plugin.settings = { enhancements: { quickFormat: { translation: { sourceId: 'test', modelId: 'test' } } } };
@@ -49,7 +49,7 @@ plugin.app.plugins = { plugins: { 'simple-ai': {
 } } };
 state = EditorState.create({ doc: translationCardSource('original\n\nold result', 'original'), extensions: [field] });
 state.field(field).decorations.between(0, state.doc.length, (_from, _to, value) => { widget = value.spec.widget; });
-widget.toDOM(view).querySelector('[title="重新翻译"]').click();
+widget.toDOM(view).querySelector('[aria-label="重新翻译"]').click();
 await new Promise(resolve => setTimeout(resolve, 0));
 assert.deepEqual(requested, [{ id: 1, text: 'original' }], 'refresh translates the saved original rather than previous bilingual output');
 assert.equal(translationCardRanges(state)[0].markdown, 'original\n\nfresh result');

@@ -1,3 +1,4 @@
+import { tooltipText } from "../../shared/tooltipText";
 import { createFileListLayout, fileListPanel, renderLayoutToggle, FileListLayout, renderFileTree, renderPathTree } from "./fileTree";
 import { remoteSnapshotRef } from "./directRemote";
 import { legacyScopeRules, readRootIgnore, rootIgnoreMatcher, organizedLocalIgnore } from "./localIgnore";
@@ -3243,7 +3244,7 @@ class ZoeySyncView extends ItemView {
     }
     const remaining = this.plugin.getMobileGithub().remaining;
     quota.setText(remaining === null ? "API 额度待查询" : `API 剩余 ${remaining.toLocaleString()} 次`);
-    quota.setAttr("title", "以最近一次 GitHub 响应为准；下一次请求会更新额度，同账号其他设备可能共享额度。");
+    quota.setAttribute("aria-label", "以最近一次 GitHub 响应为准；下一次请求会更新额度，同账号其他设备可能共享额度。");
   }
 
   async render(reuseChanges = false): Promise<void> {
@@ -3333,7 +3334,7 @@ class ZoeySyncView extends ItemView {
     const downloadEngine = this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github" ? this.plugin.getMobileGithub() : undefined;
     if (downloadEngine?.downloadTask) {
       const reminder = styleActionButton(actions.createEl("button", { cls: "clickable-icon nav-action-button simple-one-sync-download-alert",
-        attr: { type: "button", "aria-label": "下载待办尚未完成", title: "继续逐文件下载" } }), "bordered");
+        attr: { type: "button", "aria-label": tooltipText("下载待办尚未完成", "继续逐文件下载") } }), "bordered");
       setIcon(reminder, "triangle-alert");
       reminder.addEventListener("click", () => void this.showDownloadTask());
     }
@@ -3540,7 +3541,7 @@ class ZoeySyncView extends ItemView {
   private renderChange(parent: HTMLElement, change: ChangeItem, fullPath: boolean): void {
     const row = parent.createDiv({ cls: "simple-one-sync-view__change" });
     row.setAttr("data-kind", change.kind);
-    row.setAttr("title", change.path);
+    row.setAttribute("aria-label", change.path);
     row.createSpan({ text: this.changeMark(change.kind), cls: "simple-one-sync-view__mark" });
     const text = row.createDiv({ cls: "simple-one-sync-view__change-text" });
     const label = fullPath ? change.path : change.path.split("/").pop() || change.path;
@@ -3792,7 +3793,7 @@ export class SyncSettingsTab extends PluginSettingTab {
   }
 
   private addSettingsArrow(parent: HTMLElement, page: "desktop-settings" | "mobile" | "server", title: string): void {
-    const arrow = styleActionButton(parent.createEl("button", { cls: "clickable-icon simple-one-sync-entry-arrow", attr: { type: "button", "aria-label": `打开${title}`, title: `打开${title}` } }), "bordered");
+    const arrow = styleActionButton(parent.createEl("button", { cls: "clickable-icon simple-one-sync-entry-arrow", attr: { type: "button", "aria-label": `打开${title}` } }), "bordered");
     setIcon(arrow, "chevron-right");
     parent.tabIndex = 0;
     parent.setAttribute("role", "link");
@@ -3949,7 +3950,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     tokenBox.createDiv({ text: "GitHub Token", cls: "simple-one-sync-mobile-guide__token-label" });
     const row = tokenBox.createDiv({ cls: "simple-one-sync-mobile-guide__token-row" });
     row.createEl("code", { text: this.lightweightGuideToken, cls: "simple-one-sync-mobile-guide__token-text" });
-    const copy = row.createEl("button", { cls: "simple-one-sync-mobile-guide__copy", attr: { type: "button", "aria-label": "复制 token", title: "复制 token" } });
+    const copy = row.createEl("button", { cls: "simple-one-sync-mobile-guide__copy", attr: { type: "button", "aria-label": "复制 token" } });
     setActionIcon(copy, "copy", "plain");
     const copyStatus = tokenBox.createEl("p", { cls: "simple-one-sync-mobile-guide__result", attr: { role: "status", "aria-live": "polite" } });
     const reportCopy = (text: string, error = false) => {
@@ -4022,7 +4023,7 @@ export class SyncSettingsTab extends PluginSettingTab {
     })());
     if (ready) {
       const footer = card.createDiv({ cls: "simple-one-sync-setup-footer" });
-      const next = footer.createEl("button", { text: "我已保存好 token", cls: "mod-cta", attr: { type: "button", title: "继续配置轻量同步" } });
+      const next = footer.createEl("button", { text: "我已保存好 token", cls: "mod-cta", attr: { type: "button", "aria-label": "继续配置轻量同步" } });
       styleActionButton(next, "text");
       next.addEventListener("click", () => { this.lightweightGuideStep = 2; this.renderSettings(); });
     }
@@ -4254,8 +4255,8 @@ export class SyncSettingsTab extends PluginSettingTab {
     const page = containerEl.createDiv({ cls: "simple-one-sync-setup-layout" });
     this.displayDevicePreview(page, "轻量 Git 同步", "适用于安卓、iOS，也适用于电脑");
     const body = this.syncSettingsBody(page, this.plugin.useLightweightSync());
-    renderMobileSettings(body, this.plugin.mobileHost(), false);
-    this.performanceSetting(compactSettingsSection(body, "故障排查"));
+    const advanced = renderMobileSettings(body, this.plugin.mobileHost(), false);
+    this.performanceSetting(advanced ?? compactSettingsSection(body, "故障排查"));
     if (this.plugin.settings.mobile.mode === "server") this.displayMobile(body);
   }
 
@@ -4483,7 +4484,7 @@ export class SyncSettingsTab extends PluginSettingTab {
       });
     }
     if (!this.plugin.settings.setupComplete && this.plugin.settings.setupBackup && !this.plugin.settings.setupMutationStarted) {
-      const cancel = styleActionButton(status.createEl("button", { text: "取消向导，恢复旧同步", attr: { type: "button", title: "退出向导并恢复之前已配置的自动同步" } }), "text");
+      const cancel = styleActionButton(status.createEl("button", { text: "取消向导，恢复旧同步", attr: { type: "button", "aria-label": "退出向导并恢复之前已配置的自动同步" } }), "text");
       cancel.disabled = this.setupBusy;
       cancel.addEventListener("click", () => void this.runSetup(() => this.plugin.cancelSetup(), "已恢复之前的同步配置。"));
     }
@@ -5042,9 +5043,9 @@ export class SyncSettingsTab extends PluginSettingTab {
       );
     for (const row of Array.from(containerEl.querySelectorAll<HTMLElement>(".simple-one-sync-advanced__body > .setting-item"))) {
       const description = row.querySelector<HTMLElement>(".setting-item-description");
-      if (description?.textContent) row.title = description.textContent;
+      if (description?.textContent) row.setAttribute("aria-label", description.textContent);
       const input = row.querySelector<HTMLInputElement>("input[type=number], input[type=text]");
-      if (input && row.title) input.title = row.title;
+      if (input && row.getAttribute("aria-label")) input.setAttribute("aria-label", row.getAttribute("aria-label")!);
     }
 
   }

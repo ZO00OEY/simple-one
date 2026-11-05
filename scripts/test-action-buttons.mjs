@@ -55,6 +55,7 @@ button.hidden = true; assert.equal(window.getComputedStyle(button).display, "non
 const popout = new JSDOM('<div class="setting-item"><div class="setting-item-name">Popout setting</div><div class="toggle"></div></div>');
 const popoutDoc = popout.window.document;
 popout.window.HTMLElement.prototype.createEl = function(tag) { return this.appendChild(popoutDoc.createElement(tag)); };
+popout.window.HTMLElement.prototype.createSpan = function() { return this.createEl('span'); };
 popout.window.HTMLElement.prototype.addClass = function(name) { this.classList.add(name); };
 const checkboxBundle = await build({ entryPoints: ['src/shared/nativeCheckbox.ts'], bundle: true, platform: 'node', format: 'cjs', write: false });
 const checkboxModule = { exports: {} };
@@ -68,6 +69,6 @@ const changes = [];
 toggle.onChange(value => changes.push(value)); checkbox.checked = false; checkbox.dispatchEvent(new popout.window.Event('change'));
 assert.deepEqual(changes, [false]);
 assert.equal(toggle.setValue(true), toggle); assert.equal(toggle.getValue(), true); assert.deepEqual(changes, [false]);
-toggle.setDisabled(true); toggle.setTooltip('Popout tooltip'); assert.equal(checkbox.disabled, true); assert.equal(checkbox.title, 'Popout tooltip');
+toggle.setDisabled(true); toggle.setTooltip('Popout tooltip'); assert.equal(checkbox.disabled, true); assert.equal(checkbox.getAttribute('aria-label'), 'Popout tooltip'); assert.equal(checkbox.hasAttribute('title'),false);
 popout.window.close();
 console.log("Action buttons: platform-scoped 28/44 geometry, nested icons, variants, labels, events and disabled state passed.");

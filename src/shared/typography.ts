@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, type QuickFormatHeadingLevel, type TypographySettings } from "../types";
+import { DEFAULT_SETTINGS, type ThemeFormattingSettings, type QuickFormatSettings, type QuickFormatHeadingLevel, type TypographySettings } from "../types";
 import { CHINESE_FONTS, LATIN_FONTS } from "./fontOptions";
 
 export const TYPOGRAPHY_DEFAULTS = DEFAULT_SETTINGS.desktopTypography;
@@ -45,8 +45,31 @@ export function headingFontFloorPatch(sizes: Record<QuickFormatHeadingLevel, str
   const value = String(Math.ceil(body * 1000) / 1000);
   for (const level of ["h1", "h2", "h3", "h4", "h5", "h6"] as QuickFormatHeadingLevel[]) {
     const explicit = Number(sizes[level]);
-    if (Number.isFinite(rendered[level]) && rendered[level] > 0 && rendered[level] < body
-      && !(sizes[level].trim() && explicit >= body && explicit <= 96)) patch[level] = value;
+    const candidate = sizes[level].trim() && explicit >= 10 && explicit <= 96 ? explicit : rendered[level];
+    if (Number.isFinite(candidate) && candidate > 0 && candidate < body) patch[level] = value;
   }
   return patch;
+}
+
+/** Initialize missing appearance choices once; an empty value after reset must stay empty. */
+export function initializeHeadingDefaults(settings: QuickFormatSettings): boolean {
+  if (settings.headingDefaultsVersion >= 3) return false;
+  if (!settings.headingDefaultsVersion && Object.values(settings.headingColors).every(color => !color.trim())) {
+    Object.assign(settings.headingColors, { h1: "#222222", h2: "#222222", h4: "#478f14", h6: "#222222" });
+  } else if (settings.headingDefaultsVersion) {
+    for (const level of ["h1", "h2", "h6"] as QuickFormatHeadingLevel[]) {
+      if (settings.headingColors[level] === "var(--text-normal)") settings.headingColors[level] = "#222222";
+    }
+    if (settings.headingColors.h4.toLowerCase() === "#168c54") settings.headingColors.h4 = "#478f14";
+  }
+  settings.headingDefaultsVersion = 3;
+  return true;
+}
+
+/** Empty after initialization means follow the current theme, including after restart. */
+export function initializeFormattingDefaults(settings: { themeFormattingDefaultsVersion: number; themeFormatting: ThemeFormattingSettings }): boolean {
+  if (settings.themeFormattingDefaultsVersion >= 1) return false;
+  if (!settings.themeFormatting.highlightBackground) settings.themeFormatting.highlightBackground = "#ffd00066";
+  settings.themeFormattingDefaultsVersion = 1;
+  return true;
 }

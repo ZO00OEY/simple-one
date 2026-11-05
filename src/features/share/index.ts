@@ -16,8 +16,7 @@ import { editShareName } from "./inlineName";
 import { ShareRepository, websiteFiles } from "./repository";
 import { ApiShareRepository, FallbackShareRepository, canFallbackToApi } from "./apiRepository";
 import { githubJson } from "../sync/githubApi";
-import { shareAppearance } from "./appearance";
-import { DEFAULT_TEMPLATE_FILE, TEMPLATE_SELECTION_FILE, bundledReaderFiles, templateAppearance, validateShareTemplate } from "./template";
+import { DEFAULT_TEMPLATE_FILE, TEMPLATE_SELECTION_FILE, bundledReaderFiles, readerRevision, validateShareTemplate } from "./template";
 import { EDGEONE_PROJECTS_URL, EdgeOneConnection, edgeOneWebsite, type EdgeOneCustomDomain } from "./edgeone";
 import { renderEdgeOneGuide, renderMainlandPreviewNotice, shareExternalLink, type EdgeOneRepositoryVisibility } from "./edgeoneUi";
 
@@ -315,7 +314,7 @@ export default class ShareFeature extends Component {
     const settingsBadge = '<path d="M71 60h12l2 7 7 2 4 10-5 5 1 8-10 4-5-5-8 1-4-10 5-5-1-8 7-4z"/><circle cx="79" cy="79" r="6"/>';
     addIcon("simple-share-copy-settings", `<g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M27 53H13V9h43v14M55 79H28V26h43v26"/>${settingsBadge}</g>`);
     this.refreshActions = registerMarkdownAction(this.host, "data-simple-share-note", () => this.manifest.enabled,
-      view => { const action = view.addAction("share-2", "分享当前笔记", runAsync(async () => {
+      view => { const action = view.addAction("share-2", "左键：分享当前笔记\n右键：选择笔记库", runAsync(async () => {
         if (!view.file) return;
         await view.save();
         await this.share(view.file).catch(error => this.fail(error));
@@ -348,8 +347,7 @@ export default class ShareFeature extends Component {
       action => {
         const disabled = this.busy || this.sharing;
         action.setAttr("aria-disabled", String(disabled));
-        const selected = selectedLibraryIds(this.manifest).map(id => this.libraries[id]).filter(Boolean);
-        setTooltip(action, disabled ? "正在处理分享，请稍候" : selected.length ? `加入分享列表：${selected.join("、")}（右键选择）` : "尚未配置分享库（右键选择）");
+        setTooltip(action, disabled ? "正在处理分享，请稍候" : "左键：分享当前笔记\n右键：选择笔记库");
       });
     this.host.registerView(VIEW, leaf => new ShareView(leaf, this));
     this.host.addCommand({ id: "share-current-note", name: "分享此笔记", checkCallback: checking => {
@@ -1386,8 +1384,6 @@ export default class ShareFeature extends Component {
       const state: PublishState = { version: 1, notes: {}, files: [] };
       const adapter = this.host.app.vault.adapter, licensePath = this.path("reader-licenses.txt");
       const files = websiteFiles(template, readerTemplate, await adapter.exists(licensePath) ? await adapter.read(licensePath) : bundledReaderFiles().licenses);
-      const appearance = shareAppearance(this.host);
-      files.set("reader/appearance.css", appearance); files.set("index.html", templateAppearance(template, appearance));
       const index = this.index(true);
       const assetCache: ShareAssetCache = new Map();
       // Identity writes can precede Obsidian's metadata-cache refresh.
@@ -1649,16 +1645,33 @@ export default class ShareFeature extends Component {
     Object.assign(this.display, change, { layout: "public" }); this.displayStored = true;
     this.host.app.workspace.requestSaveLayout(); this.renderViews();
   }
+  private defaultTemplateChecked = false;
   private async readDefaultTemplate(): Promise<string> {
     const adapter = this.host.app.vault.adapter;
     const path = this.path(DEFAULT_TEMPLATE_FILE);
-    if (!await adapter.exists(path)) {
+    const revisionPath = this.path("default-template-version.json");
+    let previousRevision = "";
+    if (!this.defaultTemplateChecked && await adapter.exists(revisionPath)) previousRevision = (await adapter.read(revisionPath)).trim();
+    if (!await adapter.exists(path) || !this.defaultTemplateChecked && previousRevision !== readerRevision) {
       const defaults = bundledReaderFiles();
       validateShareTemplate(defaults.template);
+      if (await adapter.exists(path)) {
+        const previous = await adapter.read(path);
+        const hash = await sha256(previous);
+        // Preserve edits to a previous default; imported custom templates are never replaced.
+        if (hash !== readerRevision && hash !== previousRevision) {
+          let backup = "custom-default-backup.html";
+          for (let suffix = 2; await adapter.exists(this.path(backup)); suffix++) backup = `custom-default-backup-${suffix}.html`;
+          await adapter.write(this.path(backup), previous);
+        }
+      }
       const licensePath = this.path("reader-licenses.txt");
-      if (!await adapter.exists(licensePath)) await adapter.write(licensePath, defaults.licenses);
+      await adapter.write(licensePath, defaults.licenses);
       await adapter.write(path, defaults.template);
+      await adapter.write(revisionPath, readerRevision);
     }
+    this.defaultTemplateChecked = true;
+    // Only installation/upgrade unpacks the embedded copy; publication reads the fixed file.
     const source = await adapter.read(path);
     validateShareTemplate(source);
     return source;
@@ -1737,7 +1750,8 @@ export default class ShareFeature extends Component {
     const render = (): void => {
       modal.contentEl.empty();
       const disabled = !this.manifest.enabled || this.isPublishing || this.templateBusy;
-      new Setting(modal.contentEl).setName("当前分享模板")
+      new Setting(modal.contentEl).setName("当前分享模板").setClass("simple-share-template-selector")
+        .setDesc("默认使用自带模板，也可导入自定义模板。")
         .addDropdown(dropdown => dropdown.addOptions(this.templateFiles).setValue(this.templateFile)
           .setDisabled(disabled).onChange(value => { void this.selectTemplate(value).catch(error => this.fail(error)); }));
       new Setting(modal.contentEl).setName("模板操作")
@@ -1936,8 +1950,8 @@ export default class ShareFeature extends Component {
         setting.nameEl.addEventListener("click", locate);
         setting.nameEl.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); locate(); } });
       }
-      setting.nameEl.setAttribute("title", `${row.title} · ${row.state}${selection && row.file ? " · 双击打开原笔记" : ""}`);
-      setting.infoEl.createSpan({ text: row.state, cls: `simple-share-note-state${row.state === "推送成功" ? " is-published" : ""}`, attr: { title: row.state === "推送成功" ? "上次推送成功；正文与附件仅在点击「推送新分享」时重新检查。" : row.state } });
+      setting.nameEl.setAttribute("aria-label", `${row.title} · ${row.state}${selection && row.file ? " · 双击打开原笔记" : ""}`);
+      setting.infoEl.createSpan({ text: row.state, cls: `simple-share-note-state${row.state === "推送成功" ? " is-published" : ""}`, attr: { "aria-label": row.state === "推送成功" ? "上次推送成功；正文与附件仅在点击「推送新分享」时重新检查。" : row.state } });
       if (entry) setting.settingEl.addEventListener("contextmenu", event => {
         event.preventDefault();
         const ids = selection?.selected.has(row.id) ? this.rows.filter(item => selection.selected.has(item.id)).map(item => item.id) : [row.id];
@@ -1946,7 +1960,7 @@ export default class ShareFeature extends Component {
           .addItem(item => item.setTitle(ids.length > 1 ? `删除所选 ${ids.length} 篇` : "删除").setIcon("trash-2").setDisabled(this.isPublishing)
             .onClick(runAsync(async () => { await this.confirmRemoveShares(ids); }))).showAtMouseEvent(event);      });
       setting.descEl.hidden = true;
-      setting.descEl.setAttribute("title", `原笔记目录：${path || "/"} · 公开分类：${entry?.category || "未分类"}`);
+      setting.descEl.setAttribute("aria-label", `原笔记目录：${path || "/"} · 公开分类：${entry?.category || "未分类"}`);
       if (this.published.notes[row.id] && this.manifest.showLinkButtons !== false) {
         for (const key of this.manifest.linkChannels ?? ["github", "pageOne"]) setting.addButton(button => {
           const name = key === "github" ? "GitHub" : key === "pageOne" ? "EdgeOne" : "自定义域名";
@@ -2013,7 +2027,7 @@ export default class ShareFeature extends Component {
     if (showTitle) {
       const header = page.createDiv({ cls: "simple-page-header" });
       if (!guide && (this.edgeOneGuideOpen || managingLibrary)) {
-        const back = styleActionButton(header.createEl("button", { cls: "simple-back-button", attr: { type: "button", "aria-label": "返回笔记分享设置", title: "返回笔记分享设置" } }), "bordered");
+        const back = styleActionButton(header.createEl("button", { cls: "simple-back-button", attr: { type: "button", "aria-label": "返回笔记分享设置" } }), "bordered");
         setIcon(back, "arrow-left"); back.addEventListener("click", () => { if (managingLibrary) this.backFromShareLibraryManagement(); else this.backFromEdgeOneGuide(); });
       }
       new Setting(header).setName(title).setHeading().setClass("simple-page-title");
@@ -2033,9 +2047,10 @@ export default class ShareFeature extends Component {
       const management = compactSettingsSection(page, "分享设置");
       this.renderLibrarySelector(management, true, false, false);
       const selector = management.querySelector<HTMLElement>(".simple-share-library-selector")!;
-      selector.title = "切换当前查看的分享库；发布目标可在笔记分享按钮的右键菜单中选择。";
+      selector.setAttribute("aria-label", "切换当前查看的分享库；发布目标可在笔记分享按钮的右键菜单中选择。");
       selector.querySelector(".setting-item-description")?.remove();
-      new Setting(management).setName("当前分享模板")
+      new Setting(management).setName("当前分享模板").setClass("simple-share-template-selector")
+        .setDesc("默认使用自带模板，也可导入自定义模板。")
         .addDropdown(dropdown => dropdown.addOptions(this.templateFiles).setValue(this.templateFile)
           .setDisabled(!this.manifest.enabled || this.isPublishing || this.templateBusy)
           .onChange(value => { void this.selectTemplate(value).catch(error => this.fail(error)); }))
@@ -2189,10 +2204,10 @@ export default class ShareFeature extends Component {
         instructions.append("，按提示登录、输入设备码并完成授权。授权完成后会自动核验并进入下一步。");
         const deviceAction = authChoice.createDiv({ cls: "simple-one-sync-setup-device-action" });
         deviceAction.createEl("code", { text: this.deviceCode || (this.setupBusy ? "正在获取…" : ""), cls: `simple-one-sync-setup-device-slot${this.deviceCode ? " simple-one-sync-setup-device-code" : ""}`, attr: { "aria-live": "polite" } });
-        const copy = deviceAction.createEl("button", { cls: "simple-one-sync-setup-device-icon-button", attr: { type: "button", "aria-label": "复制设备码", title: "复制设备码" } });
+        const copy = deviceAction.createEl("button", { cls: "simple-one-sync-setup-device-icon-button", attr: { type: "button", "aria-label": "复制设备码" } });
         setActionIcon(copy, "copy", "plain"); copy.disabled = !this.deviceCode;
         copy.addEventListener("click", runAsync(async () => { await navigator.clipboard.writeText(this.deviceCode); }));
-        const refresh = deviceAction.createEl("button", { cls: "simple-one-sync-setup-device-icon-button", attr: { type: "button", "aria-label": "刷新设备码", title: "刷新设备码" } });
+        const refresh = deviceAction.createEl("button", { cls: "simple-one-sync-setup-device-icon-button", attr: { type: "button", "aria-label": "刷新设备码" } });
         setActionIcon(refresh, "refresh-cw", "plain"); refresh.disabled = this.setupBusy || this.busy;
         refresh.addEventListener("click", () => run(browserLogin));
         if (this.setupBusy) new Setting(authChoice).addButton(button => { styleActionButton(button.buttonEl, "text");
@@ -2656,7 +2671,7 @@ export class ShareView extends ItemView {
     status.toggleClass("is-checking", !this.feature.error && (this.feature.refreshingStatus || this.feature.checkingShareStatus && !deploying));
     status.toggleClass("is-pending", !this.feature.error && (deploying || pending && !this.feature.isPublishing));
     if (this.feature.refreshingStatus && !this.feature.error) status.textContent = "正在刷新分享变更与部署状态…";
-    status.title = [this.feature.progressText, this.feature.shareStatusInfo].filter(Boolean).join("\n");
+    status.setAttribute("aria-label", [this.feature.progressText, this.feature.shareStatusInfo].filter(Boolean).join("\n"));
     if (!this.feature.shareStatusBusy && !deploying && !this.feature.error) {
       status.textContent = status.textContent?.replace("GitHub Pages 与腾讯 EdgeOne 均已部署成功", "GitHub / EdgeOne 已部署").replace("GitHub Pages 已部署成功", "GitHub Pages 已部署") ?? "";
       const pushed = this.feature.shareStatusInfo.split(" · ")[0];

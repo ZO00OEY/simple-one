@@ -41,7 +41,7 @@ export function enhanceMermaid(node: HTMLElement, icon?: (button: HTMLButtonElem
     const control = doc.createElement("button");
     control.type = "button";
     control.className = "clickable-icon simple-mermaid-icon-button";
-    control.title = label;
+    if (!icon) control.title = label;
     control.setAttribute("aria-label", label);
     if (value) control.dataset.mermaidMode = value;
     if (icon) icon(control, name); else control.textContent = label;
@@ -78,7 +78,7 @@ export function enhanceMermaid(node: HTMLElement, icon?: (button: HTMLButtonElem
     frame.classList.toggle("is-fullscreen", open);
     fullscreen.setAttribute("aria-expanded", String(open));
     const label = open ? "退出全屏" : "全屏";
-    fullscreen.title = label;
+    if (!icon) fullscreen.title = label;
     fullscreen.setAttribute("aria-label", label);
     if (!icon) fullscreen.textContent = label;
     if (open) {

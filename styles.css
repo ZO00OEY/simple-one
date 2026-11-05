@@ -591,13 +591,8 @@ body.simple-one-active .notice-container .notice {
 
 .simple-preview-checkbox-row input[type="checkbox"],
 .simple-one-sync-settings input.simple-one-sync-mobile-checkbox {
-  position: relative;
-  box-sizing: border-box;
-  flex: 0 0 16px;
-  width: 16px;
-  height: 16px;
+  flex: 0 0 auto;
   margin: 0;
-  accent-color: var(--interactive-accent);
 }
 
 .simple-preview-checkbox-row span {
@@ -8615,6 +8610,11 @@ body .simple-one-sync-version-choice button.simple-action-button.simple-one-sync
   font-size: var(--font-ui-smaller);
 }
 
+/* Bind the exact face: Windows groups JinKai weights under one typographic family. */
+@font-face {
+  font-family: "Simple One JinKai W04";
+  src: local("仓耳今楷01 W04"), local("TsangerJinKai01-W04"), local("TsangerJinKai01 W04");
+}
 /* Restrict the Latin override so Chinese glyphs and punctuation keep their body font. */
 @font-face {
   font-family: "Simple One Latin Segoe UI";
@@ -8623,7 +8623,7 @@ body .simple-one-sync-version-choice button.simple-action-button.simple-one-sync
 }
 @font-face {
   font-family: "Simple One Latin Source Sans 3";
-  src: local("Source Sans 3"), local("SourceSans3-Regular");
+  src: local("Source Sans 3"), local("SourceSans3-Regular"), local("SourceSans3-Roman");
   unicode-range: U+0000-024F;
 }
 @font-face {
@@ -8638,7 +8638,7 @@ body .simple-one-sync-version-choice button.simple-action-button.simple-one-sync
 }
 
 @font-face { font-family: "Simple One Latin Georgia"; src: local("Georgia"), local("Georgia-Regular"); unicode-range: U+0000-024F; }
-@font-face { font-family: "Simple One Latin Source Serif 4"; src: local("Source Serif 4"), local("SourceSerif4-Regular"); unicode-range: U+0000-024F; }
+@font-face { font-family: "Simple One Latin Source Serif 4"; src: local("Source Serif 4"), local("SourceSerif4-Regular"), local("Source Serif 4 Regular"), local("SourceSerif4Roman-Regular"); unicode-range: U+0000-024F; }
 
 .simple-share-log { margin: 6px 0; border-bottom: 1px solid var(--background-modifier-border); padding: 6px 0; }
 .simple-share-log summary { cursor: pointer; font-size: var(--font-ui-small); }
@@ -8689,3 +8689,114 @@ body :is(button, [role="button"]).simple-action-button.simple-action-button[clas
 body :is(button, [role="button"]).simple-action-button.simple-action-button[class]:disabled:not(.mod-cta, .mod-warning, .simple-action-button--danger, [style*="color"]) > svg {
   color: var(--text-faint);
 }
+
+/* Optional tag colors track the live accent in both appearance modes. */
+body.simple-tags-follow-accent {
+  --tag-color: var(--color-accent);
+  --tag-color-hover: var(--color-accent);
+  --tag-background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  --tag-background-hover: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  --tag-border-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
+  --tag-border-color-hover: color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+body.simple-tags-follow-accent .metadata-property:is([data-property-key="tags"], [data-property-type="tags"]) .multi-select-pill {
+  --pill-color: var(--color-accent);
+  --pill-color-hover: var(--color-accent);
+  --pill-color-remove: var(--color-accent);
+  --pill-color-remove-hover: var(--color-accent);
+  --pill-background: var(--tag-background);
+  --pill-background-hover: var(--tag-background-hover);
+}
+
+/* Inline code only: keep property pills and fenced code blocks owned by their theme. */
+body.simple-inline-code-appearance .markdown-rendered code:not(pre code),
+body.simple-inline-code-appearance .markdown-source-view .cm-inline-code:not(.cm-formatting) {
+  --inline-code: var(--text-normal);
+  font-family: var(--font-interface);
+  font-size: .875em;
+  font-weight: 400;
+  letter-spacing: normal;
+  color: var(--text-normal);
+  background-color: color-mix(in srgb, var(--text-normal) 4%, var(--background-primary));
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: .05em .25em;
+}
+
+/* Compact API fields; models remain individually editable after discovery. */
+.modal.simple-translation-api-modal .setting-item { display: grid; grid-template-columns: 84px minmax(0, 1fr); }
+.modal.simple-translation-api-modal .setting-item-info { min-width: 0; margin: 0; }
+.modal.simple-translation-api-modal .setting-item-control { min-width: 0; flex-wrap: nowrap; justify-content: flex-start; }
+.modal.simple-translation-api-modal .setting-item-control input { flex: 1 1 180px; min-width: 0; width: 100%; }
+.modal.simple-translation-api-modal .simple-translation-protocol-row select { width: 180px; max-width: 100%; }
+.modal.simple-translation-api-modal .simple-translation-secret-row input { max-width: 360px; }
+.modal.simple-translation-api-modal .setting-item-description { overflow-wrap: anywhere; }
+.modal.simple-translation-api-modal .simple-translation-model-header { grid-template-columns: minmax(0, 1fr) auto; }
+.modal.simple-translation-api-modal .simple-translation-model-header .setting-item-control { justify-content: flex-end; }
+.modal.simple-translation-api-modal .simple-translation-models { max-height: 250px; overflow-y: auto; scrollbar-width: thin; }
+.modal.simple-translation-api-modal .simple-translation-model-row { grid-template-columns: minmax(0, 1fr); }
+.modal.simple-translation-api-modal .simple-translation-model-row .setting-item-info { display: none; }
+.modal.simple-translation-api-modal .simple-translation-model-row .setting-item-control { width: 100%; }
+.modal.simple-translation-api-modal .modal-content > .setting-item:last-child { display: flex; justify-content: flex-end; }
+@media (max-width: 480px) {
+  .modal.simple-translation-api-modal .setting-item { grid-template-columns: 72px minmax(0, 1fr); gap: 8px; }
+  .modal.simple-translation-api-modal .simple-translation-model-row { grid-template-columns: minmax(0, 1fr); }
+}
+
+.modal.simple-translation-api-modal .simple-translation-endpoint-lock[aria-pressed="false"] { color: var(--text-faint); opacity: .45; }
+.modal.simple-translation-api-modal .simple-translation-endpoint-lock[aria-pressed="true"] { color: var(--text-normal); opacity: 1; }
+.modal.simple-translation-api-modal .simple-translation-secret-toggle svg { width: 18px; height: 18px; stroke-width: 2.2px; }
+/* Match the sync action: accent text stays readable as the tinted background deepens. */
+body .simple-share-panel .simple-share-publish-row button.simple-share-new.simple-action-button[class] {
+  background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary));
+  color: var(--interactive-accent);
+  border-color: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-primary));
+}
+body .simple-share-panel .simple-share-publish-row button.simple-share-new.simple-action-button[class]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--interactive-accent) 20%, var(--background-primary));
+  color: var(--interactive-accent);
+}
+body .simple-share-panel .simple-share-publish-row button.simple-share-new.simple-action-button[class]:active:not(:disabled) {
+  background: color-mix(in srgb, var(--interactive-accent) 25%, var(--background-primary));
+}
+body .simple-share-panel .simple-share-publish-row button.simple-share-new.simple-action-button[class]:disabled {
+  background: var(--background-modifier-hover);
+  color: var(--text-faint);
+  border-color: transparent;
+}
+
+/* Keep template choices as readable as library choices; stack both rows on phones. */
+.simple-settings .simple-share-compact-settings :is(.simple-share-library-selector, .simple-share-template-selector) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.simple-settings .simple-share-compact-settings :is(.simple-share-library-selector, .simple-share-template-selector) select {
+  width: 240px;
+  max-width: 100%;
+}
+.simple-settings .simple-share-compact-settings .simple-share-template-selector .setting-item-control {
+  display: flex;
+  flex-wrap: nowrap;
+  max-width: 100%;
+}
+.simple-settings .simple-share-compact-settings .simple-share-template-selector .setting-item-description {
+  overflow-wrap: anywhere;
+}
+body.is-mobile .simple-settings .simple-share-compact-settings :is(.simple-share-library-selector, .simple-share-template-selector) {
+  grid-template-columns: minmax(0, 1fr);
+}
+body.is-mobile .simple-settings .simple-share-compact-settings :is(.simple-share-library-selector, .simple-share-template-selector) .setting-item-control {
+  width: 100%;
+}
+body.is-mobile .simple-settings .simple-share-compact-settings :is(.simple-share-library-selector, .simple-share-template-selector) select {
+  flex: 1 1 0;
+  width: 100%;
+}
+@media (max-width: 640px) {
+  .simple-settings .simple-share-compact-settings :is(.simple-share-library-selector, .simple-share-template-selector) { grid-template-columns: minmax(0, 1fr); }
+  .simple-settings .simple-share-compact-settings :is(.simple-share-library-selector, .simple-share-template-selector) .setting-item-control { width: 100%; }
+  .simple-settings .simple-share-compact-settings :is(.simple-share-library-selector, .simple-share-template-selector) select { flex: 1 1 0; width: 100%; }
+}
+
+.simple-translation-api-modal .simple-translation-fetch-status { white-space: pre-wrap; overflow-wrap: anywhere; }
+.simple-translation-api-modal .simple-translation-fetch-status.is-error { color: var(--text-error); }

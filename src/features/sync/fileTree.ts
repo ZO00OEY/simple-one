@@ -14,7 +14,7 @@ export function createFileListLayout(settings: { viewLayout?: FileListMode } = {
 export function renderLayoutToggle(parent: HTMLElement, layout: FileListLayout): void {
   const button = styleActionButton(parent.createEl("button", { cls: "simple-one-sync-layout-toggle", attr: { type: "button" } }), "plain");
   const update = (): void => { const label = layout.get() === "tree" ? "切换为平铺列表" : "切换为目录树";
-    button.setAttr("aria-label", label); button.setAttr("title", label); setIcon(button, layout.get() === "tree" ? "list" : "folder-tree"); };
+    button.setAttr("aria-label", label); button.setAttribute("aria-label", label); setIcon(button, layout.get() === "tree" ? "list" : "folder-tree"); };
   update(); button.addEventListener("click", () => { button.disabled = true; void layout.set(layout.get() === "tree" ? "list" : "tree")
     .then(update).catch(() => new Notice("显示方式未能保存，请重试。")) .finally(() => { button.disabled = false; }); });
 }
@@ -50,7 +50,7 @@ export function renderFileTree<T>(parent: HTMLElement, items: readonly T[], path
     // Compress single-directory chains to leave room for filenames on phones.
     while (!node.files.length && node.children.size === 1) { node = [...node.children.values()][0]; name += "/" + node.name; }
     const group = host.createEl("details", { cls: "simple-one-sync-view__group" });
-    group.setAttr("data-folder", node.path); group.setAttr("title", node.path || "Vault 根目录");
+    group.setAttr("data-folder", node.path); group.setAttribute("aria-label", node.path || "Vault 根目录");
     group.style.marginInlineStart = depth > 0 && depth < 3 ? "8px" : "0";
     group.open = !collapsed.has(node.path);
     group.addEventListener("toggle", () => { if (group.open) collapsed.delete(node.path); else collapsed.add(node.path); });
@@ -78,7 +78,7 @@ export function renderPathTree(parent: HTMLElement, paths: readonly string[], ma
     const visible = paths.slice(page * 100, (page + 1) * 100);
     dispose = renderFileTree(host, visible, path => path, (folder, path, fullPath) => {
       const value = typeof mark === "function" ? mark(path) : mark;
-      const row = folder.createDiv({ cls: "simple-one-sync-view__change" }); row.setAttr("title", path);
+      const row = folder.createDiv({ cls: "simple-one-sync-view__change" }); row.setAttribute("aria-label", path);
       row.setAttr("data-kind", value === "+" ? "added" : value === "−" ? "deleted" : "modified");
       row.createSpan({ text: value, cls: "simple-one-sync-view__mark" });
       row.createSpan({ text: fullPath ? path : path.split("/").pop() ?? path, cls: "simple-one-sync-view__path" });

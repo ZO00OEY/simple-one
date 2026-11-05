@@ -46,7 +46,7 @@ const MODES: QuickFormatMode[] = [
 
 const headingFloorContexts = new WeakMap<SimplePlugin, { body?: number; active: boolean }>();
 
-/** Called at load/theme changes and when the effective body size changes, not on every save. */
+/** Called at load/theme changes and when the effective body size changes. */
 export async function repairHeadingFontSizes(plugin: SimplePlugin, themeChanged = false): Promise<boolean> {
   if (!document.body?.isConnected || document.win.closed) return false;
   const host = document.body.createDiv({ cls: "workspace-leaf-content simple-font-size-probe", attr: { "data-type": "markdown", "aria-hidden": "true" } });
@@ -88,12 +88,15 @@ export function applyQuickFormatStyles(plugin: SimplePlugin, extraDoc?: Document
 
   for (const level of ["h1", "h2", "h3", "h4", "h5", "h6"] as QuickFormatHeadingLevel[]) {
     const color = quickFormat.headingColors[level];
-    if (isHexColor(color)) {
-      rules.push(`body{--${level}-color:${color};--${level}-color-rgb:${hexToRgbTriplet(color)};}`);
+    const selector = `body.simple-one-active .markdown-rendered ${level},body.simple-one-active .markdown-source-view .cm-header-${level.slice(1)}`;
+    if (color === "var(--text-normal)") {
+      rules.push(`body{--${level}-color:var(--text-normal);}${selector}{color:var(--text-normal)!important;}`);
+    } else if (isHexColor(color)) {
+      rules.push(`body{--${level}-color:${color};--${level}-color-rgb:${hexToRgbTriplet(color)};}${selector}{color:${color}!important;}`);
     }
     const size = Number(quickFormat.headingSizes[level]);
     if (Number.isFinite(size) && size >= 10 && size <= 96) {
-      rules.push(`body{--${level}-size:${size}px;}`);
+      rules.push(`body{--${level}-size:${size}px;}${selector}{font-size:${size}px!important;}`);
     }
   }
 
@@ -141,7 +144,6 @@ function addCalloutColorRules(rules: string[], type: string, rgb: string): void 
 }
 
 export function registerQuickFormat(plugin: SimplePlugin): () => void {
-  let openMenu: Menu | null = null;
   const toolbar = registerSelectionToolbar(plugin, () => syncAllActions());
   plugin.addCommand({
     id: "apply-quick-format",
@@ -201,12 +203,7 @@ export function registerQuickFormat(plugin: SimplePlugin): () => void {
       action.addEventListener("contextmenu", (evt) => {
         evt.preventDefault();
         evt.stopPropagation();
-        openMenu?.hide();
-        const target = activeColumnFormatTarget;
-        target?.hold(true);
-        openMenu = createQuickFormatMenu(plugin, syncAllActions);
-        openMenu.onHide(() => target?.hold(false));
-        openMenu.showAtMouseEvent(evt);
+
       });
       return action;
     },
@@ -218,58 +215,10 @@ export function registerQuickFormat(plugin: SimplePlugin): () => void {
         setIcon(badge, "ban");
       }
       action.setAttribute("aria-pressed", String(!toolbar.isPaused()));
-      setTooltip(action, toolbar.isPaused() ? "浮动编辑栏已禁用；点击恢复" : "点击禁用浮动编辑栏；右键选择原格式预设");
+      setTooltip(action, toolbar.isPaused() ? "开启浮动编辑栏" : "关闭浮动编辑栏");
     }
   );
-  plugin.register(() => openMenu?.hide());
   return () => { toolbar.refresh(); syncAllActions(); };
-}
-
-function createQuickFormatMenu(plugin: SimplePlugin, syncAllActions: () => void): Menu {
-  const menu = new Menu();
-  const current = plugin.settings.enhancements.quickFormat.lastMode;
-  const modes = visibleModes(plugin);
-  const headingModes = modes.filter(isHeadingMode);
-  if (headingModes.length) {
-    const heading = isHeadingMode(current) ? current : headingModes[0];
-    menu.addItem((item) => {
-      item.setTitle("改变光标行格式").setIcon("heading").setDisabled(true);
-      setMenuItemIconColor(item, getCssVar(`--${heading}-color`, "--text-normal"));
-    });
-    for (const mode of headingModes) addQuickFormatMenuItem(menu, plugin, syncAllActions, current, mode);
-  }
-
-  const selectionModes = modes.filter((mode) => !isHeadingMode(mode));
-  if (selectionModes.length) {
-    if (headingModes.length) menu.addSeparator();
-    menu.addItem((item) => item.setTitle("指定选中内容").setIcon("text-select").setDisabled(true));
-    for (const mode of selectionModes) addQuickFormatMenuItem(menu, plugin, syncAllActions, current, mode);
-  }
-  return menu;
-}
-
-function addQuickFormatMenuItem(
-  menu: Menu,
-  plugin: SimplePlugin,
-  syncAllActions: () => void,
-  current: QuickFormatMode,
-  mode: QuickFormatMode
-): void {
-  menu.addItem((item) => {
-    const isCallout = mode.startsWith("callout-") || mode.startsWith("custom-callout:");
-    const color = isHeadingMode(mode) ? getCssVar(`--${mode}-color`, "--text-normal")
-      : isCallout ? calloutColor(plugin, calloutTypeFromMode(plugin, mode)) : "";
-    const menuItem = item
-      .setTitle(menuTitle(plugin, mode, color))
-      .setIcon(modeIcon(mode))
-      .setChecked(current === mode);
-    if (color) setMenuItemIconColor(menuItem, color);
-    menuItem.onClick(async () => {
-      plugin.settings.enhancements.quickFormat.lastMode = mode;
-      await plugin.saveSettings();
-      syncAllActions();
-    });
-  });
 }
 
 function applyQuickFormat(plugin: SimplePlugin): void {
@@ -399,7 +348,6 @@ function syncActionButton(plugin: SimplePlugin, action: HTMLElement): void {
   setIcon(action, QUICK_FORMAT_ICON);
   action.style.color = quickFormatIconColor(plugin);
   action.addClass("simple-quick-format-action");
-  setTooltip(action, `当前预设：${modeLabel(plugin, plugin.settings.enhancements.quickFormat.lastMode)}；左键执行，右键选择预设`);
 }
 
 export function quickFormatIconColor(plugin: SimplePlugin): string {

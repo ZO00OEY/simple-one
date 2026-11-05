@@ -56,18 +56,18 @@ function fixture({ alreadyOpen = false, options = false, inApp = false, migrate 
   const f = fixture({ alreadyOpen: true });
   f.refresh(); f.settings.onOpen(); f.flush(0); f.flush(100);
   assert.deepEqual(f.resizes, []); assert.deepEqual(f.moves, [], 'loading into an already-open window is inert');
-  f.settings.onClose(); f.settings.onOpen(); assert.deepEqual(f.resizes, [[700, 560]]); f.dispose();
+  f.settings.onClose(); f.settings.onOpen(); f.flush(100); assert.deepEqual(f.resizes, [[700, 560]]); f.dispose();
 }
 {
   const f = fixture({ options: true });
   const options = f.settings.getPopoutOptions();
   assert.equal(options.width, 700); assert.equal(options.height, 560); assert.equal(options.marker, 'retained');
   f.settings.onOpen(); f.flush(0); f.flush(100); f.refresh();
-  assert.deepEqual(f.resizes, []); assert.deepEqual(f.moves, [], 'native creation options eliminate manual resize/move');
+  assert.deepEqual(f.resizes, [[700, 560]]); assert.deepEqual(f.moves, [], 'restored bounds are corrected even when creation options were supplied');
   f.plugin.displaySettings.popupWindowScale = '80';
   assert.equal(f.settings.getPopoutOptions().width, 400, 'asking again while open leaves original platform options alone');
   f.settings.onClose(); assert.equal(f.settings.getPopoutOptions().width, 800);
-  f.settings.onOpen(); f.flush(0); f.flush(100); assert.deepEqual(f.resizes, []);
+  f.settings.onOpen(); f.flush(0); f.flush(100); assert.deepEqual(f.resizes, [[700, 560], [800, 640]]);
   f.dispose(); assert.equal(f.settings.getPopoutOptions, f.originals.options);
 }
 {
@@ -96,9 +96,26 @@ function fixture({ alreadyOpen = false, options = false, inApp = false, migrate 
   f.settings.onClose(); f.settings.onOpen(); assert.equal(f.properties.get('--simple-popup-width'), '800px'); f.dispose();
 }
 {
-  const f = fixture(); f.settings.onOpen(); const stale = [...f.timers.values()];
+  const f = fixture(); f.settings.onOpen(); f.flush(100); const stale = [...f.timers.values()];
   f.dispose(); for (const task of stale) task.fn();
   assert.equal(f.resizes.length, 1); assert.equal(f.timers.size, 0, 'unload cancels pending window sizing');
+}
+{
+  const f = fixture({ options: true });
+  const sizes = [];
+  f.settings.getPopoutWindow = () => ({ electronWindow: {
+    isDestroyed: () => false, isMaximized: () => false, isFullScreen: () => false,
+    setSize: (width, height) => sizes.push([width, height]),
+  } });
+  f.settings.getPopoutOptions(); f.settings.onOpen(); f.flush(0); f.flush(100);
+  assert.deepEqual(sizes, [[700, 560]], 'native API corrects restored size once');
+  assert.deepEqual(f.resizes, []); assert.deepEqual(f.moves, []); f.dispose();
+}
+{
+  const f = fixture({ options: true });
+  f.native.outerWidth = 700; f.native.outerHeight = 560;
+  f.settings.getPopoutOptions(); f.settings.onOpen(); f.flush(0); f.flush(100);
+  assert.deepEqual(f.resizes, [], 'correct creation size does not trigger another resize'); f.dispose();
 }
 console.log('Popup sizing: first-open sessions, native creation options, delayed migration, negative positions, close/reopen and cleanup passed.');
 

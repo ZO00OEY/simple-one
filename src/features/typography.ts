@@ -113,7 +113,7 @@ export function registerTypography(plugin: SimplePlugin): () => void {
   const documents = new Set<Document>();
   const properties = ["font-size", "line-height", "letter-spacing", "paragraph-spacing"];
   const fontStacks = { default: "", yahei: '"Microsoft YaHei", "微软雅黑", sans-serif',
-    jinkai: '"仓耳今楷01", "仓耳今楷01 W01", "TsangerJinKai01", "Microsoft YaHei", "微软雅黑", sans-serif',
+    jinkai: '"Simple One JinKai W04", "Microsoft YaHei", "微软雅黑", sans-serif',
     wenkai: '"LXGW WenKai", "LXGW WenKai TC", "LXGW WenKai GB", "LXGW WenKai Screen", "霞鹜文楷", "Microsoft YaHei", sans-serif',
     notoSerif: '"Noto Serif SC", "Source Han Serif SC", "思源宋体", serif',
     notoSans: '"Noto Sans SC", "Source Han Sans SC", "思源黑体", sans-serif' };

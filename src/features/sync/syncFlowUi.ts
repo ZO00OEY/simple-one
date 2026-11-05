@@ -71,7 +71,7 @@ export function renderDownloadTask(root: HTMLElement, engine: MobileGithub,
   info.createEl("p", { text: `已下载：${completed === undefined ? "待核对" : completed.toLocaleString() + " 个文件"} / 共 ${task.downloads.toLocaleString()} 个` });
   const commit = engine.state.pending?.commit;
   const version = info.createEl("p", { text: "目标 commit：" });
-  version.createEl("code", { text: commit ? commit.slice(0, 12) : "待核对", attr: { title: commit ?? "" } });
+  version.createEl("code", { text: commit ? commit.slice(0, 12) : "待核对", attr: { "aria-label": commit ?? "" } });
   card.createEl("p", { text: "下载及验证完成后，才会确认新的共同基准。", cls: "simple-one-sync-transfer__strategy-description" });
   if (task.reviewRequired) card.createEl("p", { text: "两端内容已变化，需要重新预览差异。已下载文件和本地新修改会保留。", cls: "simple-one-sync-transfer__error" });
   const actions = card.createDiv({ cls: "simple-one-sync-transfer__strategy-actions" });

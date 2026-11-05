@@ -778,7 +778,7 @@ function renderChecklist<T extends { checked: boolean }>(container: HTMLElement,
       item.checked = checkbox.checked;
     });
     const lines = text(item).split("\n").map((line) => line.trim()).filter(Boolean);
-    const detail = label.createDiv({ cls: "simple-attachment-detail", attr: { title: lines.join("\n") } });
+    const detail = label.createDiv({ cls: "simple-attachment-detail", attr: { "aria-label": lines.join("\n") } });
     detail.createDiv({ cls: "simple-attachment-path", text: lines[0] ?? "" });
     for (const line of lines.slice(1)) {
       detail.createDiv({ cls: "simple-attachment-subpath", text: line });
@@ -798,7 +798,7 @@ function renderRenameChecklist(container: HTMLElement, plans: RenamePlan[]): voi
 
     const detail = row.createDiv({
       cls: "simple-attachment-detail simple-rename-comparison",
-      attr: { title: `修改前：${plan.file.path}\n修改后：${plan.targetPath}` },
+      attr: { "aria-label": `修改前：${plan.file.path}\n修改后：${plan.targetPath}` },
     });
     const diff = changedPathSegments(plan.file.path, plan.targetPath);
     renderRenamePath(detail, "修改前", diff.before, false);

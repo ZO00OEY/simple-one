@@ -230,6 +230,6 @@ function createColorSwatch(color: string, rendered = false): HTMLElement {
     : "simple-color-swatch";
   swatch.style.backgroundColor = color;
   swatch.setAttribute("aria-label", `颜色预览：${color}`);
-  swatch.setAttribute("title", color);
+  swatch.setAttribute("aria-label", color);
   return swatch;
 }
