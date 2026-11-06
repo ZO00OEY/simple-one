@@ -294,7 +294,10 @@
 .simple-ai-approval-label { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
 .simple-ai-approval-segments { display: flex; min-width: 0; padding: 2px; gap: 2px; border-radius: 6px; background: var(--background-secondary); }
 .simple-ai-chat .simple-ai-approval-segments button:not(.simple-action-button) { height: 25px; padding: 3px 6px; border: 0; box-shadow: none; font-size: 11px; white-space: nowrap; background: transparent; color: var(--text-muted); }
-.simple-ai-chat .simple-ai-approval-segments button:not(.simple-action-button)[aria-pressed="true"] { background: var(--background-modifier-hover); background: color-mix(in srgb, var(--interactive-accent) 16%, var(--background-primary)); color: var(--interactive-accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 28%, transparent); }
+.simple-ai-chat .simple-ai-approval-segments button:not(.simple-action-button)[aria-pressed="true"] { background: var(--background-modifier-hover); color: var(--interactive-accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 28%, transparent); }
+@supports (background: color-mix(in srgb, red 16%, white)) {
+  .simple-ai-chat .simple-ai-approval-segments button:not(.simple-action-button)[aria-pressed="true"] { background: color-mix(in srgb, var(--interactive-accent) 16%, var(--background-primary)); }
+}
 .simple-ai-chat .simple-ai-approval-segments button:not(.simple-action-button).simple-ai-no-approval { color: var(--text-error, #d23f40); }
 
 /* Compact history drawer with one-line entries and native UI typography. */
@@ -461,7 +464,6 @@
   --simple-ai-examiner-height: 100dvh;
   width: 100vw;
   height: 100vh;
-  height: 100dvh;
   max-width: 100vw;
   max-height: 100dvh;
   margin: 0;
@@ -972,3 +974,7 @@ body.is-mobile .simple-ai-chat .simple-ai-reasoning-text > :last-child { margin-
 
 .simple-ai-editor .simple-ai-status { white-space: pre-wrap; overflow-wrap: anywhere; }
 .simple-ai-editor .simple-ai-status.is-error { color: var(--text-error); }
+
+@supports (height: 100dvh) {
+  .modal.simple-ai-config-modal.simple-ai-examiner.is-fullscreen { height: 100dvh; }
+}

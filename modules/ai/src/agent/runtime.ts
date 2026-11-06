@@ -4,7 +4,7 @@ import { NoteSearch } from "./search";
 import { estimateTextTokens, usageRecords, trafficRecord } from "./usage";
 import { requestBody } from "./protocol";
 import { memoryCursor, memoryHash, memoryText, summarizeMemory } from "./memory";
-import { Notice, TFile, TFolder } from "obsidian";
+import { Notice, TFile, TFolder, requireApiVersion } from "obsidian";
 import type SimpleAIPlugin from "../main";
 import { baseRules, skillsFor } from "./skills";
 import { memoryCandidates, newSession, newState, notePath, referencePaths, type Message, type PrivateState, type Session } from "./types";
@@ -15,7 +15,7 @@ export class AgentRuntime {
   busy = false;
   activity = "";
   pendingReply?: { sessionId: string; message: Message };
-  private replyTimer?: ReturnType<typeof setTimeout>;
+  private replyTimer?: number;
   private controller?: AbortController;
   private listeners = new Set<() => void>();
   private store?: SessionStore;
@@ -127,7 +127,9 @@ export class AgentRuntime {
     for (const m of branch.messages) { m.inherited = true; if (m.calls && !m.process) m.calls = m.calls.filter(c => results.has(c.id)); }
     const previous = this.state.active; this.state.sessions.unshift(branch); this.state.active = branch.id;
     try { await this.save(); } catch (error) { this.state.sessions = this.state.sessions.filter(item => item.id !== branch.id); this.state.active = previous; throw error; }
-    this.changed(); new Notice("已创建分支：" + branch.title, 2500).noticeEl?.addClass("simple-ai-action-notice"); return branch;
+    this.changed(); const notice = new Notice("已创建分支：" + branch.title, 2500);
+    if (requireApiVersion("1.8.7")) notice.messageEl?.addClass("simple-ai-action-notice");
+    return branch;
   }
   async retryMessage(s: Session, index: number): Promise<void> {
     if (this.busy) throw new Error("请先暂停当前任务。");
@@ -248,7 +250,7 @@ export class AgentRuntime {
     const onUpdate = withTools && s ? (partial: { text: string; reasoning: string }) => {
       if (this.controller?.signal.aborted || this.pendingReply?.sessionId !== s.id) return;
       this.pendingReply.message.text = partial.text; this.pendingReply.message.reasoning = partial.reasoning;
-      if (!this.replyTimer) this.replyTimer = setTimeout(() => { this.replyTimer = undefined; this.changed(); }, 50);
+      if (!this.replyTimer) this.replyTimer = window.setTimeout(() => { this.replyTimer = undefined; this.changed(); }, 50);
     } : undefined;
     return this.plugin.cooperation ? this.plugin.cooperation.request("main", { sourceId: source.id, modelId: model }, system, messages, tools, this.controller?.signal, { session: s, taskId: this.currentTaskId, stage: withTools ? "聊天与工具规划" : "图片读取或上下文压缩", onUpdate, maxOutputTokens }) : this.plugin.client.chat(source, this.plugin.getRequestKey(source.id), model, system, messages, tools, this.controller?.signal, onUpdate, maxOutputTokens);
   }
@@ -369,7 +371,7 @@ export class AgentRuntime {
       this.closePendingCalls(s); s.updated = Date.now(); this.lastInteraction = Date.now(); s.revision++;
       try { await this.save(); } catch { s.problem += " 会话保存失败，当前记录仍在内存中，请勿关闭插件。"; }
       this.busy = false; this.activity = ""; this.controller = undefined;
-      if (this.replyTimer) clearTimeout(this.replyTimer); this.replyTimer = undefined; this.pendingReply = undefined;
+      if (this.replyTimer) window.clearTimeout(this.replyTimer); this.replyTimer = undefined; this.pendingReply = undefined;
       this.currentTaskId = undefined;
       this.changed();
     }
@@ -489,8 +491,8 @@ export class AgentRuntime {
       guardMemory();
       const wait = Math.max(0, this.lastMemoryRequest + cfg.requestGapSeconds * 1000 - Date.now());
       if (wait) await new Promise<void>((resolve, reject) => {
-        const abort = () => { clearTimeout(timer); reject(new Error("记忆整理已暂停，空闲后再继续。")); };
-        const timer = setTimeout(() => { controller.signal.removeEventListener("abort", abort); resolve(); }, wait);
+        const abort = () => { window.clearTimeout(timer); reject(new Error("记忆整理已暂停，空闲后再继续。")); };
+        const timer = window.setTimeout(() => { controller.signal.removeEventListener("abort", abort); resolve(); }, wait);
         controller.signal.addEventListener("abort", abort, { once: true });
       });
       guardMemory();

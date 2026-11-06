@@ -1,3 +1,4 @@
+import { isRecord, record } from "../agent/json";
 import type { ApiSource } from "./types";
 import type { Message, Tool } from "../agent/types";
 import { requestBody, parseResponse } from "../agent/protocol";
@@ -80,7 +81,7 @@ export class ApiClient {
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) controller.abort();
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 120000);
+    const timer = window.setTimeout(() => { timedOut = true; controller.abort(); }, 120000);
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "text/event-stream" };
@@ -109,44 +110,45 @@ export class ApiClient {
       }
       stream.push(decoder.decode()); return stream.finish();
     } catch (error) {
-      const message = timedOut ? "等待流式回复超时，请稍后重试。" : signal?.aborted ? "已停止，流式回复未执行工具。" : error instanceof TypeError ? "流式连接失败，可能是网络或来源跨域限制。可在此来源设置中关闭“流式回复”后重试。" : safeError(error, key);
+      const message = timedOut ? "等待流式回复超时，请稍后重试。" : signal?.aborted ? "已停止，流式回复未执行工具。" : error instanceof TypeError ? "流式连接失败，可能是网络或来源的 CORS 限制。请检查来源跨域配置，也可先用来源的非流式连接测试核对地址和密钥；本次不会自动重试。" : safeError(error, key);
       throw new Error(safeError(new Error(message), key));
     } finally {
-      clearTimeout(timer); signal?.removeEventListener("abort", abort);
-      try { await reader?.cancel(); } catch {}
+      window.clearTimeout(timer); signal?.removeEventListener("abort", abort);
+      await reader?.cancel().catch(() => undefined);
       reader?.releaseLock();
     }
   }
-  private async request(source: ApiSource, key: string, url: string, body?: unknown, timeout = this.timeoutMs): Promise<Record<string, any>> {
+  private async request(source: ApiSource, key: string, url: string, body?: unknown, timeout = this.timeoutMs): Promise<Record<string, unknown>> {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (source.protocol === "anthropic") {
       headers["anthropic-version"] = "2023-06-01";
       if (key) headers["x-api-key"] = key;
     } else if (key) headers.Authorization = `Bearer ${key}`;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timer: number | undefined;
     try {
       const response = await Promise.race([
         this.transport({ url, headers, method: body ? "POST" : "GET", ...(body ? { body: JSON.stringify(body) } : {}) }),
-        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("等待响应超时。请求可能仍在服务端处理，请稍后再试。")), timeout); }),
+        new Promise<never>((_, reject) => { timer = window.setTimeout(() => reject(new Error("等待响应超时。请求可能仍在服务端处理，请稍后再试。")), timeout); }),
       ]);
       return this.decode(response);
     } catch (error) { throw new Error(safeError(error, key)); }
-    finally { if (timer) clearTimeout(timer); }
+    finally { if (timer) window.clearTimeout(timer); }
   }
-  private decode(response: HttpResponse): Record<string, any> {
-      let data: any;
+  private decode(response: HttpResponse): Record<string, unknown> {
+      let data: unknown;
       if (response.status >= 200 && response.status < 300 && !response.text.trim()) throw new Error("接口返回为空，请检查地址或服务状态。");
       try { data = JSON.parse(response.text); } catch {
         if (response.status >= 200 && response.status < 300) throw new Error(`HTTP ${response.status}：响应不是 JSON，请检查请求地址。`);
       }
-      if (response.status < 200 || response.status >= 300 || data?.error) {
-        const detail = typeof data?.error?.message === "string" ? data.error.message : typeof data?.message === "string" ? data.message : typeof data?.error === "string" ? data.error : !data ? response.text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim() : "请检查地址、密钥及模型权限。";
+      const value = record(data), error = record(value.error);
+      if (response.status < 200 || response.status >= 300 || value.error) {
+        const detail = typeof error.message === "string" ? error.message : typeof value.message === "string" ? value.message : typeof value.error === "string" ? value.error : !data ? response.text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim() : "请检查地址、密钥及模型权限。";
         const hint = response.status === 503 ? /(?:error(?:\s+code)?\s*[:：]?\s*1102\b|Worker exceeded resource limits)/i.test(detail)
           ? "上游网关返回 Cloudflare 1102（Worker 资源超限）。请稍后重试或切换来源；持续出现时需要服务提供方排查。"
           : "上游服务暂时不可用，请稍后重试或切换来源。" : response.status === 401 ? "认证失败，请检查 API 密钥。" : response.status === 403 ? "访问被拒绝，请检查密钥权限或服务商限制。" : response.status === 404 ? "接口地址不存在，请检查地址和路径。" : response.status === 429 ? "请求受限或额度不足，请稍后重试或检查账户。" : "";
         throw new Error(`HTTP ${response.status}：${hint}${hint && detail ? "\n原始错误：" : ""}${detail}`);
       }
-      if (!data || typeof data !== "object") throw new Error("接口返回了无效数据。");
+      if (!isRecord(data)) throw new Error("接口返回了无效数据。");
       return data;
   }
   async listModels(source: ApiSource, key: string): Promise<string[]> {
@@ -157,12 +159,13 @@ export class ApiClient {
     for (let page = 0; page < 50; page++) {
       const data = await this.request(source, key, url);
       if (!Array.isArray(data.data)) throw new Error("模型列表格式不兼容；可以手动填写模型名称。");
-      for (const model of data.data) if (typeof model?.id === "string" && model.id.trim()) ids.add(model.id.trim());
+      const models: unknown[] = data.data;
+      for (const model of models) { const id = record(model).id; if (typeof id === "string" && id.trim()) ids.add(id.trim()); }
       if (!data.has_more) {
         if (!ids.size) throw new Error("模型列表为空，接口没有返回可用模型；可手动添加模型。");
         return [...ids].sort((a, b) => a.localeCompare(b));
       }
-      const cursor = data.last_id ?? data.data[data.data.length - 1]?.id;
+      const cursor = data.last_id ?? record(data.data[data.data.length - 1]).id;
       if (typeof cursor !== "string" || !cursor || cursors.has(cursor)) throw new Error("模型分页未正确推进，请检查服务商接口或手动添加。");
       cursors.add(cursor);
       const next = new URL(base);
@@ -181,10 +184,10 @@ export class ApiClient {
     let reply: string;
     if (source.protocol === "anthropic") {
       if (!Array.isArray(data.content)) throw new Error("返回格式不是 Anthropic Messages 响应。");
-      reply = data.content.filter((part: any) => part.type === "text" && typeof part.text === "string").map((part: any) => part.text).join("\n");
+      reply = data.content.map(part => record(part)).filter(part => part.type === "text" && typeof part.text === "string").map(part => part.text).join("\n");
     } else {
-      const message = data.choices?.[0]?.message;
-      if (!message || typeof message !== "object") throw new Error("返回格式不是 OpenAI Chat Completions 响应。");
+      const message = record(Array.isArray(data.choices) ? data.choices[0] : undefined).message;
+      if (!isRecord(message)) throw new Error("返回格式不是 OpenAI Chat Completions 响应。");
       reply = typeof message.content === "string" ? message.content : "";
     }
     return { reply: reply.slice(0, 1200) || "接口已返回有效响应，但没有文本内容（可能达到输出上限）。", ms: Date.now() - start };

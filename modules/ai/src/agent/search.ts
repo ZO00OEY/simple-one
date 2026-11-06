@@ -22,11 +22,13 @@ export class NoteSearch {
     return body;
   }
   async search(session: Session, args: Record<string, unknown>, stopped: () => boolean) {
+    if (args.folder != null && typeof args.folder !== "string") throw new Error("搜索目录必须是字符串。");
+    const folder = typeof args.folder === "string" ? args.folder : "";
     const query = String(args.query ?? "").trim().toLowerCase();
     if (!query && !args.modifiedDays && !args.createdDays) throw new Error("请提供关键词，或最近创建/修改天数。");
     const terms = query.split(/\s+/).filter(Boolean); const now = Date.now();
     const files = this.app.vault.getMarkdownFiles().filter(f => !f.path.split("/").some(p => p.startsWith(".")) && inScope(session, f.path)
-      && (!args.folder || f.path.startsWith(args.folder + "/"))
+      && (!folder || f.path.startsWith(folder + "/"))
       && (!args.modifiedDays || now - f.stat.mtime <= Number(args.modifiedDays) * 86400000)
       && (!args.createdDays || now - f.stat.ctime <= Number(args.createdDays) * 86400000));
     const results: { path: string; excerpt: string; score: number; modified: number; created: number }[] = [];
@@ -48,7 +50,7 @@ export class NoteSearch {
       score += terms.filter(t => lower.includes(t)).length;
       const index = Math.max(0, lower.indexOf(terms[0] ?? "") - 60);
       results.push({ path: file.path, excerpt: body.slice(index, index + 240), score, modified: file.stat.mtime, created: file.stat.ctime });
-      if (scanned % 50 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+      if (scanned % 50 === 0) await new Promise(resolve => window.setTimeout(resolve, 0));
     }
     results.sort((a, b) => b.score - a.score || b.modified - a.modified || a.path.localeCompare(b.path));
     const offset = Math.min(Number(args.offset) || 0, results.length);

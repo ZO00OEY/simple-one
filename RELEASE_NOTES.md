@@ -1,3 +1,13 @@
+# Simple One 1.0.34
+
+- 校验 AI 流式事件的索引、块类型和增量字段，阻止畸形来源事件写入数组继承属性。
+- 对 API/流式 JSON、工具提案和搜索目录补齐结构校验，保留合法来源响应与取消行为。
+- 改善窗口计时器、跨窗口 DOM 检查、设置导航及旧版 Notice 兼容；保留 IME 和旧 WebView 回退。
+- 保留流式 fetch，不自动重发付费请求；修正 CORS 错误中已退休设置的提示。
+- 同一配置下本地 lint 警告从 421 降至 144；仍有未处理建议，未声称全部清零。最低 Obsidian 保持 1.7.2，AI 密钥存储仍要求 1.11.4+。
+
+English: validate SSE indices and content blocks to prevent inherited-array property writes from malformed provider events; validate API JSON and tool proposals; improve window compatibility and settings navigation. Valid streaming, cancellation, IME and old-WebView fallbacks remain supported. No code-execution or data-exfiltration exploit was established. Local lint warnings decrease from 421 to 144 under unchanged rules; remaining warnings are documented. Community review for this release is not yet confirmed.
+
 # Simple One 1.0.33
 
 - 修复 AI 设置标题和消息编辑框样式的社区审核错误。

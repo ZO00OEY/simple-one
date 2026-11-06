@@ -319,7 +319,7 @@ export class ApiSettingsTab extends PluginSettingTab {
     el.classList.toggle("simple-ai-settings-overview", this.page === "overview");
     if (this.page === "traffic") {
       const heading = el.createDiv("simple-ai-library-header").createDiv("simple-ai-library-heading");
-      new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = "overview"; this.display(); });
+      new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = "overview"; this.render(); });
       new Setting(heading).setName("Token 用量统计").setHeading().setClass("simple-ai-page-heading");
       trafficSettingsPage(el.createDiv(), this.plugin);
       return;
@@ -328,15 +328,15 @@ export class ApiSettingsTab extends PluginSettingTab {
     if (this.page === "auxiliary") {
       const header = el.createDiv("simple-ai-library-header");
       const heading = header.createDiv("simple-ai-library-heading");
-      new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = "overview"; this.display(); });
+      new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = "overview"; this.render(); });
       new Setting(heading).setName("子 Agent").setHeading().setClass("simple-ai-page-heading");
-      auxiliarySettings(settingsSection(el, "子 Agent 配置"), this.plugin, () => this.display());
+      auxiliarySettings(settingsSection(el, "子 Agent 配置"), this.plugin, () => this.render());
       return;
     }
     if (this.page === "auxiliaryAssessment") {
       const header = el.createDiv("simple-ai-library-header");
       const heading = header.createDiv("simple-ai-library-heading");
-      new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回模型考核").onClick(() => { this.page = "examiner"; this.display(); });
+      new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回模型考核").onClick(() => { this.page = "examiner"; this.render(); });
       new Setting(heading).setName("考核子 Agent工作成果").setHeading().setClass("simple-ai-page-heading");
       this.stopAgentStatus = auxiliaryAssessmentPage(el.createDiv("simple-ai-examiner-settings"), this.plugin);
       return;
@@ -344,29 +344,29 @@ export class ApiSettingsTab extends PluginSettingTab {
     if (this.page === "examiner") {
       const header = el.createDiv("simple-ai-library-header");
       const heading = header.createDiv("simple-ai-library-heading");
-      new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = "overview"; this.display(); });
+      new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = "overview"; this.render(); });
       new Setting(heading).setName("模型考核").setHeading().setClass("simple-ai-page-heading");
-      modelSettings(el.createDiv(), this.plugin, page => { this.page = page; this.display(); }, "examiner");
+      modelSettings(el.createDiv(), this.plugin, page => { this.page = page; this.render(); }, "examiner");
       return;
     }
     if (this.page === "skills" || this.page === "memory" || this.page === "rules" || this.page === "compression") {
       const header = el.createDiv("simple-ai-library-header");
       const heading = header.createDiv("simple-ai-library-heading");
       const parent = "overview" as const;
-      new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = parent; this.display(); });
+      new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = parent; this.render(); });
       new Setting(heading).setName({ skills: "技能库", memory: "自动记忆", rules: "模型共用提示词", compression: "自动压缩设置" }[this.page]).setHeading().setClass("simple-ai-page-heading");
       this.stopAgentStatus = agentSettingsPage(el.createDiv(), this.plugin, this.page, this.page === "memory"
-        ? parent => modelSettings(parent, this.plugin, page => { this.page = page; this.display(); }, "memory")
+        ? parent => modelSettings(parent, this.plugin, page => { this.page = page; this.render(); }, "memory")
         : undefined);
       return;
     }
     const models = settingsSection(el, "模型管理");
     settingsNavigation(new Setting(models).setName(`API 来源 · ${this.plugin.settings.sources.length} 个来源 · ${this.plugin.settings.sources.reduce((count, source) => count + source.models.length, 0)} 个模型`),
-      () => { this.page = "sources"; this.display(); });
-    modelSettings(models.createDiv(), this.plugin, page => { this.page = page; this.display(); });
-    settingsNavigation(new Setting(models).setName("子 Agent"), () => { this.page = "auxiliary"; this.display(); });
+      () => { this.page = "sources"; this.render(); });
+    modelSettings(models.createDiv(), this.plugin, page => { this.page = page; this.render(); });
+    settingsNavigation(new Setting(models).setName("子 Agent"), () => { this.page = "auxiliary"; this.render(); });
     const assistant = settingsSection(el, "助手设置");
-    agentSettings(assistant, this.plugin, page => { this.page = page; this.display(); });
+    agentSettings(assistant, this.plugin, page => { this.page = page; this.render(); });
     let choice: "enter" | "shift-enter" = this.plugin.settings.sendShortcut === "shift-enter" ? "shift-enter" : "enter";
     const shortcut = new Setting(assistant).setName("快捷发送").setClass("simple-ai-send-shortcut-setting");
     shortcut.addToggle(t => settingsCheckbox(t).setValue(this.plugin.settings.sendShortcut !== "off").onChange(async enabled => {
@@ -388,15 +388,15 @@ export class ApiSettingsTab extends PluginSettingTab {
       for (const [page, name, description] of [
         ["memory", "自动记忆", "提取工作习惯，生成记忆文件。"],
         ["examiner", "模型考核", "评估模型表现和工作成果。"],
-      ] as const) settingsNavigation(new Setting(group).setName(name).setDesc(description), () => { this.page = page; this.display(); });
+      ] as const) settingsNavigation(new Setting(group).setName(name).setDesc(description), () => { this.page = page; this.render(); });
       const compression = settingsSection(el, "上下文压缩");
-      settingsNavigation(new Setting(compression).setName("自动压缩设置").setDesc("触发点、压缩目标与自定义提示词。"), () => { this.page = "compression"; this.display(); });
+      settingsNavigation(new Setting(compression).setName("自动压缩设置").setDesc("触发点、压缩目标与自定义提示词。"), () => { this.page = "compression"; this.render(); });
       this.displayCacheSettings(el);
       this.displayUsageSettings(el);
   }
   private displayUsageSettings(el: HTMLElement): void {
     const group = settingsSection(el, "用量统计");
-    settingsNavigation(new Setting(group).setName("Token 用量统计").setDesc("查看模型调用及累计 Token 用量。"), () => { this.page = "traffic"; this.display(); });
+    settingsNavigation(new Setting(group).setName("Token 用量统计").setDesc("查看模型调用及累计 Token 用量。"), () => { this.page = "traffic"; this.render(); });
   }
   private displayCacheSettings(el: HTMLElement, existingGroup?: HTMLElement): void {
     const group = existingGroup ?? settingsSection(el, "缓存维护");
@@ -433,18 +433,18 @@ export class ApiSettingsTab extends PluginSettingTab {
   private displaySources(el: HTMLElement): void {
     const header = el.createDiv("simple-ai-library-header");
     const heading = header.createDiv("simple-ai-library-heading");
-    new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = "overview"; this.display(); });
+    new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = "overview"; this.render(); });
     new Setting(heading).setName("API 来源").setHeading().setClass("simple-ai-page-heading");
     const group = settingsSection(el, "来源管理");
     if (!this.plugin.settings.sources.length) group.createEl("p", { text: "添加一个来源，再选择或手动填写模型。", cls: "simple-ai-hint" });
     for (const source of this.plugin.settings.sources) {
       const row = new Setting(group).setName(source.name).setClass("simple-ai-source-row");
       row.nameEl.createSpan({ cls: "simple-ai-source-summary", text: " · " + (source.protocol === "openai" ? "OpenAI" : "Anthropic") + " 兼容 · " + source.models.length + " 个模型" });
-      row.addButton(button => button.setIcon("settings").setTooltip("管理来源").onClick(() => new SourceEditor(this.plugin, source, () => this.display()).open()));
+      row.addButton(button => button.setIcon("settings").setTooltip("管理来源").onClick(() => new SourceEditor(this.plugin, source, () => this.render()).open()));
     }
     const actions = group.createDiv("simple-ai-source-add");
     new ButtonComponent(actions).setIcon("plus").setTooltip("添加来源")
-      .onClick(() => new SourceEditor(this.plugin, newSource(), () => this.display()).open());
+      .onClick(() => new SourceEditor(this.plugin, newSource(), () => this.render()).open());
   }
 }
 

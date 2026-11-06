@@ -5,7 +5,8 @@ import { build } from 'esbuild';
 class TFile { constructor(path) { this.path = path; this.name = path.split('/').at(-1); this.extension = path.split('.').at(-1); this.stat = { mtime: 1 }; } }
 class TFolder { constructor(path) { this.path = path; this.name = path.split('/').at(-1); this.children = []; } }
 const code = await build({ stdin: { contents: `export * from './src/agent/cooperation'; export * from './src/agent/history'; export * from './src/agent/layout'; export * from './src/agent/types'; export * from './src/agent/protocol'; export * from './src/agent/tools'; export * from './src/agent/runtime'; export * from './src/agent/memory';`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'cjs', platform: 'browser', external: ['obsidian'] });
-const ctx = vm.createContext({ module: { exports: {} }, require: () => ({ TFile, TFolder, Notice: class {} }), crypto: webcrypto, TextEncoder, AbortController, setTimeout, clearTimeout, document: { hidden: false }, console });
+const ctx = vm.createContext({ module: { exports: {} }, require: () => ({ TFile, TFolder, Notice: class {}, requireApiVersion: () => false }), crypto: webcrypto, TextEncoder, AbortController, setTimeout, clearTimeout, document: { hidden: false }, console });
+ctx.window = ctx;
 vm.runInContext(code.outputFiles[0].text, ctx);
 const { historyGroups, bottomOverlap, viewportBottomOverlap, notePath, agentDefaults, newSession, memoryCandidates, matchesReferenceRule, referencePaths, requestBody, parseResponse, VaultTools, undoChange, AgentRuntime } = ctx.module.exports;
 const { memoryText, memoryCursor, memoryHash, summarizeMemory } = ctx.module.exports;
@@ -1368,4 +1369,16 @@ await check('Manual work preferences can be disabled without losing their text',
   context = await e.runtime.context(e.s);
   assert.ok(!JSON.stringify(context).includes('UNIQUE_MANUAL_PREFERENCE'));
   assert.equal(e.cfg.instructions, 'UNIQUE_MANUAL_PREFERENCE');
+});
+
+await check('Malformed change proposals and search folders fail without mutating notes', async () => {
+  const e=env();
+  for (const item of [null, {name:'create_note',arguments:[]}, {name:{invalid:true},arguments:{}}, {name:'create_note',arguments:null}]) {
+    await assert.rejects(e.tools.execute(call('propose_changes',{items:[item]})));
+    assert.equal(e.session.changes.length,0);
+    assert.equal(e.text.get('Notes/a.md'),'alpha original');
+  }
+  const before=[...e.files.keys()];
+  await assert.rejects(e.tools.execute(call('search_notes',{query:'alpha',folder:{invalid:true}})), /字符串/);
+  assert.deepEqual([...e.files.keys()],before);
 });

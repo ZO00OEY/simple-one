@@ -14,8 +14,8 @@ export function trafficSettingsPage(el: HTMLElement, plugin: SimpleAIPlugin): vo
     const value = (sum: number, missing: number, requests: number) => missing === requests ? "未提供" : `${sum.toLocaleString("zh-CN")}${missing ? `（另有 ${missing} 次未提供）` : ""}`;
     for (const model of modelUsage(records)) {
       const row = parent.createDiv("simple-ai-traffic-model");
-      row.createEl("div", { cls: "simple-ai-traffic-model-name", text: model.modelId });
-      row.createEl("div", { cls: "simple-ai-traffic-meta", text: model.sourceName });
+      row.createDiv({ cls: "simple-ai-traffic-model-name", text: model.modelId });
+      row.createDiv({ cls: "simple-ai-traffic-meta", text: model.sourceName });
       const metrics = row.createDiv("simple-ai-traffic-metrics");
       for (const [label, amount] of [["请求次数", String(model.requests)], ["输入 Token", value(model.input, model.missingInput, model.requests)], ["输出 Token", value(model.output, model.missingOutput, model.requests)]]) {
         const metric = metrics.createDiv("simple-ai-traffic-metric");

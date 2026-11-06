@@ -48,7 +48,7 @@ export class ChatView extends ItemView {
   private tokenPreview!: HTMLElement;
   private tokenPreviewKey = "";
   private tokenPreviewVersion = 0;
-  private tokenPreviewTimer?: ReturnType<typeof setTimeout>;
+  private tokenPreviewTimer?: number;
   private header!: HTMLElement;
   private attachments!: HTMLElement;
   private model!: ButtonComponent;
@@ -69,7 +69,7 @@ export class ChatView extends ItemView {
   private selectionBar!: HTMLElement;
   private selectionFooter!: HTMLElement;
   private searchVersion = 0;
-  private searchTimer?: ReturnType<typeof setTimeout>;
+  private searchTimer?: number;
   private cleanupLayout?: () => void;
   private shownId = "";
   private rendered = "";
@@ -82,7 +82,7 @@ export class ChatView extends ItemView {
   private toolResults = new Map<string, { summary: HTMLElement; content: HTMLElement; name: string }>();
   private processes = new Map<string, { details: HTMLElement; requests: HTMLElement }>();
   private pendingCard?: { row: HTMLElement; label: HTMLElement; status: HTMLElement; text: HTMLElement; value: string; version: number; owner?: Component };
-  private timer?: ReturnType<typeof setTimeout>;
+  private timer?: number;
   constructor(leaf: WorkspaceLeaf, private plugin: SimpleAIPlugin) { super(leaf); }
   getViewType(): string { return CHAT_VIEW; }
   getDisplayText(): string { return "AI"; }
@@ -124,7 +124,7 @@ export class ChatView extends ItemView {
     this.setupComposerResize(compose);
     this.composer.onfocus = () => this.scheduleTokenPreview();
     this.composer.onblur = () => this.scheduleTokenPreview();
-    this.composer.oninput = () => { this.plugin.runtime.active.draft = this.composer.value; this.refresh(); if (this.timer) clearTimeout(this.timer); this.timer = setTimeout(() => { void this.persist(); }, 400); };
+    this.composer.oninput = () => { this.plugin.runtime.active.draft = this.composer.value; this.refresh(); if (this.timer) window.clearTimeout(this.timer); this.timer = window.setTimeout(() => { void this.persist(); }, 400); };
     this.composer.onkeydown = e => {
       if (e.key !== "Enter" || e.isComposing || e.keyCode === 229 || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
       const shortcut = this.plugin.settings.sendShortcut ?? "off";
@@ -243,8 +243,8 @@ export class ChatView extends ItemView {
     const modelLabel = source && model ? label(source, model, this.plugin.settings.showSourceName && this.plugin.settings.sources.filter(source => source.models.length).length > 1) : "选择模型";
     this.modelText.setText(Array.from(modelLabel).length > 30 ? Array.from(modelLabel).slice(0, 30).join("") + "…" : modelLabel); this.model.setTooltip(modelLabel); this.model.buttonEl.setAttribute("aria-label", "选择模型：" + modelLabel);
     this.attachments.empty();
-    s.images.forEach((image, index) => new ButtonComponent(this.attachments).setButtonText(`${image.name} ×`).setTooltip("移除图片").onClick(() => { s.images.splice(index, 1); void this.persist(); this.refresh(); }));
-    (s.files ?? []).forEach((file, index) => new ButtonComponent(this.attachments).setButtonText(file.name + " ×").setTooltip("移除文件").onClick(() => { s.files?.splice(index, 1); void this.persist(); this.refresh(); }));
+    s.images.forEach((image, index) => { new ButtonComponent(this.attachments).setButtonText(`${image.name} ×`).setTooltip("移除图片").onClick(() => { s.images.splice(index, 1); void this.persist(); this.refresh(); }); });
+    (s.files ?? []).forEach((file, index) => { new ButtonComponent(this.attachments).setButtonText(file.name + " ×").setTooltip("移除文件").onClick(() => { s.files?.splice(index, 1); void this.persist(); this.refresh(); }); });
     const availableSkills = skillsFor(this.plugin.settings.agent);
     for (const id of s.draftSkills ?? []) new ButtonComponent(this.attachments).setButtonText("@" + (availableSkills.find(skill => skill.id === id)?.name ?? id) + " ×").setTooltip("移除本次技能").onClick(() => { s.draftSkills = s.draftSkills?.filter(x => x !== id); void this.persist(); this.refresh(); });
     const reset = this.rendered !== s.id || this.renderedMessages !== s.messages || s.messages.length < this.renderedCount;
@@ -427,7 +427,7 @@ export class ChatView extends ItemView {
     this.updateProcesses(s);
     this.updatePending(s);
     this.mergeReplyRows(s);
-    if (nearBottom || sessionChanged) requestAnimationFrame(() => { if (this.plugin.runtime.active === s) this.body.scrollTop = this.body.scrollHeight; });
+    if (nearBottom || sessionChanged) window.requestAnimationFrame(() => { if (this.plugin.runtime.active === s) this.body.scrollTop = this.body.scrollHeight; });
     this.lastRenderedSession = s.id;
     this.updateScrollToLatest();
   }
@@ -466,7 +466,7 @@ export class ChatView extends ItemView {
       const separator = row.querySelector<HTMLElement>(":scope > .simple-ai-reply-separator");
       if (!separator) continue;
       let metadata = row.querySelector<HTMLElement>(":scope > .simple-ai-reply-metadata");
-      if (!metadata) { metadata = document.createElement("div"); metadata.className = "simple-ai-reply-metadata"; separator.after(metadata); }
+      if (!metadata) { metadata = createDiv(); metadata.className = "simple-ai-reply-metadata"; separator.after(metadata); }
       const index = Number(row.dataset.messageIndex); let start = index;
       while (start > 0 && !(session.messages[start].role === "user" && !session.messages[start].generated && !session.messages[start].process)) start--;
       const messages = session.messages.slice(start, index + 1);
@@ -488,17 +488,17 @@ export class ChatView extends ItemView {
     this.tokenPreview.hidden = editing;
     if (editing) {
       this.tokenPreviewKey = ""; this.tokenPreviewVersion++;
-      if (this.tokenPreviewTimer) { clearTimeout(this.tokenPreviewTimer); this.tokenPreviewTimer = undefined; }
+      if (this.tokenPreviewTimer) { window.clearTimeout(this.tokenPreviewTimer); this.tokenPreviewTimer = undefined; }
       return;
     }
     const key = JSON.stringify([r.busy, s.id, s.revision, s.status, s.contextStart, s.summary, s.draft, s.images.map(i => [i.id, i.name, i.summary]), s.files?.map(f => [f.name, f.text.length]), s.draftSkills, s.references, s.folders, s.permission, s.selected, this.plugin.settings.selected, this.plugin.settings.sources.map(source => [source.id, source.protocol, source.models.map(model => model.id)]), this.plugin.settings.agent]);
     if (key === this.tokenPreviewKey) return;
     this.tokenPreviewKey = key;
     const version = ++this.tokenPreviewVersion;
-    if (this.tokenPreviewTimer) clearTimeout(this.tokenPreviewTimer);
+    if (this.tokenPreviewTimer) window.clearTimeout(this.tokenPreviewTimer);
     if (r.busy) { this.tokenPreview.setText("下次输入：任务结束后更新"); return; }
     this.tokenPreview.setText("正在估算下次输入…");
-    this.tokenPreviewTimer = setTimeout(() => {
+    this.tokenPreviewTimer = window.setTimeout(() => {
       this.tokenPreviewTimer = undefined;
       void r.estimateNextInput(s).then(result => {
         if (version !== this.tokenPreviewVersion || r.active !== s || r.busy) return;
@@ -543,7 +543,7 @@ export class ChatView extends ItemView {
       card.value = message.text;
       const value = message.text, version = ++card.version;
       const owner = new Component(); owner.load();
-      const rendered = document.createElement("div");
+      const rendered = createDiv();
       void MarkdownRenderer.render(this.app, prepareChatMarkdown(value), rendered, "", owner).catch(() => rendered.setText(value)).then(() => {
         if (this.pendingCard !== card || !card.row.isConnected || version !== card.version) { owner.unload(); return; }
         card.owner?.unload(); card.owner = owner;
@@ -590,7 +590,7 @@ export class ChatView extends ItemView {
   private foldUserMessage(text: HTMLElement, owner: Component): void {
     let expanded = false;
     let collapsible = false;
-    const more = document.createElement("button");
+    const more = createEl("button");
     more.type = "button"; more.className = "simple-ai-message-show-more"; more.hidden = true;
     const actions = text.parentElement?.querySelector<HTMLElement>(":scope > .simple-ai-message-actions");
     if (actions) actions.prepend(more);
@@ -634,7 +634,7 @@ export class ChatView extends ItemView {
     let process = this.processes.get(taskId);
     if (!process) {
       // Keep work records off the transcript; the details icon opens them.
-      const details = document.createElement("div"); details.className = "simple-ai-work-process";
+      const details = createDiv(); details.className = "simple-ai-work-process";
       const requests = details.createDiv("simple-ai-work-requests");
       process = { details, requests }; this.processes.set(taskId, process);
     }
@@ -684,7 +684,7 @@ export class ChatView extends ItemView {
         }
       }
       const unmatched = operations.filter(node => !requestRecords.some(record => record.id === node.dataset.recordId));
-      unmatched.push(...Array.from(process.details.children).filter((node): node is HTMLElement => node instanceof HTMLElement && node !== process.requests));
+      unmatched.push(...Array.from(process.details.children).filter((node): node is HTMLElement => node.instanceOf(HTMLElement) && node !== process.requests));
       if (unmatched.length) {
         const legacy = process.requests.createEl("details", { cls: "simple-ai-request" });
         legacy.createEl("summary", { text: "其他操作记录" });
@@ -812,7 +812,7 @@ export class ChatView extends ItemView {
     this.drawer.setAttribute("role", "region"); this.drawer.setAttribute("aria-label", "会话与笔记列表");
     const heading = this.drawer.createDiv("simple-ai-drawer-heading");
     this.drawerSearch = heading.createEl("input", { type: "search", placeholder: "搜索会话标题或聊天内容", attr: { "aria-label": "搜索会话或笔记" } });
-    this.drawerSearch.oninput = () => { this.searchVersion++; if (this.searchTimer) clearTimeout(this.searchTimer); this.searchTimer = setTimeout(() => { void this.renderDrawer(); }, 250); };
+    this.drawerSearch.oninput = () => { this.searchVersion++; if (this.searchTimer) window.clearTimeout(this.searchTimer); this.searchTimer = window.setTimeout(() => { void this.renderDrawer(); }, 250); };
     this.iconButton(heading, "panel-left-close", "收起列表", () => this.toggleDrawer(false));
     const tabs = this.drawer.createDiv("simple-ai-history-tabs");
     for (const [value, text] of [["sessions", "会话历史"], ["archived", "已归档"]] as const) new ButtonComponent(tabs).setButtonText(text).onClick(() => {
@@ -944,11 +944,11 @@ export class ChatView extends ItemView {
     this.cleanupLayout = () => { closed = true; for (const timer of focusTimers) win.clearTimeout(timer); if (frame) win.cancelAnimationFrame(frame); resize.disconnect(); mutations.disconnect(); win.removeEventListener("resize", schedule); win.visualViewport?.removeEventListener("resize", schedule); win.visualViewport?.removeEventListener("scroll", schedule); };
   }
   async onClose(): Promise<void> {
-    this.tokenPreviewVersion++; if (this.tokenPreviewTimer) clearTimeout(this.tokenPreviewTimer);
+    this.tokenPreviewVersion++; if (this.tokenPreviewTimer) window.clearTimeout(this.tokenPreviewTimer);
     this.pendingCard?.owner?.unload(); this.pendingCard = undefined; this.processes.clear();
     this.toolResults.clear();
-    this.modelPopover?.close(); this.cleanupLayout?.(); this.searchVersion++; this.drawerOpen = false; if (this.searchTimer) clearTimeout(this.searchTimer);
-    this.messageComponents.forEach(c => c.unload()); this.messageComponents = []; this.unsubscribe?.(); if (this.timer) clearTimeout(this.timer); await this.persist();
+    this.modelPopover?.close(); this.cleanupLayout?.(); this.searchVersion++; this.drawerOpen = false; if (this.searchTimer) window.clearTimeout(this.searchTimer);
+    this.messageComponents.forEach(c => c.unload()); this.messageComponents = []; this.unsubscribe?.(); if (this.timer) window.clearTimeout(this.timer); await this.persist();
   }
 }
 class ChangesModal extends Modal {

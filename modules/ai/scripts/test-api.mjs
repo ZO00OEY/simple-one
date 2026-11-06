@@ -1,6 +1,8 @@
 import { build } from "esbuild";
 import assert from "node:assert/strict";
 
+globalThis.window = globalThis;
+
 async function moduleAt(path) {
   const result = await build({ entryPoints: [path], bundle: true, write: false, format: "esm", platform: "browser", target: "es2020" });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].contents).toString("base64")}`);
@@ -190,5 +192,37 @@ await check("Streaming handles ordinary JSON, legacy preferences, gateway failur
     controller.abort(); return new Response(new ReadableStream({start(c){c.enqueue(new TextEncoder().encode(sse({choices:[{delta:{content:'late'},finish_reason:'stop'}]})));c.close();}}),{headers:{'content-type':'text/event-stream'}});
   });
   await assert.rejects(aborted.chat(source,'','m','',[],[],controller.signal,()=>previews++),/已停止/); assert.equal(previews,0);
+});
+
+await check("Malformed JSON shapes fail before any tool call is returned", async () => {
+  const { parseResponse } = await moduleAt("src/agent/protocol.ts");
+  for (const data of [null, [], {choices:[{message:{content:"text",tool_calls:{bad:true}}}]}, {choices:[{message:{tool_calls:[{id:"id",type:"function",function:{name:"run",arguments:"[]"}}]}}]}]) {
+    assert.throws(() => parseResponse("openai", data), error => error instanceof Error && !(error instanceof TypeError));
+  }
+  for (const part of [null, "text", {type:"tool_use",id:"id",name:"run",input:[]}]) assert.throws(() => parseResponse("anthropic", {content:[part]}));
+  assert.equal(parseResponse("openai", {choices:[{message:{content:"ok",tool_calls:null}}]}).text, "ok");
+  for (const data of [null, [], 7]) await assert.rejects(new ApiClient(async () => reply(data)).test(source, "", "model"), /无效/);
+});
+await check("SSE indexes cannot resolve prototypes, fractional slots, or missing blocks", () => {
+  const event = value => "data: " + JSON.stringify(value) + "\n\n";
+  const previous = Object.getOwnPropertyDescriptor(Array.prototype, "text");
+  for (const index of ["__proto__", "constructor", "prototype", "0", -1, 0.5, 128, null]) {
+    const stream = new ReplyStream("anthropic", () => {});
+    assert.throws(() => stream.push(event({type:"content_block_delta",index,delta:{type:"text_delta",text:"must-not-write"}})), /索引/);
+  }
+  assert.deepEqual(Object.getOwnPropertyDescriptor(Array.prototype, "text"), previous);
+  const missing = new ReplyStream("anthropic", () => {});
+  assert.throws(() => missing.push(event({type:"content_block_delta",index:0,delta:{type:"text_delta",text:"x"}})), /起始/);
+  const invalid = new ReplyStream("anthropic", () => {});
+  invalid.push(event({type:"content_block_start",index:0,content_block:{type:"text",text:""}}));
+  assert.throws(() => invalid.push(event({type:"content_block_delta",index:0,delta:{type:"text_delta",text:{invalid:true}}})), /增量/);
+  assert.throws(() => invalid.push(event({type:"content_block_start",index:0,content_block:{type:"text",text:"replacement"}})), /起始/);
+  for (const value of [null, [], "event"]) assert.throws(() => new ReplyStream("openai", () => {}).push(event(value)), /事件/);
+});
+await check("Streaming CORS failures never retry a paid request or suggest a retired setting", async () => {
+  let streamRequests=0, fallbackRequests=0;
+  const client=new ApiClient(async()=>{fallbackRequests++;return reply({});},30000,async()=>{streamRequests++;throw new TypeError('network');});
+  await assert.rejects(client.chat(source,'','m','',[],[],undefined,()=>{}), error=>error.message.includes('CORS') && !error.message.includes('关闭「流式回复」'));
+  assert.equal(streamRequests,1);assert.equal(fallbackRequests,0);
 });
 console.log(`${checks} API checks passed; no real network requests or keys used.`);

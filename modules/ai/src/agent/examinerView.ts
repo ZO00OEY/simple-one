@@ -43,7 +43,7 @@ export class ExaminerModal extends Modal {
   private markdown(el: HTMLElement, text: string): void { void MarkdownRenderer.render(this.app, text, el, "", this.owner!).catch(() => el.setText(text)); }
   private render(): void {
     this.owner?.unload(); this.owner = new Component(); this.owner.load(); this.target.empty();
-    const tabs = this.embedded ? document.createElement("div") : this.target.createDiv("simple-ai-examiner-tabs");
+    const tabs = this.embedded ? createDiv() : this.target.createDiv("simple-ai-examiner-tabs");
     for (const [tab, label] of [["overview", "总览"], ["models", "模型档案"], ["records", "验收记录"], ["discussion", "与考官讨论"]] as const) new ButtonComponent(tabs).setButtonText(label).onClick(() => { this.tab = tab; this.render(); }).buttonEl.setAttribute("aria-pressed", String(this.tab === tab));
     const service = this.plugin.cooperation, state = service.state;
     if (this.loading) new Setting(this.target).setName("考官正在处理…").addButton(b => b.setButtonText("暂停").onClick(() => service.stop()));

@@ -1,3 +1,4 @@
+import { isRecord } from "./json";
 import { NoteSearch, inScope } from "./search";
 import { App, TFile, TFolder } from "obsidian";
 import { notePath, numberArg, referencePaths, type AgentSettings, type Call, type Change, type Session, type Tool } from "./types";
@@ -63,7 +64,7 @@ export class VaultTools {
     const calls = new Map(messages.flatMap(m => (m.calls ?? []).filter(c => c.name === "read_note").map(c => [c.id, c])));
     for (const message of messages) {
       if (message.role !== "tool" || message.error || message.process || !calls.has(message.callId ?? "")) continue;
-      try { const result = JSON.parse(message.text); if (typeof result.path === "string" && typeof result.content === "string" && result.totalChars === result.content.length) this.reads.set(result.path, result.content); } catch {}
+      try { const result: unknown = JSON.parse(message.text); if (isRecord(result) && typeof result.path === "string" && typeof result.content === "string" && result.totalChars === result.content.length) this.reads.set(result.path, result.content); } catch { continue; }
     }
   }
   private check(): void { if (this.stopped()) throw new Error("任务已停止。"); }
@@ -185,8 +186,9 @@ export class VaultTools {
       if (!Array.isArray(items) || !items.length || items.length > 50) throw new Error("每份方案需要1至50项。");
       const start = this.session.changes.length;
       try {
-        for (const [index, item] of items.entries()) {
-          if (!item || !["create_note", "edit_note", "move_note", "delete_note", "create_folder", "delete_folder", "move_folder"].includes(item.name)) throw new Error(`方案第${index + 1}项name错误：应为create_note/edit_note/move_note/delete_note/create_folder/delete_folder/move_folder，不能填笔记标题。`);
+        const proposals: unknown[] = items;
+        for (const [index, item] of proposals.entries()) {
+          if (!isRecord(item) || typeof item.name !== "string" || !isRecord(item.arguments) || !["create_note", "edit_note", "move_note", "delete_note", "create_folder", "delete_folder", "move_folder"].includes(item.name)) throw new Error(`方案第${index + 1}项name错误：应为create_note/edit_note/move_note/delete_note/create_folder/delete_folder/move_folder，不能填笔记标题。`);
           try { await this.execute({ id: crypto.randomUUID(), name: item.name, arguments: item.arguments }, true); } catch (error) { throw new Error(`方案第${index + 1}项 ${item.name}：${error instanceof Error ? error.message : String(error)}`); }
         }
       } catch (error) { this.session.changes.splice(start); await this.save(); throw error; }

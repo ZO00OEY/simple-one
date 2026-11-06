@@ -231,11 +231,11 @@ class SkillEditor extends Modal {
     const name = new Setting(el).setName("名称");
     if (this.readonlyView) name.controlEl.createSpan({ text: this.draft.name });
     else name.addText(t => t.setValue(this.draft.name).onChange(v => { this.draft.name = v; }));
-    el.createEl("div", { text: "简介：什么时候使用", cls: "simple-ai-skill-field-label" });
+    el.createDiv({ text: "简介：什么时候使用", cls: "simple-ai-skill-field-label" });
     const description = el.createEl("textarea", { cls: "simple-ai-config-text simple-ai-skill-description", attr: { "aria-label": "技能简介：什么时候使用", placeholder: "说明这个技能适合什么任务，AI 会根据简介决定是否读取正文。" } });
     description.value = this.draft.description; description.oninput = () => { this.draft.description = description.value; };
     description.readOnly = this.readonlyView;
-    el.createEl("div", { text: "技能正文", cls: "simple-ai-skill-field-label" });
+    el.createDiv({ text: "技能正文", cls: "simple-ai-skill-field-label" });
     const area = el.createEl("textarea", { cls: "simple-ai-config-text", attr: { "aria-label": "技能正文", placeholder: "填写完整的方法、格式或参考说明" } });
     area.value = this.draft.body; area.oninput = () => { this.draft.body = area.value; };
     area.readOnly = this.readonlyView;
