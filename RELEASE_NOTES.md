@@ -1,3 +1,12 @@
+# Simple One 1.0.33
+
+- 修复 AI 设置标题和消息编辑框样式的社区审核错误。
+- 为 AI 密钥读写及删除补齐 Obsidian 1.11.4 版本守卫；其他功能最低仍支持 1.7.2。
+- Reader 使用锁定的纯 JavaScript gzip 和固定时间戳，避免系统 zlib 的平台相关输出。
+- 修复干净构建的生成文件顺序，固定 Node/npm 版本，并新增重复构建产物对比检查。
+
+English: fix AI review errors while retaining Obsidian 1.7.2 compatibility; guard SecretStorage operations on 1.11.4+, make reader compression deterministic, and repair clean-build ordering. Community re-review is pending; this release does not claim approval.
+
 # Simple One 1.0.32
 
 - AI 翻译直接使用统一的 AI 模型列表，移除独立模型来源和翻译 API 设置；模型、语言和提示词仍可单独选择。

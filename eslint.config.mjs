@@ -19,6 +19,24 @@ export default [
     },
   },
   {
+    files: ["modules/ai/src/**/*.ts"],
+    languageOptions: { parserOptions: { projectService: true } },
+    // Match the community scan: existing AI warnings remain visible; errors block release.
+    rules: {
+      "@typescript-eslint/no-unsafe-assignment": "warn",
+      "@typescript-eslint/no-unsafe-member-access": "warn",
+      "no-empty": "warn",
+      "@typescript-eslint/no-unsafe-return": "warn",
+      "@typescript-eslint/no-unnecessary-type-assertion": "warn",
+      "@typescript-eslint/no-base-to-string": "warn",
+      "@typescript-eslint/no-unsafe-call": "warn",
+      "@typescript-eslint/no-unsafe-argument": "warn",
+      "@typescript-eslint/restrict-plus-operands": "warn",
+      "no-control-regex": "warn",
+      "@typescript-eslint/no-misused-promises": "warn"
+    },
+  },
+  {
     // Shared with the standalone browser reader, which has no Obsidian DOM helpers.
     files: ["src/shared/mermaidViewer.ts"],
     rules: { "obsidianmd/prefer-create-el": "off" },

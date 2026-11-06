@@ -1,5 +1,5 @@
 import { migrateAuxiliary } from "./agent/types";
-import { Notice, Plugin, requestUrl } from "obsidian";
+import { Notice, Plugin, requestUrl, requireApiVersion } from "obsidian";
 import { ApiClient } from "./api/client";
 import { LibraryPicker } from "./api/settings";
 import { ApiSource, defaults, Settings, translationModels } from "./api/types";
@@ -148,8 +148,12 @@ export default class SimpleAIPlugin extends Plugin {
   }
   onunload(): void { this.active = false; this.stopUI(); }
   getKeys(id: string): { id: string; value: string }[] {
-    const source = this.settings.sources.find(s => s.id === id);
-    return (source?.keyIds ?? [id]).map(keyId => ({ id: keyId, value: this.app.secretStorage.getSecret(`simple-one-ai-${keyId}`) ?? "" }));
+    if (requireApiVersion("1.11.4")) {
+      const source = this.settings.sources.find(s => s.id === id);
+      return (source?.keyIds ?? [id]).map(keyId => ({ id: keyId, value: this.app.secretStorage.getSecret(`simple-one-ai-${keyId}`) ?? "" }));
+    } else {
+      throw new Error("AI requires Obsidian 1.11.4 or later.");
+    }
   }
   getKey(id: string): string {
     const source = this.settings.sources.find(s => s.id === id);
@@ -191,28 +195,36 @@ export default class SimpleAIPlugin extends Plugin {
     await this.saveSourceKeys(source, keys);
   }
   async saveSourceKeys(source: ApiSource, keys: { id: string; value: string }[]): Promise<void> {
-    const oldIds = this.getKeys(source.id).map(key => key.id);
-    const ids = [...new Set([...oldIds, ...keys.map(key => key.id)])];
-    const previous = ids.map(id => ({ id, value: this.app.secretStorage.getSecret(`simple-one-ai-${id}`) ?? "" }));
-    source = { ...source, keyIds: keys.map(key => key.id),
-      activeKeyId: keys.some(key => key.id === source.activeKeyId) ? source.activeKeyId : keys[0]?.id };
-    const sources = this.settings.sources.filter(s => s.id !== source.id);
-    const index = this.settings.sources.findIndex(s => s.id === source.id);
-    sources.splice(index < 0 ? sources.length : index, 0, source);
-    const selected = this.settings.selected;
-    const valid = sources.some(s => s.id === selected?.sourceId && s.models.some(m => m.id === selected.modelId));
-    try {
-      for (const id of ids) this.app.secretStorage.setSecret(`simple-one-ai-${id}`, keys.find(key => key.id === id)?.value ?? "");
-      await this.update({ ...this.settings, sources, selected: valid ? selected : null });
-    }
-    catch (error) {
-      for (const key of previous) this.app.secretStorage.setSecret(`simple-one-ai-${key.id}`, key.value);
-      throw error;
+    if (requireApiVersion("1.11.4")) {
+      const oldIds = this.getKeys(source.id).map(key => key.id);
+      const ids = [...new Set([...oldIds, ...keys.map(key => key.id)])];
+      const previous = ids.map(id => ({ id, value: this.app.secretStorage.getSecret(`simple-one-ai-${id}`) ?? "" }));
+      source = { ...source, keyIds: keys.map(key => key.id),
+        activeKeyId: keys.some(key => key.id === source.activeKeyId) ? source.activeKeyId : keys[0]?.id };
+      const sources = this.settings.sources.filter(s => s.id !== source.id);
+      const index = this.settings.sources.findIndex(s => s.id === source.id);
+      sources.splice(index < 0 ? sources.length : index, 0, source);
+      const selected = this.settings.selected;
+      const valid = sources.some(s => s.id === selected?.sourceId && s.models.some(m => m.id === selected.modelId));
+      try {
+        for (const id of ids) this.app.secretStorage.setSecret(`simple-one-ai-${id}`, keys.find(key => key.id === id)?.value ?? "");
+        await this.update({ ...this.settings, sources, selected: valid ? selected : null });
+      }
+      catch (error) {
+        for (const key of previous) this.app.secretStorage.setSecret(`simple-one-ai-${key.id}`, key.value);
+        throw error;
+      }
+    } else {
+      throw new Error("AI requires Obsidian 1.11.4 or later.");
     }
   }
   async deleteSource(id: string): Promise<void> {
-    const keys = this.getKeys(id);
-    await this.update({ ...this.settings, sources: this.settings.sources.filter(s => s.id !== id), selected: this.settings.selected?.sourceId === id ? null : this.settings.selected });
-    for (const key of keys) this.app.secretStorage.setSecret(`simple-one-ai-${key.id}`, "");
+    if (requireApiVersion("1.11.4")) {
+      const keys = this.getKeys(id);
+      await this.update({ ...this.settings, sources: this.settings.sources.filter(s => s.id !== id), selected: this.settings.selected?.sourceId === id ? null : this.settings.selected });
+      for (const key of keys) this.app.secretStorage.setSecret(`simple-one-ai-${key.id}`, "");
+    } else {
+      throw new Error("AI requires Obsidian 1.11.4 or later.");
+    }
   }
 }

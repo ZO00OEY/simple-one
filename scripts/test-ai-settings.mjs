@@ -12,7 +12,7 @@ const host=el(doc.body,'div'),tab=new ApiSettingsTab(plugin);tab.renderInto(host
 assert.deepEqual([...host.querySelectorAll(':scope > fieldset > legend')].map(e=>e.textContent),['模型管理','助手设置','模型协作','上下文压缩','缓存维护','用量统计']);
 assert(!host.textContent.includes('基础设置'));assert(!host.textContent.includes('高级设置'));
 const skills=[...host.querySelectorAll('.setting-item')].find(e=>e.querySelector('.setting-item-name')?.textContent==='Skills 库');assert.equal(skills.querySelector('.setting-item-description').textContent,'');
-const compression=[...host.querySelectorAll('.simple-ai-settings-navigation')].find(e=>e.textContent.includes('自动压缩设置'));compression.click();assert(host.querySelector('h2').textContent.includes('自动压缩'));
+const compression=[...host.querySelectorAll('.simple-ai-settings-navigation')].find(e=>e.textContent.includes('自动压缩设置'));compression.click();assert(host.querySelector('.simple-ai-page-heading .setting-item-name').textContent.includes('自动压缩'));
 host.querySelector('button[aria-label="返回 AI 设置"]').click();assert.equal(host.querySelectorAll(':scope > fieldset').length,6);
 for(const row of host.querySelectorAll('.setting-item'))assert.equal(row.querySelector('.setting-item-description')?.textContent??'','');
 const cleanup=[...host.querySelectorAll('.setting-item')].find(e=>e.querySelector('.setting-item-name')?.textContent==='清理调用详情');assert(cleanup.getAttribute('aria-label').includes('无法恢复'));

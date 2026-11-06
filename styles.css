@@ -8903,7 +8903,8 @@ body.is-mobile .simple-settings .simple-share-compact-settings :is(.simple-share
 .simple-ai-option.is-selected { background: var(--interactive-accent); color: var(--text-on-accent); }
 .simple-ai-library-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
 .simple-ai-library-heading, .simple-ai-library-actions { display: flex; align-items: center; gap: 8px; }
-.simple-ai-library-heading h2 { margin: 0; }
+.simple-ai-library-heading .simple-ai-page-heading { margin: 0; padding: 0; border: 0; }
+.simple-ai-page-heading .setting-item-name { font-size: var(--font-ui-large); font-weight: var(--font-semibold); }
 .simple-ai-library-actions { margin-inline-start: auto; flex-wrap: wrap; }
 .simple-ai-editor .simple-ai-address { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); align-items: start; column-gap: 8px; }
 .simple-ai-address .setting-item-info { margin-inline-end: 12px; padding-top: 6px; }

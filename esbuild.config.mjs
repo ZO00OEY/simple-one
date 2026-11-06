@@ -1,5 +1,7 @@
 import esbuild from "esbuild";
 import process from "process";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import fs from "node:fs/promises";
 import { watch } from "node:fs";
 import { writeDefaultReader } from "./scripts/build-share-reader.mjs";
@@ -11,6 +13,10 @@ async function writeAIStyles() {
   await fs.writeFile("styles.css", css.trimEnd() + "\n/* Built-in AI styles */\n" + source.trim() + "\n/* End built-in AI styles */\n");
 }
 await writeAIStyles();
+if (prod) {
+  await writeDefaultReader();
+  execFileSync(process.execPath, [fileURLToPath(new URL("./node_modules/typescript/bin/tsc", import.meta.url)), "--noEmit", "--skipLibCheck"], { stdio: "inherit", windowsHide: true });
+}
 
 const context = await esbuild.context({
   entryPoints: ["src/main.ts"],
@@ -33,7 +39,6 @@ const context = await esbuild.context({
 });
 
 if (prod) {
-  await writeDefaultReader();
   await context.rebuild();
   await context.dispose();
   if ((await fs.stat("main.js")).size > 5_000_000) throw new Error("main.js exceeds the Obsidian Sync Standard 5 MB limit");

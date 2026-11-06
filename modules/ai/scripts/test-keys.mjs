@@ -5,7 +5,8 @@ import { build } from "esbuild";
 
 const bundle = await build({ entryPoints: ["src/main.ts"], bundle: true, write: false,
   format: "cjs", platform: "browser", external: ["obsidian"] });
-const obsidian = new Proxy({}, { get: () => class {} });
+let supported = true;
+const obsidian = new Proxy({}, { get: (_, name) => name === "requireApiVersion" ? () => supported : class {} });
 const context = vm.createContext({ module: { exports: {} }, require: () => obsidian, crypto: webcrypto });
 vm.runInContext(bundle.outputFiles[0].text, context);
 const Plugin = context.module.exports.default;
@@ -58,3 +59,13 @@ assert.equal(secrets.get("simple-one-ai-second"), "");
 assert.equal(plugin.settings.sources.length, 0);
 assert.equal(plugin.settings.selected, null);
 console.log("Multi-key storage: legacy compatibility, active selection, preservation, privacy, rollback and deletion passed.");
+
+supported = false;
+const originalApp = plugin.app;
+plugin.app = new Proxy({}, { get() { throw new Error("Old Obsidian API must not be accessed"); } });
+assert.throws(() => plugin.getKeys("legacy"), /requires Obsidian 1\.11\.4/);
+await assert.rejects(plugin.saveSourceKeys(source, []), /requires Obsidian 1\.11\.4/);
+await assert.rejects(plugin.deleteSource("legacy"), /requires Obsidian 1\.11\.4/);
+plugin.app = originalApp;
+supported = true;
+console.log("Old Obsidian rejects AI secret operations before any App API access.");

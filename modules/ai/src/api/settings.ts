@@ -320,7 +320,7 @@ export class ApiSettingsTab extends PluginSettingTab {
     if (this.page === "traffic") {
       const heading = el.createDiv("simple-ai-library-header").createDiv("simple-ai-library-heading");
       new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = "overview"; this.display(); });
-      heading.createEl("h2", { text: "Token 用量统计" });
+      new Setting(heading).setName("Token 用量统计").setHeading().setClass("simple-ai-page-heading");
       trafficSettingsPage(el.createDiv(), this.plugin);
       return;
     }
@@ -329,7 +329,7 @@ export class ApiSettingsTab extends PluginSettingTab {
       const header = el.createDiv("simple-ai-library-header");
       const heading = header.createDiv("simple-ai-library-heading");
       new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = "overview"; this.display(); });
-      heading.createEl("h2", { text: "子 Agent" });
+      new Setting(heading).setName("子 Agent").setHeading().setClass("simple-ai-page-heading");
       auxiliarySettings(settingsSection(el, "子 Agent 配置"), this.plugin, () => this.display());
       return;
     }
@@ -337,7 +337,7 @@ export class ApiSettingsTab extends PluginSettingTab {
       const header = el.createDiv("simple-ai-library-header");
       const heading = header.createDiv("simple-ai-library-heading");
       new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回模型考核").onClick(() => { this.page = "examiner"; this.display(); });
-      heading.createEl("h2", { text: "考核子 Agent工作成果" });
+      new Setting(heading).setName("考核子 Agent工作成果").setHeading().setClass("simple-ai-page-heading");
       this.stopAgentStatus = auxiliaryAssessmentPage(el.createDiv("simple-ai-examiner-settings"), this.plugin);
       return;
     }
@@ -345,7 +345,7 @@ export class ApiSettingsTab extends PluginSettingTab {
       const header = el.createDiv("simple-ai-library-header");
       const heading = header.createDiv("simple-ai-library-heading");
       new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = "overview"; this.display(); });
-      heading.createEl("h2", { text: "模型考核" });
+      new Setting(heading).setName("模型考核").setHeading().setClass("simple-ai-page-heading");
       modelSettings(el.createDiv(), this.plugin, page => { this.page = page; this.display(); }, "examiner");
       return;
     }
@@ -354,7 +354,7 @@ export class ApiSettingsTab extends PluginSettingTab {
       const heading = header.createDiv("simple-ai-library-heading");
       const parent = "overview" as const;
       new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = parent; this.display(); });
-      heading.createEl("h2", { text: { skills: "技能库", memory: "自动记忆", rules: "模型共用提示词", compression: "自动压缩设置" }[this.page] });
+      new Setting(heading).setName({ skills: "技能库", memory: "自动记忆", rules: "模型共用提示词", compression: "自动压缩设置" }[this.page]).setHeading().setClass("simple-ai-page-heading");
       this.stopAgentStatus = agentSettingsPage(el.createDiv(), this.plugin, this.page, this.page === "memory"
         ? parent => modelSettings(parent, this.plugin, page => { this.page = page; this.display(); }, "memory")
         : undefined);
@@ -434,7 +434,7 @@ export class ApiSettingsTab extends PluginSettingTab {
     const header = el.createDiv("simple-ai-library-header");
     const heading = header.createDiv("simple-ai-library-heading");
     new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = "overview"; this.display(); });
-    heading.createEl("h2", { text: "API 来源" });
+    new Setting(heading).setName("API 来源").setHeading().setClass("simple-ai-page-heading");
     const group = settingsSection(el, "来源管理");
     if (!this.plugin.settings.sources.length) group.createEl("p", { text: "添加一个来源，再选择或手动填写模型。", cls: "simple-ai-hint" });
     for (const source of this.plugin.settings.sources) {

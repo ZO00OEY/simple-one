@@ -396,7 +396,7 @@ export class ChatView extends ItemView {
           row.addClass("simple-ai-message-editing");
           const input = row.createEl("textarea", { cls: "simple-ai-inline-edit", attr: { "aria-label": "编辑消息内容" } });
           input.value = versions[selectedVersion]; text.after(input);
-          const resize = () => { input.style.height = "auto"; input.style.height = Math.max(72, input.scrollHeight) + "px"; };
+          const resize = () => { input.setCssStyles({ height: "auto" }); input.style.height = Math.max(72, input.scrollHeight) + "px"; };
           input.addEventListener("input", resize);
           const controls = row.createDiv("simple-ai-inline-edit-actions");
           const cancel = () => { input.remove(); controls.remove(); row.removeClass("simple-ai-message-editing"); };
