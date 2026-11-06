@@ -17,12 +17,12 @@ export function auxiliarySettings(el: HTMLElement, plugin: SimpleAIPlugin, refre
     }).catch(error => { new Notice(error instanceof Error ? error.message : "保存失败"); if (el.isConnected) refresh(); });
     return pending;
   };
-  new Setting(el).setName("通用补充指令").setDesc("所有子 Agent 共用；留空使用默认规则。")
+  new Setting(el).setName("通用补充指令").setDesc("所有子 agent 共用；留空使用默认规则。")
     .addButton(button => button.setButtonText("编辑").onClick(() => {
       const modal = new Modal(plugin.app);
       modal.modalEl.addClass("simple-ai-candidate-editor");
-      modal.titleEl.setText("子 Agent 通用补充指令");
-      const input = modal.contentEl.createEl("textarea", { attr: { placeholder: "例如：输出简洁，引用资料路径，明确标注不确定信息。", "aria-label": "子 Agent 通用补充指令" } });
+      modal.titleEl.setText("子 agent 通用补充指令");
+      const input = modal.contentEl.createEl("textarea", { attr: { placeholder: "例如：输出简洁，引用资料路径，明确标注不确定信息。", "aria-label": "子 agent 通用补充指令" } });
       input.value = plugin.settings.agent.cooperation.auxiliary.supplementalInstructions ?? "";
       new Setting(modal.contentEl)
         .addButton(button => button.setButtonText("取消").onClick(() => modal.close()))
@@ -41,14 +41,14 @@ export function auxiliarySettings(el: HTMLElement, plugin: SimpleAIPlugin, refre
   rules.createEl("summary", { text: "查看内置规则" });
   rules.createEl("p", { text: childPolicy });
   {
-    el.createEl("p", { cls: "simple-ai-hint", text: "用途说明帮助主 Agent 选择模型；行为要求填在“通用补充指令”。" });
-    const selection = new Setting(el).setName("子 Agent 可用模型").setDesc("至少选择一个模型，可与主 Agent 相同。");
+    el.createEl("p", { cls: "simple-ai-hint", text: "用途说明帮助主 agent 选择模型；行为要求填在“通用补充指令”。" });
+    const selection = new Setting(el).setName("子 agent 可用模型").setDesc("至少选择一个模型，可与主 agent 相同。");
     const picker = selection.controlEl.createEl("details", { cls: "simple-ai-role-picker" });
     const summary = picker.createEl("summary");
     const count = summary.createSpan();
     setIcon(summary.createSpan("simple-ai-role-chevron"), "chevron-down");
     const panel = picker.createDiv("simple-ai-role-options");
-    const search = panel.createEl("input", { type: "search", attr: { placeholder: "搜索来源或模型", "aria-label": "搜索子 Agent 候选模型" } });
+    const search = panel.createEl("input", { type: "search", attr: { placeholder: "搜索来源或模型", "aria-label": "搜索子 agent 候选模型" } });
     const list = panel.createDiv("simple-ai-role-list");
     const explanation = el.createEl("p", { cls: "simple-ai-hint", text: "为每个模型填写擅长的任务和限制。" });
     const cards = el.createDiv("simple-ai-auxiliary-candidates");

@@ -72,9 +72,9 @@ class AgentSettingsModal extends Modal {
     }
     if (this.page === "compression") {
       el = settingsSection(el, "压缩规则");
-      new Setting(el).setName("自动压缩触发点（Token）").setDesc("每次主 Agent请求前，粗估规则、历史、当前任务及工具定义。达到后压缩旧历史并继续；默认 200000，0 关闭。请低于所用模型的上下文容量。")
+      new Setting(el).setName("自动压缩触发点（token）").setDesc("每次主 agent请求前，粗估规则、历史、当前任务及工具定义。达到后压缩旧历史并继续；默认 200000，0 关闭。请低于所用模型的上下文容量。")
         .addText(t => t.setValue(String(cfg.autoCompactTokens ?? 200000)).onChange(v => { const n = Number(v); if (v.trim() && Number.isInteger(n) && (n === 0 || n >= 10000 && n <= 1000000)) { cfg.autoCompactTokens = n; void this.save().catch(() => new Notice("保存失败")); } }));
-      new Setting(el).setName("压缩目标（Token）").setDesc("压缩后的摘要目标长度，默认约 4000 Token，可设置 500–12000；实际长度由模型决定。")
+      new Setting(el).setName("压缩目标（token）").setDesc("压缩后的摘要目标长度，默认约 4000 token，可设置 500–12000；实际长度由模型决定。")
         .addText(t => t.setValue(String(cfg.compactTargetTokens ?? 4000)).onChange(v => { const n = Number(v); if (v.trim() && Number.isInteger(n) && n >= 500 && n <= 12000) { cfg.compactTargetTokens = n; void this.save().catch(() => new Notice("保存失败")); } }));
       new Setting(el).setName("自定义压缩提示词").setDesc("补充摘要的保留重点和格式要求；留空使用默认规则。");
       const field = el.createEl("textarea", { cls: "simple-ai-config-text", attr: { "aria-label": "自定义压缩提示词", placeholder: "例如：保留关键决策、文件路径和未完成事项，按项目分组。" } });

@@ -1,5 +1,6 @@
 import type { DataAdapter } from "obsidian";
 import { newState, type ImageInput, type PrivateState, type Session } from "./types";
+import { decodeIndex, decodeMemory, decodePrivateState, decodeSession } from "./storageSchema";
 
 // Only plugin-private storage uses these paths; note tools cannot access them.
 export class SessionStore {
@@ -8,12 +9,13 @@ export class SessionStore {
   private missingSessions = new Set<string>();
   private writes: Promise<void> = Promise.resolve();
   private cleanupKey = "";
+  private indexFields: Record<string, unknown> = {};
   constructor(private adapter: DataAdapter, private root: string, private cleanupFailed?: (error: unknown) => void) {}
   get unavailableSessions(): string[] { return [...this.missingSessions]; }
-  private async json(path: string, valid: (v: any) => boolean): Promise<any> {
+  private async json<T>(path: string, decode: (value: unknown) => T): Promise<T> {
     for (const candidate of [path, path + ".previous"]) {
       if (!await this.adapter.exists(candidate)) continue;
-      try { const text = await this.adapter.read(candidate); const value = JSON.parse(text); if (valid(value)) { if (candidate !== path) this.recovered.add(path); else this.saved.set(path, text); return value; } } catch {}
+      try { const text = await this.adapter.read(candidate); const value = decode(JSON.parse(text) as unknown); if (candidate !== path) this.recovered.add(path); else this.saved.set(path, text); return value; } catch { /* Try the previous copy; preserve both files and report failure if neither validates. */ }
     }
     throw new Error(`存储损坏，原文件已保留：${path}`);
   }
@@ -21,7 +23,8 @@ export class SessionStore {
     this.missingSessions.clear();
     const indexPath = `${this.root}/index.json`;
     if (!await this.adapter.exists(indexPath) && !await this.adapter.exists(indexPath + ".previous")) return;
-    const index = await this.json(indexPath, v => v?.version === 2 && Array.isArray(v.sessions));
+    const index = await this.json(indexPath, decodeIndex);
+    this.indexFields = index;
     const sessions: Session[] = [];
     for (const id of index.sessions) {
       if (typeof id !== "string" || !/^[\w-]+$/.test(id)) throw new Error("会话索引格式错误。");
@@ -32,9 +35,9 @@ export class SessionStore {
         this.missingSessions.add(id);
         continue;
       }
-      sessions.push(await this.json(path, v => v?.id === id && Array.isArray(v.messages) && Array.isArray(v.changes)));
+      sessions.push(await this.json(path, value => decodeSession(value, id)));
     }
-    const memory = await this.json(`${this.root}/memory.json`, v => v && typeof v.summaries === "object" && Array.isArray(v.versions));
+    const memory = await this.json(`${this.root}/memory.json`, decodeMemory);
     return { ...newState(), sessions, memory, active: sessions.some(s => s.id === index.active) ? index.active : sessions[0]?.id ?? "" };
   }
   async image(image: ImageInput): Promise<ImageInput> {
@@ -54,7 +57,7 @@ export class SessionStore {
     const imageIds = new Set(state.sessions.flatMap(s => [...s.images, ...s.messages.flatMap(m => m.images ?? [])].flatMap(i => i.id ? [i.id] : [])));
     const cleanupKey = JSON.stringify([[...sessionIds].sort(), [...imageIds].sort()]);
     const memory = JSON.stringify(state.memory);
-    const index = JSON.stringify({ version: 2, active: state.active, sessions: [...state.sessions.map(s => s.id), ...this.missingSessions].filter((id, i, ids) => ids.indexOf(id) === i) });
+    const index = JSON.stringify({ ...this.indexFields, version: 2, active: state.active, sessions: [...state.sessions.map(s => s.id), ...this.missingSessions].filter((id, i, ids) => ids.indexOf(id) === i) });
     const op = this.writes.then(async () => {
       for (const dir of [this.root, `${this.root}/sessions`, `${this.root}/images`]) if (!await this.adapter.exists(dir)) await this.adapter.mkdir(dir);
       const write = async (path: string, text: string) => {
@@ -87,6 +90,17 @@ export class SessionStore {
     this.writes = op.catch(() => {}); return op;
   }
   async cleanAttachments(state: PrivateState, cutoff: number | ((session: Session) => number) = Infinity): Promise<number> {
+    // Validate recovery payloads before save can rotate/overwrite them or remove
+    // image files. A malformed backup must remain available for manual repair.
+    await this.writes;
+    for (const s of state.sessions) {
+      const path = `${this.root}/sessions/${s.id}.json.previous`;
+      if (await this.adapter.exists(path)) decodeSession(JSON.parse(await this.adapter.read(path)) as unknown, s.id);
+    }
+    for (const name of ["state.json", "state.previous.json"]) {
+      const path = `${this.root}/${name}`;
+      if (await this.adapter.exists(path)) decodePrivateState(JSON.parse(await this.adapter.read(path)) as unknown, true);
+    }
     let removed = 0;
     const strip = (s: Session): number => {
       let count = 0;
@@ -113,16 +127,14 @@ export class SessionStore {
       for (const s of state.sessions) {
         const path = `${this.root}/sessions/${s.id}.json.previous`;
         if (!await this.adapter.exists(path)) continue;
-        const backup = JSON.parse(await this.adapter.read(path));
-        if (backup?.id !== s.id || !Array.isArray(backup.messages) || !Array.isArray(backup.images)) throw new Error("对话备份格式无效，清理未完成。");
+        const backup = decodeSession(JSON.parse(await this.adapter.read(path)) as unknown, s.id);
         if (strip(backup)) await this.adapter.write(path, JSON.stringify(backup));
       }
       // Older installations may still have the pre-migration storage snapshots.
       for (const name of ["state.json", "state.previous.json"]) {
         const path = `${this.root}/${name}`;
         if (!await this.adapter.exists(path)) continue;
-        const legacy = JSON.parse(await this.adapter.read(path));
-        if (!Array.isArray(legacy?.sessions)) throw new Error("旧会话存储格式无效，清理未完成。");
+        const legacy = decodePrivateState(JSON.parse(await this.adapter.read(path)) as unknown, true);
         let count = 0;
         for (const s of legacy.sessions) count += strip(s);
         if (count) await this.adapter.write(path, JSON.stringify(legacy));

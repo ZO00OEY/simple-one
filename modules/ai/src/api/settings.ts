@@ -1,4 +1,4 @@
-import { ButtonComponent, Setting } from "../ui";
+import { ButtonComponent, Setting, destructiveButton } from "../ui";
 import { setNativeTooltip } from "../tooltipText";
 import { App, Modal, Notice, PluginSettingTab } from "obsidian";
 import type SimpleAIPlugin from "../main";
@@ -18,7 +18,7 @@ class ConfirmDelete extends Modal {
     this.titleEl.setText("删除 API 来源");
     this.contentEl.createEl("p", { text: `删除“${this.name}”及其已选模型？` });
     new Setting(this.contentEl).addButton(b => b.setButtonText("取消").onClick(() => this.close()))
-      .addButton(b => b.setButtonText("删除").setWarning().onClick(async () => {
+      .addButton(b => destructiveButton(b.setButtonText("删除")).onClick(async () => {
         b.setDisabled(true);
         try { await this.remove(); this.close(); } catch { new Notice("删除失败，请重试。"); b.setDisabled(false); }
       }));
@@ -329,7 +329,7 @@ export class ApiSettingsTab extends PluginSettingTab {
       const header = el.createDiv("simple-ai-library-header");
       const heading = header.createDiv("simple-ai-library-heading");
       new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = "overview"; this.render(); });
-      new Setting(heading).setName("子 Agent").setHeading().setClass("simple-ai-page-heading");
+      new Setting(heading).setName("子 agent").setHeading().setClass("simple-ai-page-heading");
       auxiliarySettings(settingsSection(el, "子 Agent 配置"), this.plugin, () => this.render());
       return;
     }
@@ -337,7 +337,7 @@ export class ApiSettingsTab extends PluginSettingTab {
       const header = el.createDiv("simple-ai-library-header");
       const heading = header.createDiv("simple-ai-library-heading");
       new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回模型考核").onClick(() => { this.page = "examiner"; this.render(); });
-      new Setting(heading).setName("考核子 Agent工作成果").setHeading().setClass("simple-ai-page-heading");
+      new Setting(heading).setName("考核子 agent工作成果").setHeading().setClass("simple-ai-page-heading");
       this.stopAgentStatus = auxiliaryAssessmentPage(el.createDiv("simple-ai-examiner-settings"), this.plugin);
       return;
     }
@@ -364,7 +364,7 @@ export class ApiSettingsTab extends PluginSettingTab {
     settingsNavigation(new Setting(models).setName(`API 来源 · ${this.plugin.settings.sources.length} 个来源 · ${this.plugin.settings.sources.reduce((count, source) => count + source.models.length, 0)} 个模型`),
       () => { this.page = "sources"; this.render(); });
     modelSettings(models.createDiv(), this.plugin, page => { this.page = page; this.render(); });
-    settingsNavigation(new Setting(models).setName("子 Agent"), () => { this.page = "auxiliary"; this.render(); });
+    settingsNavigation(new Setting(models).setName("子 agent"), () => { this.page = "auxiliary"; this.render(); });
     const assistant = settingsSection(el, "助手设置");
     agentSettings(assistant, this.plugin, page => { this.page = page; this.render(); });
     let choice: "enter" | "shift-enter" = this.plugin.settings.sendShortcut === "shift-enter" ? "shift-enter" : "enter";
@@ -396,12 +396,12 @@ export class ApiSettingsTab extends PluginSettingTab {
   }
   private displayUsageSettings(el: HTMLElement): void {
     const group = settingsSection(el, "用量统计");
-    settingsNavigation(new Setting(group).setName("Token 用量统计").setDesc("查看模型调用及累计 Token 用量。"), () => { this.page = "traffic"; this.render(); });
+    settingsNavigation(new Setting(group).setName("Token 用量统计").setDesc("查看模型调用及累计 token 用量。"), () => { this.page = "traffic"; this.render(); });
   }
   private displayCacheSettings(el: HTMLElement, existingGroup?: HTMLElement): void {
     const group = existingGroup ?? settingsSection(el, "缓存维护");
     let cleanAll = false;
-    new Setting(group).setName("清理调用详情").setDesc("清除思考过程、工具参数与结果等详细记录；保留聊天正文、Token 累计用量和笔记修改记录。清理也覆盖备份，无法恢复。")
+    new Setting(group).setName("清理调用详情").setDesc("清除思考过程、工具参数与结果等详细记录；保留聊天正文、token 累计用量和笔记修改记录。清理也覆盖备份，无法恢复。")
       .addDropdown(d => d.addOptions({ current: "当前对话", all: "全部对话" }).onChange(value => { cleanAll = value === "all"; }))
       .addButton(b => b.setButtonText("清理详情").onClick(async () => {
         b.setDisabled(true);

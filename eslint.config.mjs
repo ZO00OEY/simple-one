@@ -23,6 +23,7 @@ export default [
     languageOptions: { parserOptions: { projectService: true } },
     // Match the community scan: existing AI warnings remain visible; errors block release.
     rules: {
+      "obsidianmd/ui/sentence-case": ["warn", { brands: ["Simple One", "Obsidian"] }],
       "@typescript-eslint/no-unsafe-assignment": "warn",
       "@typescript-eslint/no-unsafe-member-access": "warn",
       "no-empty": "warn",

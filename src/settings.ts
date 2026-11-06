@@ -463,6 +463,12 @@ export class SimpleSettingTab extends PluginSettingTab {
     const replacementManage = replacementRow.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", "aria-label": "文本显示替换设置" } });
     setActionIcon(replacementManage, "settings", "bordered");
     replacementManage.addEventListener("click", () => this.openPage({ type: "html-preview" }));
+    this.renderDisplayCheckbox(basic, "全库标签批量重命名",
+      "在笔记属性的 tags 标签栏中，右键点击某个标签，选择“在全库中重命名此标签…”。同时更新属性、正文及子标签；目标标签已存在时需确认合并。",
+      this.plugin.settings.enableVaultTagRename, async value => {
+        this.plugin.settings.enableVaultTagRename = value;
+        await this.plugin.saveSettings();
+      });
   }
 
   private renderBasicOptimizationSettings(container: HTMLElement): void {

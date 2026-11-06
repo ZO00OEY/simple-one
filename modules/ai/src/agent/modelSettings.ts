@@ -49,7 +49,7 @@ export function modelSettings(el: HTMLElement, plugin: SimpleAIPlugin, enter: (p
     const title = selectToEnable && !cfg.enabled ? "不启用"
       : cfg.selected ? source && model ? label(source, model, plugin.settings.showSourceName) : "所选模型不可用"
       : role === "main" ? "选择模型" : cfg.follow === "auxiliary" ? role !== "memory" && plugin.settings.agent.cooperation.auxiliary.candidates.length !== 1 ? "请重新选择模型" : "跟随子 Agent" : "跟随主 Agent";
-    if (role === "memory" && !cfg.selected && cfg.follow === "auxiliary") setting.setDesc("辅助未启用或未设置时使用主 Agent；多个子 Agent时使用第一个。");
+    if (role === "memory" && !cfg.selected && cfg.follow === "auxiliary") setting.setDesc("辅助未启用或未设置时使用主 agent；多个子 agent时使用第一个。");
     summary.createSpan({ text: title }); summary.setAttribute("aria-label", `${name}：${title}`);
     setIcon(summary.createSpan("simple-ai-role-chevron"), "chevron-down");
     const panel = picker.createDiv("simple-ai-role-options");
@@ -114,7 +114,7 @@ export function modelSettings(el: HTMLElement, plugin: SimpleAIPlugin, enter: (p
   const management = settingsSection(el, "验收管理", "simple-ai-examiner-section");
   new Setting(management).setName("考官工作台").setDesc("查看评估结果与模型分工建议。")
     .addButton(b => b.setButtonText("打开工作台").onClick(() => new ExaminerModal(plugin).open()));
-  settingsNavigation(new Setting(management).setName("考核子 Agent工作成果").setDesc("结合聊天记录和委派要求，分别评价辅助成果与主 Agent后续处理。"), () => enter("auxiliaryAssessment"));
+  settingsNavigation(new Setting(management).setName("考核子 agent工作成果").setDesc("结合聊天记录和委派要求，分别评价辅助成果与主 agent后续处理。"), () => enter("auxiliaryAssessment"));
   const options = settingsSection(el, "高级自定义", "simple-ai-examiner-section");
   options.createEl("p", { cls: "simple-ai-hint", text: "通常保留默认值即可。" });
   const number = (name: string, value: number, min: number, max: number, apply: (draft: typeof plugin.settings, n: number) => void) => new Setting(options).setName(name).addText(t => {

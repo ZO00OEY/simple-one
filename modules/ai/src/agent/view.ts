@@ -1,5 +1,6 @@
-import { Setting, ButtonComponent } from "../ui";
+import { Setting, ButtonComponent, destructiveButton } from "../ui";
 import { settingsCheckbox } from "../settingsLayout";
+import { styleActionButton } from "../../../../src/shared/actionButton";
 import { prepareChatMarkdown } from "./markdown";
 import { historyGroups } from "./history";
 import { bottomOverlap, viewportBottomOverlap } from "./layout";
@@ -119,7 +120,7 @@ export class ChatView extends ItemView {
     const compose = el.createDiv("simple-ai-compose");
     this.tokenPreview = compose.createDiv("simple-ai-token-preview");
     this.tokenPreview.setAttribute("aria-live", "polite");
-    this.tokenPreview.setAttribute("aria-label", "本地粗估下一次主 Agent请求的输入，包含当前有效历史、规则及附件文本；不含工具定义，未解析图片也未计入。不同模型的分词和缓存计费可能不同。");
+    this.tokenPreview.setAttribute("aria-label", "本地粗估下一次主 agent请求的输入，包含当前有效历史、规则及附件文本；不含工具定义，未解析图片也未计入。不同模型的分词和缓存计费可能不同。");
     this.composer = compose.createEl("textarea", { placeholder: "发消息，或添加截图整理笔记……", attr: { "aria-label": "消息输入" } });
     this.setupComposerResize(compose);
     this.composer.onfocus = () => this.scheduleTokenPreview();
@@ -472,7 +473,7 @@ export class ChatView extends ItemView {
       const messages = session.messages.slice(start, index + 1);
       const ids = new Set(messages.map(m => m.execution?.recordId).filter(Boolean));
       const models = [...new Set(messages.filter(m => m.execution && !m.process).map(m => '[' + (m.execution!.sourceName ?? m.execution!.sourceId) + '] ' + (m.execution!.modelName ?? m.execution!.modelId)))];
-      metadata.setText((session.messages[index].timestamp ? new Date(session.messages[index].timestamp!).toLocaleString("zh-CN", { hour12: false }) : "时间未记录") + ' · ' + ids.size + ' 次调用' + (models.length ? '\n' + models.join('\n') : ''));
+      metadata.setText((session.messages[index].timestamp ? new Date(session.messages[index].timestamp).toLocaleString("zh-CN", { hour12: false }) : "时间未记录") + ' · ' + ids.size + ' 次调用' + (models.length ? '\n' + models.join('\n') : ''));
       const duration = separator.querySelector<HTMLElement>("button");
       if (duration) {
         const begin = session.messages[start].timestamp, end = session.messages[index].timestamp;
@@ -504,7 +505,7 @@ export class ChatView extends ItemView {
         if (version !== this.tokenPreviewVersion || r.active !== s || r.busy) return;
         this.tokenPreview.setText(`下次输入约 ${result.tokens.toLocaleString("zh-CN")} Token${result.pendingImages ? " · 图片待解析" : ""}`);
       }).catch(() => {
-        if (version === this.tokenPreviewVersion) this.tokenPreview.setText("输入 Token 暂无法估算，请检查模型与参考配置");
+        if (version === this.tokenPreviewVersion) this.tokenPreview.setText("输入 token 暂无法估算，请检查模型与参考配置");
       });
     }, 300);
   }
@@ -592,6 +593,7 @@ export class ChatView extends ItemView {
     let collapsible = false;
     const more = createEl("button");
     more.type = "button"; more.className = "simple-ai-message-show-more"; more.hidden = true;
+    styleActionButton(more, "text");
     const actions = text.parentElement?.querySelector<HTMLElement>(":scope > .simple-ai-message-actions");
     if (actions) actions.prepend(more);
     else text.after(more);
@@ -794,7 +796,7 @@ export class ChatView extends ItemView {
       const result = await this.plugin.runtime.nextRequestPreview(this.plugin.runtime.active); const modal = new Modal(this.app);
       modal.modalEl.addClass("simple-ai-config-modal", "simple-ai-prompt-preview");
       modal.titleEl.setText("当前完整提示词");
-      modal.contentEl.createEl("p", { cls: "simple-ai-hint", text: "下一次主 Agent请求预览：包含前置规则、参考正文、有效历史、输入草稿、附件文本和工具定义。仅查看，不发送请求。" });
+      modal.contentEl.createEl("p", { cls: "simple-ai-hint", text: "下一次主 agent请求预览：包含前置规则、参考正文、有效历史、输入草稿、附件文本和工具定义。仅查看，不发送请求。" });
       if (result.pendingImages) modal.contentEl.createEl("p", { cls: "simple-ai-hint", text: `${result.pendingImages} 张图片尚未解析；发送时会先读取图片，随后将解析结果加入主 Agent提示词。此处以“尚未提取”显示。` });
       const text = JSON.stringify(result.body, null, 2);
       new Setting(modal.contentEl).addButton(button => button.setButtonText("复制完整提示词").onClick(() => { void this.perform(async () => { await navigator.clipboard.writeText(text); new Notice("已复制完整提示词。"); }); }));
@@ -895,7 +897,7 @@ export class ChatView extends ItemView {
     const remove = new ButtonComponent(this.selectionFooter).setButtonText("删除").setDisabled(!ids.length || this.plugin.runtime.busy).onClick(() => {
       const modal = new Modal(this.app); modal.titleEl.setText("删除 " + ids.length + " 个对话？");
       modal.contentEl.createEl("p", { text: "删除这些对话及其专属图片、附件和对话备份。其他对话仍引用的共享图片会保留。笔记和已提取的长期记忆不受影响。" });
-      new Setting(modal.contentEl).addButton(b => b.setButtonText("取消").onClick(() => modal.close())).addButton(b => b.setButtonText("删除").setWarning().onClick(() => { void this.perform(async () => { await this.plugin.runtime.manageSessions(ids, "delete"); this.selectedSessions.clear(); this.selecting = false; modal.close(); void this.renderDrawer(); }); }));
+      new Setting(modal.contentEl).addButton(b => b.setButtonText("取消").onClick(() => modal.close())).addButton(b => destructiveButton(b.setButtonText("删除")).onClick(() => { void this.perform(async () => { await this.plugin.runtime.manageSessions(ids, "delete"); this.selectedSessions.clear(); this.selecting = false; modal.close(); void this.renderDrawer(); }); }));
       modal.open();
     });
     remove.buttonEl.addClass("simple-ai-delete-sessions"); const trash = remove.buttonEl.createSpan(); setIcon(trash, "trash-2"); remove.buttonEl.prepend(trash);

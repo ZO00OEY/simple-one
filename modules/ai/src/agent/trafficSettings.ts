@@ -8,7 +8,7 @@ export function trafficSettingsPage(el: HTMLElement, plugin: SimpleAIPlugin): vo
   el.addClass("simple-ai-traffic-settings");
   el.createEl("p", { cls: "simple-ai-hint", text: "按对话累计各模型的实际请求用量，包括工具调用及重试。归档不影响统计，分支继承的历史不重复计费。缺失用量不会算作 0；旧记录仅能汇总仍保留的数据。" });
   const toolbar = el.createDiv("simple-ai-traffic-toolbar");
-  const search = toolbar.createEl("input", { type: "search", placeholder: "搜索对话、来源或模型", cls: "simple-ai-search", attr: { "aria-label": "搜索 Token 使用记录" } });
+  const search = toolbar.createEl("input", { type: "search", placeholder: "搜索对话、来源或模型", cls: "simple-ai-search", attr: { "aria-label": "搜索 token 使用记录" } });
   const list = el.createDiv("simple-ai-traffic-list");
   const totals = (parent: HTMLElement, records: WorkRecord[]) => {
     const value = (sum: number, missing: number, requests: number) => missing === requests ? "未提供" : `${sum.toLocaleString("zh-CN")}${missing ? `（另有 ${missing} 次未提供）` : ""}`;

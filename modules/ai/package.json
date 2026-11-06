@@ -5,7 +5,7 @@
   "description": "Built-in AI module for Simple One",
   "main": "main.js",
   "scripts": {
-    "test": "node scripts/test-native-tooltips.mjs && node scripts/test-api.mjs && node scripts/test-keys.mjs && node scripts/test-lifecycle.mjs && node scripts/test-agent.mjs && node scripts/test-usage.mjs && node scripts/test-translation.mjs"
+    "test": "node scripts/test-native-tooltips.mjs && node scripts/test-api.mjs && node scripts/test-keys.mjs && node scripts/test-lifecycle.mjs && node scripts/test-agent.mjs && node scripts/test-usage.mjs && node scripts/test-translation.mjs && node scripts/test-cooperation-validation.mjs && node scripts/test-storage-schema.mjs"
   },
   "overrides": {
     "moment": "^2.31.0"

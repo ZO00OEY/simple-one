@@ -1,3 +1,13 @@
+# Simple One 1.0.35
+
+- 统一内置 AI 设置、模型列表与按钮的悬停和选中样式，整理重复覆盖并保留必要的主题兼容。
+- 校验模型评价、配置建议与历史存储结构；损坏数据尝试备份恢复，避免错误地保存为空状态。
+- 新增全库标签重命名入口，补齐标签字段类型检查，并保留菜单接管与卸载恢复行为。
+- 本地 AI 检查剩余建议继续保留；社区新版审核结果待刷新确认。
+- 公开发布仅包含 main.js、manifest.json、styles.css；不包含个人设置、聊天、凭据和日志。
+
+English: unify AI controls and selection states, validate model output and persisted sessions with recovery support, and add vault tag renaming with guarded metadata updates. Personal settings, chats and credentials are excluded. Community review is pending.
+
 # Simple One 1.0.34
 
 - 校验 AI 流式事件的索引、块类型和增量字段，阻止畸形来源事件写入数组继承属性。

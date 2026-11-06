@@ -169,6 +169,7 @@ export interface SimplePluginSettings {
   enableImageZoom: boolean;
   enableInlineCodeCopy: boolean;
   enableHtmlPreview: boolean;
+  enableVaultTagRename: boolean;
   enableTextDisplayReplacement: boolean;
   enableReadableCustomTags: boolean;
   themeFormattingDefaultsVersion: number;
@@ -781,6 +782,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   enableImageZoom: true,
   enableInlineCodeCopy: true,
   enableHtmlPreview: true,
+  enableVaultTagRename: true,
   enableTextDisplayReplacement: true,
   enableReadableCustomTags: true,
   themeFormattingDefaultsVersion: 0,

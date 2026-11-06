@@ -1,5 +1,6 @@
 import { delegationPolicy } from "./workPolicies";
 import { SessionStore } from "./storage";
+import { decodePrivateState } from "./storageSchema";
 import { NoteSearch } from "./search";
 import { estimateTextTokens, usageRecords, trafficRecord } from "./usage";
 import { requestBody } from "./protocol";
@@ -44,11 +45,11 @@ export class AgentRuntime {
         new Notice(`Simple AI：${ids.length} 个会话文件缺失，其他会话已加载；索引已保留，可恢复原文件。`, 10000);
       }
     }
-    else if (await adapter.exists(this.path)) {
+    else if (await adapter.exists(this.path) || await adapter.exists(`${this.plugin.manifest.dir}/private/state.previous.json`)) {
       let restored = false;
       for (const path of [this.path, `${this.plugin.manifest.dir}/private/state.previous.json`]) {
         if (!await adapter.exists(path)) continue;
-        try { const raw = JSON.parse(await adapter.read(path)); if (raw && Array.isArray(raw.sessions) && raw.memory) { this.state = raw; restored = true; break; } } catch {}
+        try { this.state = decodePrivateState(JSON.parse(await adapter.read(path)) as unknown); restored = true; break; } catch { /* Try the previous state; retain the existing recovery failure below. */ }
       }
       if (!restored) throw new Error("会话存储及备份格式无效，请保留 private 目录排查，未覆盖。");
     }
@@ -88,8 +89,8 @@ export class AgentRuntime {
       for (const name of ["state.json", "state.previous.json"]) {
         const path = `${root}/${name}`;
         if (await adapter.exists(path)) {
-          const legacy = JSON.parse(await adapter.read(path));
-          for (const session of legacy.sessions ?? []) if (ids.has(session.id)) for (const message of session.messages ?? []) {
+          const legacy = decodePrivateState(JSON.parse(await adapter.read(path)) as unknown, true);
+          for (const session of legacy.sessions) if (ids.has(session.id)) for (const message of session.messages) {
             delete message.reasoning;
             for (const call of message.calls ?? []) call.arguments = {};
             if (message.role === "tool" || message.process) message.text = "[调用详情已清理]";

@@ -2,6 +2,7 @@
 // Simple One — entry point
 // ============================================================
 import AiFeature from "./features/ai";
+import { registerTagRename } from "./features/tagRename";
 import {
   Editor,
   MarkdownView,
@@ -188,6 +189,7 @@ export default class SimplePlugin extends Plugin {
 
     // ── Feature 1: URL 粘贴处理 ──
     registerLinkFilter(this);
+    registerTagRename(this);
 
     // ── Feature 2: 快速笔记 ──
     {
