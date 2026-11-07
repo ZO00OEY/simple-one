@@ -2,7 +2,7 @@ import { migrateAuxiliary } from "./agent/types";
 import { Notice, Plugin, requestUrl, requireApiVersion } from "obsidian";
 import { ApiClient } from "./api/client";
 import { LibraryPicker } from "./api/settings";
-import { ApiSource, defaults, Settings, translationModels } from "./api/types";
+import { ApiSource, defaults, Settings } from "./api/types";
 import { agentDefaults, cooperationDefaults, defaultAuxiliaryUsage } from "./agent/types";
 import { Cooperation } from "./agent/cooperation";
 import { AgentRuntime } from "./agent/runtime";
@@ -12,9 +12,6 @@ class AIInterface extends Plugin { onload(): void {} }
 
 export default class SimpleAIPlugin extends Plugin {
   openSettings: () => void = () => {};
-  getTranslationModels(): { sourceId: string; modelId: string; label: string }[] {
-    return translationModels(this.settings.sources);
-  }
   async translateSelection(input: { text: string; prompt: string; sourceId: string; modelId: string }, signal?: AbortSignal, onUpdate?: (text: string) => void): Promise<string> {
     if (!input.text.trim()) throw new Error("翻译内容不能为空。");
     if (!input.prompt.trim()) throw new Error("翻译提示词不能为空。");
@@ -186,13 +183,6 @@ export default class SimpleAIPlugin extends Plugin {
     });
     this.writes = operation.catch(() => {});
     return operation;
-  }
-  async saveSource(source: ApiSource, key: string): Promise<void> {
-    const keys = this.getKeys(source.id);
-    const active = keys.find(item => item.id === source.activeKeyId) ?? keys.find(item => item.value) ?? keys[0];
-    if (active) active.value = key;
-    else if (key) keys.push({ id: crypto.randomUUID(), value: key });
-    await this.saveSourceKeys(source, keys);
   }
   async saveSourceKeys(source: ApiSource, keys: { id: string; value: string }[]): Promise<void> {
     if (requireApiVersion("1.11.4")) {

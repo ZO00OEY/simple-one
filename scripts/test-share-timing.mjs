@@ -9,11 +9,8 @@ const obsidian = new Proxy({ Component: class {}, TFile: class {}, Notice: class
 const bundle = await esbuild.build({ stdin: { contents: 'export { default as ShareFeature } from "./src/features/share/index"; export { emptyManifest } from "./src/features/share/model";', resolveDir: process.cwd() },
   bundle: true, write: false, platform: "node", format: "cjs", external: ["obsidian"],
   plugins: [{ name: "share-timing-fixtures", setup(build) {
-    build.onResolve({ filter: /^\.\/appearance$/ }, () => ({ path: "appearance", namespace: "fixture" }));
     build.onResolve({ filter: /^\.\/export$/ }, args => args.importer.endsWith("share/index.ts") || args.importer.endsWith("share\\index.ts") ? { path: "export", namespace: "fixture" } : undefined);
-    build.onLoad({ filter: /.*/, namespace: "fixture" }, args => ({ contents: args.path === "appearance"
-      ? 'export const shareAppearance = () => "";'
-      : 'export const exportNote = (...args) => globalThis.shareTimingExport(...args);' }));
+    build.onLoad({ filter: /.*/, namespace: "fixture" }, () => ({ contents: 'export const exportNote = (...args) => globalThis.shareTimingExport(...args);' }));
   } }] });
 let clock = 0, wall = 100000;
 const context = vm.createContext({ module: { exports: {} }, require: () => obsidian,

@@ -8,7 +8,7 @@ import { ExaminerModal } from "./examinerView";
 import { roleNames } from "./cooperation";
 import type { ModelSelection } from "./types";
 
-export function modelSettings(el: HTMLElement, plugin: SimpleAIPlugin, enter: (page: "memory" | "examiner" | "auxiliary" | "auxiliaryAssessment") => void, page: "overview" | "memory" | "examiner" | "auxiliary" = "overview"): void {
+export function modelSettings(el: HTMLElement, plugin: SimpleAIPlugin, enter: (page: "memory" | "examiner" | "auxiliary" | "auxiliaryAssessment") => void, page: "overview" | "memory" | "examiner" = "overview"): void {
   let saving = false;
   const save = async (update: (draft: typeof plugin.settings) => void, refresh = true) => {
     if (saving) return;
@@ -23,7 +23,6 @@ export function modelSettings(el: HTMLElement, plugin: SimpleAIPlugin, enter: (p
   };
   const descriptions = {
     main: "",
-    auxiliary: "按需搜索、提炼和起草，笔记写入由主 Agent执行。",
     memory: "",
     examiner: "",
   };
@@ -34,11 +33,10 @@ export function modelSettings(el: HTMLElement, plugin: SimpleAIPlugin, enter: (p
     new Setting(modelParent).setName("启用考官模型").setDesc("独立评估模型表现并提出分工建议。")
       .addToggle(t => settingsCheckbox(t).setValue(plugin.settings.agent.cooperation.examiner.enabled).onChange(value => { void save(draft => { draft.agent.cooperation.examiner.enabled = value; }); }));
   }
-  const roles = page === "examiner" ? ["examiner"] as const : page === "memory" ? ["memory"] as const : page === "auxiliary" ? ["auxiliary"] as const : ["main"] as const;
+  const roles = page === "examiner" ? ["examiner"] as const : page === "memory" ? ["memory"] as const : ["main"] as const;
   for (const role of roles) {
     const cfg = role === "main" ? { selected: plugin.settings.selected, follow: "main" as const, enabled: true }
       : role === "memory" ? plugin.settings.agent.memory : plugin.settings.agent.cooperation[role];
-    const selectToEnable = role === "auxiliary";
     const source = plugin.settings.sources.find(s => s.id === cfg.selected?.sourceId), model = source?.models.find(m => m.id === cfg.selected?.modelId);
     const name = role === "main" ? "默认模型" : roleNames[role];
     const setting = new Setting(modelParent).setName(name);
@@ -46,8 +44,7 @@ export function modelSettings(el: HTMLElement, plugin: SimpleAIPlugin, enter: (p
     setting.settingEl.addClass("simple-ai-role-setting");
     const picker = setting.controlEl.createEl("details", { cls: "simple-ai-role-picker" });
     const summary = picker.createEl("summary");
-    const title = selectToEnable && !cfg.enabled ? "不启用"
-      : cfg.selected ? source && model ? label(source, model, plugin.settings.showSourceName) : "所选模型不可用"
+    const title = cfg.selected ? source && model ? label(source, model, plugin.settings.showSourceName) : "所选模型不可用"
       : role === "main" ? "选择模型" : cfg.follow === "auxiliary" ? role !== "memory" && plugin.settings.agent.cooperation.auxiliary.candidates.length !== 1 ? "请重新选择模型" : "跟随子 Agent" : "跟随主 Agent";
     if (role === "memory" && !cfg.selected && cfg.follow === "auxiliary") setting.setDesc("辅助未启用或未设置时使用主 agent；多个子 agent时使用第一个。");
     summary.createSpan({ text: title }); summary.setAttribute("aria-label", `${name}：${title}`);
@@ -55,12 +52,11 @@ export function modelSettings(el: HTMLElement, plugin: SimpleAIPlugin, enter: (p
     const panel = picker.createDiv("simple-ai-role-options");
     const search = panel.createEl("input", { type: "search", attr: { placeholder: "搜索来源或模型", "aria-label": `搜索${roleNames[role]}` } });
     const list = panel.createDiv("simple-ai-role-list");
-    const choose = (selected: ModelSelection, follow?: "main" | "auxiliary", disabled = false) => {
+    const choose = (selected: ModelSelection, follow?: "main" | "auxiliary") => {
       if (plugin.runtime.busy || plugin.runtime.memoryBusy || plugin.cooperation.busy) { new Notice("请等待当前模型任务结束后切换。"); return; }
       picker.open = false;
       void save(draft => {
         if (role === "main") draft.selected = selected;
-        else if (role === "auxiliary") { draft.agent.cooperation.auxiliary.selected = selected; draft.agent.cooperation.auxiliary.follow = "main"; draft.agent.cooperation.auxiliary.enabled = !disabled; }
         else { const target = role === "memory" ? draft.agent.memory : draft.agent.cooperation[role]; target.selected = selected; target.follow = follow; }
       });
     };
@@ -70,13 +66,10 @@ export function modelSettings(el: HTMLElement, plugin: SimpleAIPlugin, enter: (p
         const button = parent.createEl("button", { text, cls: "simple-ai-role-option", attr: { type: "button", "aria-pressed": String(active) } });
         button.onclick = action;
       };
-      if (selectToEnable && "不启用".includes(query)) {
-        matches++; option(list, "不启用", !cfg.enabled, () => choose(null, undefined, true));
-      }
-      for (const follow of role === "main" ? [] : role === "auxiliary" ? ["main"] as const : ["main", "auxiliary"] as const) {
+      for (const follow of role === "main" ? [] : ["main", "auxiliary"] as const) {
         if (role !== "memory" && follow === "auxiliary" && plugin.settings.agent.cooperation.auxiliary.mode === "multiple") continue;
         const name = follow === "main" ? "跟随主 Agent" : "跟随子 Agent";
-        if (name.toLowerCase().includes(query)) { matches++; option(list, name, !cfg.selected && (cfg.follow ?? "main") === follow && (!selectToEnable || cfg.enabled), () => choose(null, follow)); }
+        if (name.toLowerCase().includes(query)) { matches++; option(list, name, !cfg.selected && (cfg.follow ?? "main") === follow, () => choose(null, follow)); }
       }
       for (const source of plugin.settings.sources) {
         const models = source.models.filter(m => `${source.name} ${m.id} ${m.alias}`.toLowerCase().includes(query));
@@ -84,7 +77,7 @@ export function modelSettings(el: HTMLElement, plugin: SimpleAIPlugin, enter: (p
         matches += models.length;
         const group = list.createEl("details", { cls: "simple-ai-role-source" }); group.open = true;
         group.createEl("summary", { text: source.name });
-        for (const model of models) option(group, model.alias.trim() || model.id, cfg.selected?.sourceId === source.id && cfg.selected?.modelId === model.id && (!selectToEnable || cfg.enabled), () => choose({ sourceId: source.id, modelId: model.id }));
+        for (const model of models) option(group, model.alias.trim() || model.id, cfg.selected?.sourceId === source.id && cfg.selected?.modelId === model.id, () => choose({ sourceId: source.id, modelId: model.id }));
       }
       if (!matches) list.createEl("p", { text: "没有匹配的模型", cls: "simple-ai-hint" });
     };

@@ -1,21 +1,4 @@
 import type { Session } from "./types";
-export function noteHistory(sessions: Session[]): { path: string; updated: number }[] {
-  const notes = new Map<string, number>();
-  const changes = sessions.flatMap(s => s.changes.filter(c => c.state === "done").map(c => ({ c, updated: c.completedAt ?? s.updated }))).sort((a, b) => a.updated - b.updated);
-  for (const { c, updated } of changes) {
-    if (c.kind.startsWith("folder-")) {
-      if (c.kind === "folder-delete" || c.kind === "folder-move") for (const [path, time] of [...notes]) {
-        if (!path.startsWith(c.path + "/")) continue;
-        notes.delete(path);
-        if (c.kind === "folder-move" && c.target) notes.set(c.target + path.slice(c.path.length), Math.max(time, updated));
-      }
-      continue;
-    }
-    if (c.kind === "move" && c.target) notes.delete(c.path);
-    notes.set(c.target ?? c.path, updated);
-  }
-  return [...notes].map(([path, updated]) => ({ path, updated })).sort((a, b) => b.updated - a.updated);
-}
 export function historyGroups(sessions: Session[], query = "", now = Date.now()): { title: string; sessions: Session[] }[] {
   const start = new Date(now); start.setHours(0, 0, 0, 0);
   const titles = ["今天", "7 天内", "30 天内", "更早"];

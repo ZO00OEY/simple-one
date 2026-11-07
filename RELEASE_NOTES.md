@@ -1,3 +1,14 @@
+# Simple One 1.0.36
+
+- 自动排版写回前核对正文和文件；等待网页标题期间继续编辑时，不覆盖新输入。自动排版粘贴先插入内容，再安全更新链接。
+- 修复子 Agent 模型建议：加入当前候选列表并保留用途说明，支持基线校验和恢复；旧建议缺少可信基线时要求重新验收。
+- 设置页与日记页共用周期提醒表单，保留各自的保存、删除、取消及 ID 行为。
+- 移除废弃分享外观导出、AI 旧接口和失效样式，整理移动预览布局，保留必要的主题覆盖与兼容代码。
+- 补充并通过编辑并发、辅助建议和周期提醒回归。手机及真实主题视觉验收尚未完成；社区审核结果以新版扫描为准。
+- Release 仅包含 main.js、manifest.json、styles.css，不包含个人配置、聊天、密钥或日志。
+
+English: preserve edits made during asynchronous formatting; apply and restore auxiliary model recommendations against the current candidate list; share recurring reminder forms while retaining each entry point's actions; remove obsolete code and CSS. Regression checks pass. Mobile/theme visual acceptance remains pending. Personal settings, chats, credentials and logs are excluded.
+
 # Simple One 1.0.35
 
 - 统一内置 AI 设置、模型列表与按钮的悬停和选中样式，整理重复覆盖并保留必要的主题兼容。

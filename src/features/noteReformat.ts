@@ -14,7 +14,9 @@ export async function reformatCurrentNote(plugin: SimplePlugin): Promise<void> {
     new Notice("请先启用自动排版");
     return;
   }
-  const editor = plugin.app.workspace.activeEditor?.editor;
+  const activeEditor = plugin.app.workspace.activeEditor;
+  const editor = activeEditor?.editor;
+  const file = activeEditor?.file;
   if (!editor) {
     new Notice("没有打开的编辑器");
     return;
@@ -40,6 +42,10 @@ export async function reformatCurrentNote(plugin: SimplePlugin): Promise<void> {
     return;
   }
 
+  if (editor.getValue() !== original || plugin.app.workspace.activeEditor?.editor !== editor || plugin.app.workspace.activeEditor?.file !== file) {
+    new Notice("笔记已变化或已切换，未写入自动排版结果，请重试。");
+    return;
+  }
   editor.setValue(result.text);
   editor.setCursor(cursor);
   const parts: string[] = [];

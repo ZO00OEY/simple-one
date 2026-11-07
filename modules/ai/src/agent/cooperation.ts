@@ -4,7 +4,7 @@ import type { ReplyUpdate } from "./stream";
 import { trafficRecord, usageRecords } from "./usage";
 import { noteTools, VaultTools, validateCall } from "./tools";
 import { isRecord } from "./json";
-import { cooperationDefaults, newSession, type Message, type ModelRole, type ModelSelection, type Session, type Tool } from "./types";
+import { cooperationDefaults, defaultAuxiliaryUsage, newSession, type AuxiliaryCandidate, type Message, type ModelRole, type ModelSelection, type Session, type Tool } from "./types";
 
 export interface WorkRecord {
   id: string; taskId: string; sessionId?: string; stage: string; role: ModelRole;
@@ -14,7 +14,7 @@ export interface WorkRecord {
   requestContext?: { messageCount: number; inputChars: number; rulesChars: number; tools: string[]; auxiliaryEnabled: boolean; auxiliaryMode: string; delegateCallId?: string };
 }
 export interface Finding { recordId: string; assessment: string; reason: string; confidence: "low" | "medium" | "high"; actor?: { sourceId: string; sourceName: string; modelId: string; role: ModelRole }; }
-export interface Recommendation { role: ModelRole; sourceId: string; modelId: string; reason: string; baseline?: ModelSelection; baselineFollow?: "main" | "auxiliary"; applied?: boolean; previous?: ModelSelection; previousFollow?: "main" | "auxiliary"; }
+export interface Recommendation { role: ModelRole; sourceId: string; modelId: string; reason: string; baseline?: ModelSelection; baselineFollow?: "main" | "auxiliary"; baselineCandidates?: AuxiliaryCandidate[]; applied?: boolean; previous?: ModelSelection; previousFollow?: "main" | "auxiliary"; previousCandidates?: AuxiliaryCandidate[]; appliedCandidates?: AuxiliaryCandidate[]; }
 export interface Assessment {
   id: string; taskId: string; created: number; summary: string; findings: Finding[]; questions: string[];
   recommendations: Recommendation[]; recordIds: string[]; sessionId?: string; revision?: number;
@@ -35,6 +35,13 @@ function historyCalls(value: unknown): NonNullable<Message["calls"]> | undefined
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) return undefined;
   return value.flatMap((call: unknown) => isRecord(call) && typeof call.id === "string" && typeof call.name === "string" && isRecord(call.arguments) ? [{ id: call.id, name: call.name, arguments: call.arguments }] : []);
+}
+function candidateSnapshot(value: unknown): AuxiliaryCandidate[] {
+  if (!Array.isArray(value)) throw new Error("子 Agent 候选快照无效，请重新验收。");
+  return value.map((candidate: unknown) => {
+    if (!isRecord(candidate) || typeof candidate.sourceId !== "string" || typeof candidate.modelId !== "string" || typeof candidate.description !== "string") throw new Error("子 Agent 候选快照无效，请重新验收。");
+    return { sourceId: candidate.sourceId, modelId: candidate.modelId, description: candidate.description };
+  });
 }
 export class Cooperation {
   state = fresh(); busy = false;
@@ -292,6 +299,7 @@ export class Cooperation {
       const revision = session?.revision;
       const baselines = Object.fromEntries(Object.keys(roleNames).map(role => [role, this.configuredModel(role as ModelRole)]));
       const follows = Object.fromEntries(Object.keys(roleNames).map(role => [role, this.configuredFollow(role as ModelRole)]));
+      const baselineCandidates = candidateSnapshot(this.config.auxiliary.candidates);
       const configSnapshot = JSON.stringify([this.plugin.settings.agent.cooperation, this.plugin.settings.agent.memory, this.plugin.settings.selected]);
       const ids = new Set(records.map(r => r.id));
       const available = this.plugin.settings.sources.flatMap(s => s.models.filter(m => records.some(r => r.sourceId === s.id && r.modelId === m.id)).map(m => ({ sourceId: s.id, modelId: m.id })));
@@ -309,7 +317,7 @@ export class Cooperation {
       const questions = raw.questions.map((q: unknown) => { if (typeof q !== "string") throw new Error("考官问题格式无效。"); return q; });
       const recommendations: Recommendation[] = raw.recommendations.map((r: unknown) => {
         if (!isRecord(r) || !isModelRole(r.role) || typeof r.sourceId !== "string" || typeof r.modelId !== "string" || typeof r.reason !== "string" || !available.some(m => m.sourceId === r.sourceId && m.modelId === r.modelId)) throw new Error("考官建议包含未知模型或角色。");
-        return { role: r.role, sourceId: r.sourceId, modelId: r.modelId, reason: r.reason, baseline: baselines[r.role], baselineFollow: follows[r.role] };
+        return { role: r.role, sourceId: r.sourceId, modelId: r.modelId, reason: r.reason, baseline: baselines[r.role], baselineFollow: follows[r.role], ...(r.role === "auxiliary" ? { baselineCandidates } : {}) };
       });
       if (signal.aborted || (session && revision !== session.revision) || configSnapshot !== JSON.stringify([this.plugin.settings.agent.cooperation, this.plugin.settings.agent.memory, this.plugin.settings.selected])) throw new Error("验收期间会话或模型配置已变化，结果未采用。");
       const assessment: Assessment = { id: crypto.randomUUID(), taskId, created: Date.now(), summary: raw.summary, findings, questions, recommendations, recordIds: records.map(r => r.id), sessionId: session?.id, revision, taskType: records.every(r => r.role === "memory") ? "记忆提取与合并" : typeof raw.taskType === "string" ? raw.taskType.slice(0, 50) : "对话与笔记任务" };
@@ -317,10 +325,14 @@ export class Cooperation {
     }, automatic);
   }
   private configuredModel(role: ModelRole): ModelSelection {
+    if (role === "auxiliary") {
+      const candidates = this.config.auxiliary.candidates;
+      return candidates.length === 1 ? { sourceId: candidates[0].sourceId, modelId: candidates[0].modelId } : null;
+    }
     return role === "main" ? this.plugin.settings.selected : role === "memory" ? this.plugin.settings.agent.memory.selected : this.config[role].selected;
   }
   private configuredFollow(role: ModelRole): "main" | "auxiliary" | undefined {
-    if (role === "main" || this.configuredModel(role)) return undefined;
+    if (role === "main" || role === "auxiliary" || this.configuredModel(role)) return undefined;
     return (role === "memory" ? this.plugin.settings.agent.memory : this.config[role]).follow === "auxiliary" ? "auxiliary" : undefined;
   }
   async feedback(assessment: Assessment, satisfaction: string, reason: string): Promise<void> {
@@ -329,6 +341,7 @@ export class Cooperation {
   async applyRecommendation(recommendation: Recommendation, restore = false): Promise<void> {
     if (!Object.keys(roleNames).includes(recommendation.role)) throw new Error("模型角色无效。");
     if (this.plugin.runtime.busy || this.plugin.runtime.memoryBusy || this.busy) throw new Error("请等待模型任务结束后再调整设置。");
+    if (recommendation.role === "auxiliary") { await this.applyAuxiliaryRecommendation(recommendation, restore); return; }
     const current = this.configuredModel(recommendation.role), previousFollow = this.configuredFollow(recommendation.role), next = { sourceId: recommendation.sourceId, modelId: recommendation.modelId };
     if (JSON.stringify(current) !== JSON.stringify(restore ? next : recommendation.baseline)) throw new Error("配置已变化，请重新查看建议，未覆盖当前选择。");
     if (this.configuredFollow(recommendation.role) !== (restore ? undefined : recommendation.baselineFollow === "auxiliary" ? "auxiliary" : undefined)) throw new Error("跟随模型配置已变化，请重新查看建议。");
@@ -344,6 +357,33 @@ export class Cooperation {
     }
     await this.plugin.update(settings);
     if (!restore) { recommendation.previous = current; recommendation.previousFollow = previousFollow; } recommendation.applied = !restore; await this.save();
+  }
+  private async applyAuxiliaryRecommendation(recommendation: Recommendation, restore: boolean): Promise<void> {
+    if (restore && !recommendation.applied) throw new Error("这项建议尚未应用。");
+    const current = candidateSnapshot(this.config.auxiliary.candidates);
+    const matches = (candidate: AuxiliaryCandidate) => candidate.sourceId === recommendation.sourceId && candidate.modelId === recommendation.modelId;
+    const legacy = (selected: ModelSelection | undefined): AuxiliaryCandidate[] => {
+      if (selected === undefined) throw new Error("旧建议缺少配置基线，请重新验收。");
+      if (selected === null) return [];
+      if (!isRecord(selected) || typeof selected.sourceId !== "string" || typeof selected.modelId !== "string") throw new Error("旧建议配置基线无效，请重新验收。");
+      return [{ ...selected, description: current.find(c => c.sourceId === selected.sourceId && c.modelId === selected.modelId)?.description ?? this.config.auxiliary.description ?? defaultAuxiliaryUsage }];
+    };
+    const baseline = restore ? current : recommendation.baselineCandidates === undefined ? legacy(recommendation.baseline) : candidateSnapshot(recommendation.baselineCandidates);
+    const previous = restore ? recommendation.previousCandidates === undefined ? legacy(recommendation.previous) : candidateSnapshot(recommendation.previousCandidates) : current;
+    const added = { sourceId: recommendation.sourceId, modelId: recommendation.modelId, description: this.config.auxiliary.description || defaultAuxiliaryUsage };
+    const expected = restore ? recommendation.appliedCandidates === undefined ? [added] : candidateSnapshot(recommendation.appliedCandidates) : baseline;
+    // Old single-model records did not store descriptions; compare their model IDs only.
+    const same = recommendation.baselineCandidates === undefined && recommendation.previousCandidates === undefined
+      ? (a: AuxiliaryCandidate[], b: AuxiliaryCandidate[]) => JSON.stringify(a.map(c => [c.sourceId, c.modelId])) === JSON.stringify(b.map(c => [c.sourceId, c.modelId]))
+      : (a: AuxiliaryCandidate[], b: AuxiliaryCandidate[]) => JSON.stringify(a) === JSON.stringify(b);
+    if (!same(current, expected)) throw new Error("配置已变化，请重新查看建议，未覆盖当前候选。");
+    if (!restore && current.some(matches)) throw new Error("建议模型已在子 Agent 候选中。");
+    const candidates = restore ? previous : [...current, added];
+    if (candidates.some(c => !this.plugin.settings.sources.some(s => s.id === c.sourceId && s.models.some(m => m.id === c.modelId)))) throw new Error("建议模型已不可用。");
+    const settings = { ...this.plugin.settings, agent: { ...this.plugin.settings.agent, cooperation: { ...this.config, auxiliary: { ...this.config.auxiliary, candidates } } } };
+    await this.plugin.update(settings);
+    if (!restore) { recommendation.baselineCandidates = baseline; recommendation.previousCandidates = current; recommendation.appliedCandidates = candidates; }
+    recommendation.applied = !restore; await this.save();
   }
   async discuss(text: string, signalRun?: (signal: AbortSignal) => void): Promise<void> {
     if (!text.trim()) return;
@@ -375,7 +415,7 @@ export class Cooperation {
           if (!isRecord(r) || !isModelRole(r.role) || typeof r.sourceId !== "string" || typeof r.modelId !== "string" || typeof r.reason !== "string" || typeof r.evidenceIds !== "string") throw new Error("配置建议缺少有效模型或验收依据。");
           const evidenceIds: unknown = JSON.parse(r.evidenceIds);
           if (!available.some(m => m.sourceId === r.sourceId && m.modelId === r.modelId) || !Array.isArray(evidenceIds) || !evidenceIds.length || evidenceIds.some((id: unknown) => typeof id !== "string" || !id.trim() || !this.state.assessments.some(a => a.id === id))) throw new Error("配置建议缺少有效模型或验收依据。");
-          const recommendation: Recommendation = { role: r.role, sourceId: r.sourceId, modelId: r.modelId, reason: r.reason, baseline: this.configuredModel(r.role), baselineFollow: this.configuredFollow(r.role) };
+          const recommendation: Recommendation = { role: r.role, sourceId: r.sourceId, modelId: r.modelId, reason: r.reason, baseline: this.configuredModel(r.role), baselineFollow: this.configuredFollow(r.role), ...(r.role === "auxiliary" ? { baselineCandidates: candidateSnapshot(this.config.auxiliary.candidates) } : {}) };
           this.state.assessments.push({ id: crypto.randomUUID(), taskId: "recommendation:" + call.id, created: Date.now(), summary: r.reason, findings: [], questions: [], recommendations: [recommendation], recordIds: [] });
           result = { role: "tool", callId: call.id, text: "建议已保存，请在验收记录中查看并应用；未修改设置。" };
         } catch (error) { result = { role: "tool", callId: call.id, error: true, text: error instanceof Error ? error.message : "建议无效" }; }

@@ -145,7 +145,7 @@ export class ExaminerModal extends Modal {
   }
   private recommendation(el: HTMLElement, r: Recommendation): void {
     const name = (selected: Recommendation["baseline"]) => selected ? `[${this.plugin.settings.sources.find(s => s.id === selected.sourceId)?.name ?? selected.sourceId}] ${selected.modelId}` : "跟随主 Agent";
-    new Setting(el).setName(`${(roleNames[r.role] ?? "历史角色（已停用）")}：${name(r.baseline)} → ${name(r)}`).setDesc(r.reason + (r.role === "main" ? "。更改全局默认，当前会话选择不变。" : ""))
-      .addButton(b => b.setButtonText(r.applied ? "恢复旧配置" : "应用建议").setDisabled(this.loading || !Object.prototype.hasOwnProperty.call(roleNames, r.role)).onClick(() => { void this.perform(() => this.plugin.cooperation.applyRecommendation(r, !!r.applied)); }));
+    new Setting(el).setName(r.role === "auxiliary" ? `子 Agent 候选：加入 ${name(r)}` : `${(roleNames[r.role] ?? "历史角色（已停用）")}：${name(r.baseline)} → ${name(r)}`).setDesc(r.reason + (r.role === "main" ? "。更改全局默认，当前会话选择不变。" : ""))
+      .addButton(b => b.setButtonText(r.applied ? "恢复旧配置" : r.role === "auxiliary" ? "加入候选" : "应用建议").setDisabled(this.loading || !Object.prototype.hasOwnProperty.call(roleNames, r.role)).onClick(() => { void this.perform(() => this.plugin.cooperation.applyRecommendation(r, !!r.applied)); }));
   }
 }

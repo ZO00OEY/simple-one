@@ -448,18 +448,6 @@ await check('Missing session files do not block startup or erase recovery refere
   const recovered=new AgentRuntime(e.plugin); await recovered.load();
   assert.equal(recovered.state.sessions.find(s=>s.id===original.id).messages[0].text,'recover me');
 });
-await check('AI note history deduplicates completed edits and follows renamed paths', async () => {
-  const s = newSession(null); s.updated = 99;
-  s.changes = [
-    { kind: 'create', path: 'a.md', state: 'done', completedAt: 1 },
-    { kind: 'edit', path: 'a.md', state: 'done', completedAt: 2 },
-    { kind: 'move', path: 'a.md', target: 'b.md', state: 'done', completedAt: 3 },
-    { kind: 'create', path: 'proposal.md', state: 'proposed' },
-    { kind: 'edit', path: 'failed.md', state: 'failed' },
-    { kind: 'create', path: 'undone.md', state: 'undone' },
-  ];
-  assert.equal(JSON.stringify(ctx.module.exports.noteHistory([s])), JSON.stringify([{ path: 'b.md', updated: 3 }]));
-});
 await check('Fork preserves cutoff context without pending calls, later summary or executable changes', async () => {
   const e = runtimeEnv([]); const s = e.s;
   s.messages = [ { role: 'user', text: 'start', timestamp: 10 }, { role: 'assistant', text: 'plan', calls: [{ id: 'pending', name: 'create_note', arguments: {} }] }, { role: 'tool', text: 'later result', callId: 'pending' }, { role: 'user', text: 'later' } ];

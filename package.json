@@ -1,6 +1,6 @@
 {
   "name": "simple-one",
-  "version": "1.0.35",
+  "version": "1.0.36",
   "description": "A collection of practical Obsidian tools",
   "main": "main.js",
   "scripts": {
@@ -10,7 +10,7 @@
     "build": "node esbuild.config.mjs production",
     "lint": "eslint src --max-warnings 0 && eslint modules/ai/src --quiet && node scripts/check-css.mjs",
     "check": "npm audit --omit=dev && npm run lint && npm run test && npm run build",
-    "test": "node scripts/test-tag-rename.mjs && npm run test:build && node scripts/test-native-tooltips.mjs && node scripts/smoke.mjs && node scripts/test-release-safety.mjs && node scripts/test-note-reformat.mjs && node scripts/test-diary-reminder-switch.mjs && node scripts/test-display-replacement.mjs && node scripts/test-template-import-merge.mjs && node scripts/test-template-rule-check.mjs && node scripts/test-template-property-drag.mjs && node scripts/test-typography.mjs && node scripts/test-latin-spacing.mjs && node scripts/test-popup-window-sizing.mjs && node scripts/test-settings-navigation.mjs && node scripts/test-note-filename.mjs && node scripts/test-template-search.mjs && node scripts/sync/test-remote-filename-repair.mjs && npm run test:sync && npm run test:share && npm run test:selection && npm run test:ai",
+    "test": "node scripts/test-tag-rename.mjs && npm run test:build && node scripts/test-native-tooltips.mjs && node scripts/smoke.mjs && node scripts/test-release-safety.mjs && node scripts/test-note-reformat.mjs && node scripts/test-recurring-rule-form.mjs && node scripts/test-diary-reminder-switch.mjs && node scripts/test-display-replacement.mjs && node scripts/test-template-import-merge.mjs && node scripts/test-template-rule-check.mjs && node scripts/test-template-property-drag.mjs && node scripts/test-typography.mjs && node scripts/test-latin-spacing.mjs && node scripts/test-popup-window-sizing.mjs && node scripts/test-settings-navigation.mjs && node scripts/test-note-filename.mjs && node scripts/test-template-search.mjs && node scripts/sync/test-remote-filename-repair.mjs && npm run test:sync && npm run test:share && npm run test:selection && npm run test:ai",
     "test:share": "node scripts/test-share-timing.mjs && node scripts/test-share-inline-name.mjs && node scripts/test-share-hold.mjs && node scripts/test-share.mjs && node scripts/test-share-api.mjs && node scripts/test-share-edgeone.mjs && node scripts/test-share-reader.mjs",
     "test:display": "node scripts/test-display-replacement.mjs",
     "test:sync": "node scripts/sync/test-local-ignore.mjs && node scripts/sync/test-native-ignore.mjs && node scripts/sync/test-operation-timing.mjs && node scripts/sync/test-transfer-progress.mjs && node scripts/sync/test-hash-cache.mjs && node scripts/sync/test-download-cache.mjs && node scripts/sync/test-download-queue.mjs && node scripts/sync/test-dirty.mjs && node scripts/sync/test-plugin-data-tracking.mjs && node scripts/sync/test-onboarding.mjs && node scripts/sync/test-lightweight-guide.mjs && node scripts/sync/test-mobile-sync.mjs && node scripts/sync/test-local-edit-recheck.mjs && node scripts/sync/test-mobile-runtime.mjs && node scripts/sync/test-migration.mjs && node scripts/sync/test-desktop-backup.mjs && node scripts/sync/test-direct-remote.mjs && node scripts/sync/test-sync-panel.mjs && node scripts/sync/test-sync-mode-switch.mjs",

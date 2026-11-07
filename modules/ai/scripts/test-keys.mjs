@@ -40,7 +40,8 @@ assert.equal(plugin.getKey("legacy"), "second-secret", "rotation must not change
 plugin.settings.sources[0].rotateKeys = false;
 assert.equal(plugin.getRequestKey("legacy"), "second-secret");
 assert(!JSON.stringify(saved).includes("-secret"), "settings contain secret IDs only");
-await plugin.saveSource({ ...plugin.settings.sources[0], prefix: "prefix" }, plugin.getKey("legacy"));
+await plugin.saveSourceKeys({ ...plugin.settings.sources[0], prefix: "prefix" }, plugin.getKeys("legacy"));
+assert.equal(plugin.settings.sources[0].prefix, "prefix");
 assert.equal(plugin.getKeys("legacy").length, 2, "editing model/source fields preserves all keys");
 assert.equal(plugin.getKey("legacy"), "second-secret");
 fail = true;

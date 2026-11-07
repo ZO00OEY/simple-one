@@ -48,12 +48,12 @@ export function registerLinkFilter(plugin: SimplePlugin): void {
               ? (text.startsWith("obsidian://") ? plugin.settings.autoProcessObsidian : plugin.settings.autoProcessPaste)
               : plugin.settings.autoProcessPastedTextLinks
           );
-          void reformatPastedTextBeforeInsert(
+          void reformatPastedText(
             plugin,
             editor,
             isSingleLink ? text : clipboardText,
             shouldProcessLinks
-          );
+          ).catch(reportError);
           return;
         }
         if (bypassLinkProcessing) return;
@@ -245,7 +245,7 @@ export function trimTrailingUrlPunctuation(url: string): string {
   return url.replace(/[)\].,;!?，。；！？、]+$/u, "");
 }
 
-async function reformatPastedTextBeforeInsert(
+async function reformatPastedText(
   plugin: SimplePlugin,
   editor: Editor,
   pastedText: string,
@@ -254,16 +254,27 @@ async function reformatPastedTextBeforeInsert(
   const settings = plugin.settings.diary.reformat;
   const from = editor.getCursor("from");
   const to = editor.getCursor("to");
-  let output = settings.runFormatReflow ? applyTextReformatRules(pastedText, settings.formatRules) : pastedText;
-  if (processLinks && hasConvertibleLinks(output)) {
-    output = (await convertTextLinks(plugin, output)).text;
-  }
-
+  const output = settings.runFormatReflow ? applyTextReformatRules(pastedText, settings.formatRules) : pastedText;
+  // Insert before the network request so later edits never replace the old selection.
   editor.replaceRange(output, from, to);
   const lines = output.split("\n");
-  editor.setCursor(lines.length === 1
+  const end = lines.length === 1
     ? { line: from.line, ch: from.ch + lines[0].length }
-    : { line: from.line + lines.length - 1, ch: lines[lines.length - 1]?.length ?? 0 });
+    : { line: from.line + lines.length - 1, ch: lines[lines.length - 1]?.length ?? 0 };
+  editor.setCursor(end);
+  if (processLinks && hasConvertibleLinks(output)) {
+    const snapshot = editor.getValue();
+    const converted = (await convertTextLinks(plugin, output)).text;
+    if (editor.getValue() !== snapshot) return;
+    const cursor = editor.getCursor();
+    editor.replaceRange(converted, from, end);
+    if (cursor.line === end.line && cursor.ch === end.ch) {
+      const convertedLines = converted.split("\n");
+      editor.setCursor(convertedLines.length === 1
+        ? { line: from.line, ch: from.ch + converted.length }
+        : { line: from.line + convertedLines.length - 1, ch: convertedLines[convertedLines.length - 1].length });
+    }
+  }
 }
 
 function escapeMarkdownLinkText(text: string): string {

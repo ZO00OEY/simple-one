@@ -17,9 +17,6 @@ export function agentSettings(el: HTMLElement, plugin: SimpleAIPlugin, enter: (p
     .addButton(button => button.setIcon("settings").setTooltip("编辑工作规则与记忆").onClick(() => new AgentSettingsModal(plugin, "rules", undefined, undefined, () => { el.empty(); agentSettings(el, plugin, enter); }).open()));
   settingsNavigation(new Setting(el).setName("Skills 库"), () => enter("skills"));
 }
-export function openCompressionSettings(plugin: SimpleAIPlugin): void {
-  new AgentSettingsModal(plugin, "compression").open();
-}
 export function agentSettingsPage(el: HTMLElement, plugin: SimpleAIPlugin, page: "skills" | "memory" | "rules" | "compression", renderModels?: (el: HTMLElement) => void): () => void {
   const settings = new AgentSettingsModal(plugin, page, el, renderModels); settings.onOpen();
   return () => settings.onClose();
