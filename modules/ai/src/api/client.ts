@@ -98,7 +98,7 @@ export class ApiClient {
         if (controller.signal.aborted) throw new Error("已停止。");
         update({ text: message.text, reasoning: message.reasoning ?? "" }); return message;
       }
-      if (!response.body) throw new Error("当前环境无法读取流式回复，请关闭此来源的“流式回复”。");
+      if (!response.body) throw new Error("当前环境无法读取流式回复，请检查来源响应与当前网络环境；本次不会自动重试。");
       const stream = new ReplyStream(source.protocol, partial => { if (!controller.signal.aborted) update(partial); });
       const decoder = new TextDecoder(); reader = response.body.getReader();
       while (true) {

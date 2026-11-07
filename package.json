@@ -1,6 +1,6 @@
 {
   "name": "simple-one",
-  "version": "1.0.36",
+  "version": "1.0.37",
   "description": "A collection of practical Obsidian tools",
   "main": "main.js",
   "scripts": {
@@ -14,7 +14,7 @@
     "test:share": "node scripts/test-share-timing.mjs && node scripts/test-share-inline-name.mjs && node scripts/test-share-hold.mjs && node scripts/test-share.mjs && node scripts/test-share-api.mjs && node scripts/test-share-edgeone.mjs && node scripts/test-share-reader.mjs",
     "test:display": "node scripts/test-display-replacement.mjs",
     "test:sync": "node scripts/sync/test-local-ignore.mjs && node scripts/sync/test-native-ignore.mjs && node scripts/sync/test-operation-timing.mjs && node scripts/sync/test-transfer-progress.mjs && node scripts/sync/test-hash-cache.mjs && node scripts/sync/test-download-cache.mjs && node scripts/sync/test-download-queue.mjs && node scripts/sync/test-dirty.mjs && node scripts/sync/test-plugin-data-tracking.mjs && node scripts/sync/test-onboarding.mjs && node scripts/sync/test-lightweight-guide.mjs && node scripts/sync/test-mobile-sync.mjs && node scripts/sync/test-local-edit-recheck.mjs && node scripts/sync/test-mobile-runtime.mjs && node scripts/sync/test-migration.mjs && node scripts/sync/test-desktop-backup.mjs && node scripts/sync/test-direct-remote.mjs && node scripts/sync/test-sync-panel.mjs && node scripts/sync/test-sync-mode-switch.mjs",
-    "test:ai": "node scripts/test-ai-style-integration.mjs && node scripts/test-ai-runtime.mjs && node scripts/test-ai-settings.mjs && npm test --prefix modules/ai",
+    "test:ai": "node scripts/test-ai-style-integration.mjs && node scripts/test-ai-runtime.mjs && node scripts/test-ai-settings.mjs && node scripts/test-ai-settings-search.mjs && npm test --prefix modules/ai",
     "test:build": "node scripts/test-reader-payload.mjs",
     "build:verify": "node scripts/verify-build.mjs"
   },

@@ -146,6 +146,13 @@ for (const [parentClass, tabsClass, attribute] of [
   assert.equal(declaration(tab, 'background'), background);
 }
 const form = el(editor, 'div', {cls: 'simple-ai-form'});
+const address = el(form, 'div', {cls: 'setting-item simple-shared-setting simple-ai-address'});
+const addressControl = el(address, 'div', {cls: 'setting-item-control'});
+el(addressControl, 'input', {type: 'text'});
+el(addressControl, 'button', {cls: 'simple-ai-endpoint-lock simple-action-button'});
+for (const width of [400, 600, 900]) {
+  assert.equal(declaration(addressControl, 'display', width), 'flex', 'address and lock keep their layout after obsolete contents rules are removed');
+}
 const input = el(form, 'input', {type: 'text'});
 assert.equal(declaration(form, '--simple-ai-field-indent'), '90px');
 assert.equal(declaration(form, '--simple-ai-key-label-width'), '80px');

@@ -3,7 +3,9 @@ import { Notice, Plugin, requestUrl, requireApiVersion } from "obsidian";
 import { ApiClient } from "./api/client";
 import { LibraryPicker } from "./api/settings";
 import { ApiSource, defaults, Settings } from "./api/types";
-import { agentDefaults, cooperationDefaults, defaultAuxiliaryUsage } from "./agent/types";
+import { defaultAuxiliaryUsage } from "./agent/types";
+import { decodeSettings } from "./settingsSchema";
+import { object } from "./agent/storageSchema";
 import { Cooperation } from "./agent/cooperation";
 import { AgentRuntime } from "./agent/runtime";
 import { ChatView, CHAT_VIEW } from "./agent/view";
@@ -24,6 +26,7 @@ export default class SimpleAIPlugin extends Plugin {
   settings: Settings = defaults();
   client = new ApiClient(request => requestUrl({ ...request, throw: false }), 30000, (url, init) => fetch(url, init));
   private writes: Promise<void> = Promise.resolve();
+  private settingsLoadFailed = false;
   private keyCursor = new Map<string, number>();
   runtime = new AgentRuntime(this);
   cooperation = new Cooperation(this);
@@ -52,17 +55,25 @@ export default class SimpleAIPlugin extends Plugin {
   }
   private async initializeRequests(): Promise<void> {
     this.startupStage = "读取设置";
-    this.settings = { ...defaults(), ...await this.loadData() };
+    this.settingsLoadFailed = true;
+    const synced: unknown = await this.loadData();
+    const settings = decodeSettings(synced ?? {});
     const localPath = `${this.manifest.dir}/private/settings.json`;
-    if (await this.app.vault.adapter.exists(localPath)) {
-      const local = JSON.parse(await this.app.vault.adapter.read(localPath));
-      // Only the API catalogue comes from the synchronised data.json.
-      this.settings = { ...this.settings, ...local, sources: this.settings.sources };
+    let restored = false, found = false;
+    for (const path of [localPath, localPath + ".previous"]) {
+      if (!await this.app.vault.adapter.exists(path)) continue;
+      found = true;
+      try {
+        const raw: unknown = JSON.parse(await this.app.vault.adapter.read(path)), local = object(raw);
+        // Only the API catalogue comes from the synchronised data.json.
+        delete local.sources;
+        this.settings = decodeSettings({ ...settings, ...local, sources: settings.sources }); restored = true; break;
+      } catch { /* Try the previous settings without writing defaults over either copy. */ }
     }
+    if (found && !restored) throw new Error("AI 本地设置损坏，请保留 private/settings.json 及备份排查。");
+    if (!found) this.settings = settings;
+    this.settingsLoadFailed = false;
     if (!this.active) return;
-    const cfg = this.settings.agent;
-    const co = cfg?.cooperation, base = cooperationDefaults();
-    this.settings.agent = { ...agentDefaults(), ...cfg, memory: { ...agentDefaults().memory, ...cfg?.memory }, cooperation: { auxiliary: { ...base.auxiliary, ...co?.auxiliary }, examiner: { ...base.examiner, ...co?.examiner } } };
     this.settings.agent.cooperation.auxiliary.enabled = true;
     migrateAuxiliary(this.settings.agent.cooperation.auxiliary, this.settings.selected);
     if (!this.settings.agent.cooperation.auxiliary.description?.trim()) this.settings.agent.cooperation.auxiliary.description = defaultAuxiliaryUsage;
@@ -165,8 +176,10 @@ export default class SimpleAIPlugin extends Plugin {
     this.keyCursor.set(id, index + 1);
     return keys[index].value;
   }
-  update(settings: Settings): Promise<void> {
-    const snapshot = JSON.parse(JSON.stringify(settings)) as Settings;
+  async update(settings: Settings): Promise<void> {
+    if (this.settingsLoadFailed) throw new Error("AI 设置未成功恢复，停止写入以保留原文件。");
+    const raw: unknown = JSON.parse(JSON.stringify(settings));
+    const snapshot = decodeSettings(raw);
     // Remove the retired master switch from settings saved by older versions.
     delete (snapshot as Settings & { enabled?: boolean }).enabled;
     for (const source of snapshot.sources) delete (source as ApiSource & { streaming?: boolean }).streaming;
@@ -177,7 +190,13 @@ export default class SimpleAIPlugin extends Plugin {
       const { sources, ...local } = snapshot;
       const root = `${this.manifest.dir}/private`;
       if (!await this.app.vault.adapter.exists(root)) await this.app.vault.adapter.mkdir(root);
-      await this.app.vault.adapter.write(`${root}/settings.json`, JSON.stringify(local));
+      const path = `${root}/settings.json`;
+      if (await this.app.vault.adapter.exists(path)) {
+        const old = await this.app.vault.adapter.read(path); let valid = false;
+        try { const raw: unknown = JSON.parse(old), previous = object(raw); delete previous.sources; decodeSettings(previous); valid = true; } catch { /* Preserve the known good backup when the primary is corrupt. */ }
+        if (valid) await this.app.vault.adapter.write(path + ".previous", old);
+      }
+      await this.app.vault.adapter.write(path, JSON.stringify(local));
       await this.saveData({ sources });
       this.settings = snapshot; this.runtime?.changed();
     });

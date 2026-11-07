@@ -97,7 +97,6 @@
 .simple-ai-library-actions { margin-inline-start: auto; flex-wrap: wrap; }
 .simple-ai-editor .simple-ai-address { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); align-items: start; column-gap: 8px; }
 .simple-ai-address .setting-item-info { margin-inline-end: 12px; padding-top: 6px; }
-.simple-ai-address .setting-item-control { display: contents; }
 .simple-ai-address select { grid-column: 2; min-width: 0; }
 .simple-ai-completion { display: flex; align-items: flex-start; gap: 8px; font-size: var(--font-ui-small); }
 .simple-ai-completion input { flex-shrink: 0; margin-top: 3px; }
@@ -117,7 +116,6 @@
 .simple-ai-editor .setting-item-control input[type="password"] { min-width: 0; width: 100%; }
 @media (max-width: 600px) {
   .simple-ai-editor .simple-ai-address { grid-template-columns: max-content minmax(0, 1fr); gap: 8px; }
-  .simple-ai-editor .simple-ai-address .setting-item-control { display: contents; }
   .simple-ai-editor .setting-item-info { flex-basis: 100%; margin-inline-end: 0; }
   .simple-ai-editor .setting-item-control { width: 100%; flex-wrap: wrap; }
   .simple-ai-editor .setting-item-control input { flex: 1; }
@@ -353,9 +351,6 @@
 .simple-ai-chat .simple-ai-message-user .simple-ai-message-actions .simple-ai-icon-button { flex: 0 0 25px; }
 .simple-ai-message-assistant .simple-ai-message-actions { justify-content: flex-start; }
 .simple-ai-message-assistant .simple-ai-message-actions time { order: 2; margin-inline-start: auto; margin-inline-end: 0; }
-.simple-ai-message-assistant .simple-ai-message-actions .simple-ai-call-count { order: 1; }
-.simple-ai-message-assistant .simple-ai-message-actions:has(.simple-ai-call-count) time { margin-inline-start: 8px; }
-.simple-ai-chat .simple-ai-message-actions .simple-ai-call-count { margin-inline-start: auto; white-space: nowrap; }
 
 .simple-ai-chat .simple-ai-bound-notes { position: relative; overflow: visible; max-height: none; font-size: 12px; }
 .simple-ai-chat .simple-ai-bound-notes .simple-ai-note-name { font-size: 12px; flex: 1; text-align: left; padding: 3px 5px; height: 27px; }

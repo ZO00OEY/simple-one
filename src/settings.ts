@@ -10,6 +10,7 @@ import { SyncSettingsTab } from "./features/sync";
 import { runAsync } from "./shared/async";
 import { confirmAction } from "./shared/confirm";
 import { TranslationSettingsModal } from "./features/selectionTranslation";
+import type { AiSettingsPage } from "../modules/ai/src/api/settings";
 import { ThemeColorPicker } from "./shared/themeColorPicker";
 // ============================================================
 // Settings tab UI
@@ -216,7 +217,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.openPage({ type: "automatic-reformat" });
     };
     plugin.openAISettings = () => {
-      this.displayPreviewTab = "ai";
+      this.displayPreviewTab = plugin.settings.enableAI ? "ai" : "basic";
       const settings = (app as App & { setting: { open(): void; openTabById(id: string): void } }).setting;
       settings.open(); settings.openTabById(plugin.manifest.id);
       this.openPage({ type: "overview" });
@@ -252,19 +253,55 @@ export class SimpleSettingTab extends PluginSettingTab {
           setting.settingEl.removeClass("setting-item");
           const content = setting.settingEl.createDiv({ cls: "simple-settings" });
           this.renderDisplayPreviewSettings(content, false);
+          return () => this.plugin.ai?.hideSettings();
         },
       }] },
+      ...(requireApiVersion("1.13.0") ? [{
+        type: "page" as const,
+        name: "AI 设置索引",
+        desc: "定位模型、技能、记忆、压缩与用量统计。",
+        items: [
+          { name: "AI 功能开关", aliases: ["启用 AI", "关闭 AI", "聊天", "后台任务"], control: { type: "toggle" as const, key: "enableAI" } },
+          ...([
+            ["sources", "AI 模型与 API 来源", ["model", "provider", "API key", "模型管理"]],
+            ["skills", "AI 技能库", ["skills", "skill"]],
+            ["memory", "AI 自动记忆", ["memory", "工作记忆"]],
+            ["compression", "AI 自动压缩", ["compact", "上下文", "token 阈值"]],
+            ["traffic", "AI Token 用量统计", ["usage", "流量", "输入", "输出"]],
+          ] as const).map(([page, name, aliases]) => ({
+            type: "page" as const, name, visible: () => this.plugin.settings.enableAI,
+            items: [{
+              name, aliases: [...aliases],
+              render: (setting: Setting) => this.renderAISettingsPage(setting, page),
+            }],
+          })),
+        ],
+      }] : []),
     ];
   }
 
   getControlValue(key: string): unknown {
+    if (key === "enableAI") return this.plugin.settings.enableAI;
     return key === "quickCopyLink" && !this.plugin.isMobile && this.plugin.settings.enhancements.quickCopyLink.enabled;
   }
 
   async setControlValue(key: string, value: unknown): Promise<void> {
+    if (key === "enableAI" && typeof value === "boolean") {
+      try { await this.plugin.ai.setEnabled(value); }
+      finally { if (requireApiVersion("1.13.0")) this.update(); }
+      return;
+    }
     if (key !== "quickCopyLink" || typeof value !== "boolean" || this.plugin.isMobile) return;
     this.plugin.settings.enhancements.quickCopyLink.enabled = value;
     await this.plugin.saveSettings();
+  }
+
+  private renderAISettingsPage(setting: Setting, page: AiSettingsPage): () => void {
+    setting.settingEl.empty();
+    setting.settingEl.removeClass("setting-item");
+    if (this.plugin.settings.enableAI) this.plugin.ai.renderInto(setting.settingEl, page);
+    else setting.settingEl.createEl("p", { text: "AI 尚未启用，请返回 AI 设置索引打开 AI 功能开关。" });
+    return () => this.plugin.ai.hideSettings();
   }
 
   private renderSettings(): void {
@@ -1795,6 +1832,7 @@ export class SimpleSettingTab extends PluginSettingTab {
     }
     this.page = page;
     if (requireApiVersion("1.13.0") && page.type === "overview") {
+      this.plugin.ai?.hideSettings();
       this.syncTab.hide();
       this.containerEl.empty();
       this.containerEl.removeClass("simple-settings");

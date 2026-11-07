@@ -4,17 +4,18 @@ import type { ReplyUpdate } from "./stream";
 import { trafficRecord, usageRecords } from "./usage";
 import { noteTools, VaultTools, validateCall } from "./tools";
 import { isRecord } from "./json";
-import { cooperationDefaults, defaultAuxiliaryUsage, newSession, type AuxiliaryCandidate, type Message, type ModelRole, type ModelSelection, type Session, type Tool } from "./types";
+import { decodeCooperation } from "./cooperationSchema";
+import { cooperationDefaults, defaultAuxiliaryUsage, newSession, type AuxiliaryCandidate, type Message, type ModelRole, type RecordedModelRole, type ModelSelection, type Session, type Tool } from "./types";
 
 export interface WorkRecord {
-  id: string; taskId: string; sessionId?: string; stage: string; role: ModelRole;
+  id: string; taskId: string; sessionId?: string; stage: string; role: RecordedModelRole;
   sourceId: string; sourceName: string; modelId: string; started: number; ended?: number;
   state: "running" | "done" | "failed" | "interrupted"; input: string; output: string; error?: string; truncated: boolean;
   rules: string; evidence?: string; usage?: Message["usage"];
   requestContext?: { messageCount: number; inputChars: number; rulesChars: number; tools: string[]; auxiliaryEnabled: boolean; auxiliaryMode: string; delegateCallId?: string };
 }
-export interface Finding { recordId: string; assessment: string; reason: string; confidence: "low" | "medium" | "high"; actor?: { sourceId: string; sourceName: string; modelId: string; role: ModelRole }; }
-export interface Recommendation { role: ModelRole; sourceId: string; modelId: string; reason: string; baseline?: ModelSelection; baselineFollow?: "main" | "auxiliary"; baselineCandidates?: AuxiliaryCandidate[]; applied?: boolean; previous?: ModelSelection; previousFollow?: "main" | "auxiliary"; previousCandidates?: AuxiliaryCandidate[]; appliedCandidates?: AuxiliaryCandidate[]; }
+export interface Finding { recordId: string; assessment: string; reason: string; confidence: "low" | "medium" | "high"; actor?: { sourceId: string; sourceName: string; modelId: string; role: RecordedModelRole }; }
+export interface Recommendation { role: RecordedModelRole; sourceId: string; modelId: string; reason: string; baseline?: ModelSelection; baselineFollow?: "main" | "auxiliary"; baselineCandidates?: AuxiliaryCandidate[]; applied?: boolean; previous?: ModelSelection; previousFollow?: "main" | "auxiliary"; previousCandidates?: AuxiliaryCandidate[]; appliedCandidates?: AuxiliaryCandidate[]; }
 export interface Assessment {
   id: string; taskId: string; created: number; summary: string; findings: Finding[]; questions: string[];
   recommendations: Recommendation[]; recordIds: string[]; sessionId?: string; revision?: number;
@@ -28,7 +29,7 @@ export interface ExaminerState {
 }
 const fresh = (): ExaminerState => ({ records: [], assessments: [], discussion: [], day: "", requests: 0, lastError: "", lastRequest: 0 });
 const readonlyNames = new Set(["list_folder", "search_notes", "read_note", "read_skill", "inspect_path"]);
-export const roleNames: Record<ModelRole, string> = { main: "主 Agent", auxiliary: "子 Agent", memory: "记忆模型", examiner: "考官模型" };
+export const roleNames: Record<ModelRole, string> & Partial<Record<RecordedModelRole, string>> = { main: "主 Agent", auxiliary: "子 Agent", memory: "记忆模型", examiner: "考官模型" };
 const isModelRole = (value: unknown): value is ModelRole => value === "main" || value === "auxiliary" || value === "memory" || value === "examiner";
 const isConfidence = (value: unknown): value is Finding["confidence"] => value === "low" || value === "medium" || value === "high";
 function historyCalls(value: unknown): NonNullable<Message["calls"]> | undefined {
@@ -50,6 +51,7 @@ export class Cooperation {
   private finish?: Promise<void>;
   private resolveFinish?: () => void;
   private writes: Promise<void> = Promise.resolve();
+  private loadFailed = false;
   private auxiliaryTask = "";
   private auxiliaryGrants = new Map<string, { used: number; limit: number }>();
   constructor(private plugin: SimpleAIPlugin) {}
@@ -63,21 +65,28 @@ export class Cooperation {
   async load(): Promise<void> {
     const adapter = this.plugin.app.vault.adapter;
     if (!await adapter.exists(this.path) && !await adapter.exists(this.path + ".previous")) return;
+    this.loadFailed = true;
     let restored = false;
     for (const path of [this.path, this.path + ".previous"]) {
       if (!await adapter.exists(path)) continue;
-      try { const raw = JSON.parse(await adapter.read(path)); if (Array.isArray(raw.records) && Array.isArray(raw.assessments) && Array.isArray(raw.discussion)) { this.state = { ...fresh(), ...raw }; restored = true; break; } } catch { /* Try the previous snapshot; report failure below if neither copy can be restored. */ }
+      try { const raw: unknown = JSON.parse(await adapter.read(path)); this.state = decodeCooperation(raw); restored = true; break; } catch { /* Try the previous snapshot; report failure below if neither copy can be restored. */ }
     }
     if (!restored) throw new Error("模型工作记录损坏，请保留 private/work.json 及备份排查。");
+    this.loadFailed = false;
     for (const r of this.state.records) if (r.state === "running") { r.state = "interrupted"; r.error = "上次请求被中断，完成情况未知。"; r.ended = Date.now(); }
   }
-  save(): Promise<void> {
-    const snapshot = JSON.stringify(this.state);
+  async save(): Promise<void> {
+    if (this.loadFailed) throw new Error("模型工作记录未成功恢复，停止写入以保留原文件。");
+    const snapshot = JSON.stringify(decodeCooperation(this.state));
     const operation = this.writes.then(async () => {
       const adapter = this.plugin.app.vault.adapter, root = `${this.plugin.manifest.dir}/private`;
       if (!await adapter.exists(root)) await adapter.mkdir(root);
       // Keep the last known valid snapshot rather than copying a corrupt primary.
-      if (await adapter.exists(this.path)) { try { const old = await adapter.read(this.path); const parsed = JSON.parse(old); if (Array.isArray(parsed.records) && Array.isArray(parsed.assessments) && Array.isArray(parsed.discussion)) await adapter.write(this.path + ".previous", old); } catch (error) { if (!(error instanceof SyntaxError)) throw error; } }
+      if (await adapter.exists(this.path)) {
+        const old = await adapter.read(this.path); let valid = false;
+        try { const parsed: unknown = JSON.parse(old); decodeCooperation(parsed); valid = true; } catch { /* Never rotate a corrupt primary over a valid recovery copy. */ }
+        if (valid) await adapter.write(this.path + ".previous", old);
+      }
       await adapter.write(this.path, snapshot);
     }); this.writes = operation.catch(() => {}); return operation;
   }
@@ -85,6 +94,7 @@ export class Cooperation {
   stopAutomatic(): void { if (this.automatic) this.stop(); }
   async waitUntilIdle(): Promise<void> { await this.finish; }
   model(role: ModelRole, session?: Session): ModelSelection {
+    if (!isModelRole(role)) throw new Error("模型角色无效。");
     if (role === "main") return session?.selected ?? this.plugin.settings.selected;
     if (role === "auxiliary") {
       const candidates = this.config.auxiliary.candidates ?? [];
@@ -107,10 +117,11 @@ export class Cooperation {
     return text;
   }
   async request(role: ModelRole, selected: ModelSelection, system: string, messages: Message[], tools: Tool[], signal?: AbortSignal, meta: { session?: Session; taskId?: string; stage?: string; delegateCallId?: string; onUpdate?: ReplyUpdate; maxOutputTokens?: number | null } = {}): Promise<Message> {
+    if (!isModelRole(role)) throw new Error("模型角色无效。");
     if (signal?.aborted) throw new Error("已停止模型请求。");
     const source = this.plugin.settings.sources.find(s => s.id === selected?.sourceId);
     if (!source || !source.models.some(m => m.id === selected?.modelId)) throw new Error(`${roleNames[role]}不可用，请重新选择。`);
-    const input = this.scrub(JSON.stringify(messages, (key, value) => key === "data" ? undefined : value));
+    const input = this.scrub(JSON.stringify(messages, (key, value: unknown) => key === "data" ? undefined : value));
     const rules = this.scrub(system);
     const record: WorkRecord = { id: crypto.randomUUID(), taskId: meta.taskId ?? crypto.randomUUID(), sessionId: meta.session?.id, stage: meta.stage ?? role, role, sourceId: source.id, sourceName: source.name, modelId: selected!.modelId, started: Date.now(), state: "running", input: input.slice(0, 24000), rules: rules.slice(0, 20000), output: "", truncated: input.length > 24000 || rules.length > 20000 };
     record.requestContext = { messageCount: messages.length, inputChars: input.length, rulesChars: rules.length, tools: tools.map(t => t.name), auxiliaryEnabled: this.config.auxiliary.enabled, auxiliaryMode: this.config.auxiliary.mode, delegateCallId: meta.delegateCallId };
@@ -252,7 +263,7 @@ export class Cooperation {
     const calls = new Map<string, string>();
     const delegatedTasks = new Map(selectedMessages.filter(m => !m.process).flatMap(m => (m.calls ?? []).filter(c => c.name === "delegate_task").map(c => [c.id, String(c.arguments.task ?? "").trim()] as const)));
     const auxiliaryAnswers = new Map(selectedMessages.filter(m => m.process && m.role === "assistant" && !m.calls?.length && !m.error && m.delegateCallId).map(m => [m.delegateCallId!, m.text.trim()]));
-    const actors: { role: ModelRole; sourceId: string; sourceName: string; modelId: string }[] = [];
+    const actors: { role: RecordedModelRole; sourceId: string; sourceName: string; modelId: string }[] = [];
     const actorIndex = (r: WorkRecord) => {
       let index = actors.findIndex(a => a.role === r.role && a.sourceId === r.sourceId && a.modelId === r.modelId);
       if (index < 0) { index = actors.length; actors.push({ role: r.role, sourceId: r.sourceId, sourceName: r.sourceName, modelId: r.modelId }); }
@@ -280,7 +291,7 @@ export class Cooperation {
       let delegation: ReturnType<typeof clip> | undefined, reply: object | undefined;
       if (r.role !== "main" && !messages.some(m => m.execution?.recordId === r.id)) {
         try { const output: unknown = JSON.parse(r.output); if (isRecord(output) && typeof output.text === "string") reply = { ...clip(output.text), calls: safeCalls(historyCalls(output.calls)) }; } catch { /* Older or truncated output stays without a structured reply snapshot. */ }
-        if (r.role === "auxiliary") try { const input: unknown = JSON.parse(r.input); if (Array.isArray(input)) { const user = input.find((m: unknown) => isRecord(m) && m.role === "user" && typeof m.text === "string"); if (isRecord(user) && typeof user.text === "string") delegation = clip(user.text); } } catch { /* Older or truncated input stays without a recovered delegation. */ }
+        if (r.role === "auxiliary") try { const input: unknown = JSON.parse(r.input); if (Array.isArray(input)) { const user: unknown = input.find((m: unknown) => isRecord(m) && m.role === "user" && typeof m.text === "string"); if (isRecord(user) && typeof user.text === "string") delegation = clip(user.text); } } catch { /* Older or truncated input stays without a recovered delegation. */ }
       }
       return { id: r.id, requestContext: r.requestContext, role: r.role, actor: actorIndex(r), stage: r.stage, elapsedMs: r.ended === undefined ? undefined : r.ended - r.started, state: r.state, ...(r.error ? { error: conciseError(r.error) } : {}), ...(r.usage ? { usage: r.usage } : {}), ...(r.truncated ? { truncated: true } : {}), delegation, reply };
     });
@@ -339,7 +350,7 @@ export class Cooperation {
     assessment.feedback = { satisfaction, reason, updated: Date.now() }; await this.save();
   }
   async applyRecommendation(recommendation: Recommendation, restore = false): Promise<void> {
-    if (!Object.keys(roleNames).includes(recommendation.role)) throw new Error("模型角色无效。");
+    if (!isModelRole(recommendation.role)) throw new Error("模型角色无效。");
     if (this.plugin.runtime.busy || this.plugin.runtime.memoryBusy || this.busy) throw new Error("请等待模型任务结束后再调整设置。");
     if (recommendation.role === "auxiliary") { await this.applyAuxiliaryRecommendation(recommendation, restore); return; }
     const current = this.configuredModel(recommendation.role), previousFollow = this.configuredFollow(recommendation.role), next = { sourceId: recommendation.sourceId, modelId: recommendation.modelId };

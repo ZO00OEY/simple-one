@@ -21,6 +21,7 @@ Object.assign(plugin, { manifest: { dir: ".obsidian/plugins/simple-ai" }, app: {
   vault: { adapter: {
     exists: async path => localFiles.has(path),
     mkdir: async path => { localFiles.set(path, ""); },
+    read: async path => localFiles.get(path),
     write: async (path, content) => { if (fail) throw new Error("disk failed"); localFiles.set(path, content); },
   } },
 },

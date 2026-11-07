@@ -52,7 +52,7 @@ export class SessionStore {
     }
     // Assign IDs synchronously so subsequent queued snapshots reference the same image.
     for (const s of state.sessions) for (const i of [...s.images, ...s.messages.flatMap(m => m.images ?? [])]) i.id ??= crypto.randomUUID();
-    const snapshots = state.sessions.map(s => ({ session: s, json: JSON.stringify(s, (key, value) => key === "data" ? undefined : value), images: [...s.images, ...s.messages.flatMap(m => m.images ?? [])].filter(i => i.data).map(i => ({ ...i })) }));
+    const snapshots = state.sessions.map(s => ({ session: s, json: JSON.stringify(s, (key, value: unknown) => key === "data" ? undefined : value), images: [...s.images, ...s.messages.flatMap(m => m.images ?? [])].filter(i => i.data).map(i => ({ ...i })) }));
     const sessionIds = new Set([...state.sessions.map(s => s.id), ...this.missingSessions]);
     const imageIds = new Set(state.sessions.flatMap(s => [...s.images, ...s.messages.flatMap(m => m.images ?? [])].flatMap(i => i.id ? [i.id] : [])));
     const cleanupKey = JSON.stringify([[...sessionIds].sort(), [...imageIds].sort()]);

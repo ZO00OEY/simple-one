@@ -1,7 +1,7 @@
 import { Component, requireApiVersion } from "obsidian";
 import type SimplePlugin from "../main";
 import SimpleAIPlugin from "../../modules/ai/src/main";
-import { ApiSettingsTab } from "../../modules/ai/src/api/settings";
+import { ApiSettingsTab, type AiSettingsPage } from "../../modules/ai/src/api/settings";
 import { CHAT_VIEW } from "../../modules/ai/src/agent/view";
 import { translationModels, type ApiSource } from "../../modules/ai/src/api/types";
 
@@ -87,10 +87,10 @@ export default class AiFeature extends Component {
       this.settingsTab = new ApiSettingsTab(core);
     } catch (error) { this.stop(); throw error; }
   }
-  renderInto(container: HTMLElement): void {
+  renderInto(container: HTMLElement, page?: AiSettingsPage): void {
     this.hideSettings();
     if (!this.settingsTab) { container.createEl("p", { text: "AI 尚未启动，请在拓展中重新启用。" }); return; }
-    this.settingsTab.renderInto(container);
+    this.settingsTab.renderInto(container, page);
   }
   hideSettings(): void { this.settingsTab?.hide(); }
   stop(detachViews = true): void {

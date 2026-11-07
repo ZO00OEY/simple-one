@@ -1,6 +1,6 @@
 import { ButtonComponent, Setting, destructiveButton } from "../ui";
 import { setNativeTooltip } from "../tooltipText";
-import { App, Modal, Notice, PluginSettingTab } from "obsidian";
+import { App, Modal, Notice } from "obsidian";
 import type SimpleAIPlugin from "../main";
 import { ApiClient, endpoint, safeError, completeSourceAddresses } from "./client";
 import { ApiSource, label, ModelEntry, newSource, validateSource } from "./types";
@@ -306,13 +306,19 @@ class SourceEditor extends Modal {
     finally { this.busy = false; if (this.active) form.disabled = false; }
   }
 }
-export class ApiSettingsTab extends PluginSettingTab {
+export type AiSettingsPage = "overview" | "sources" | "skills" | "memory" | "examiner" | "auxiliary" | "auxiliaryAssessment" | "traffic" | "rules" | "compression";
+
+/** Embedded in the host settings tab; only the host owns the native settings index. */
+export class ApiSettingsTab {
+  private containerEl!: HTMLElement;
   private stopAgentStatus?: () => void;
   hide(): void { this.stopAgentStatus?.(); this.stopAgentStatus = undefined; }
-  private page: "overview" | "sources" | "skills" | "memory" | "examiner" | "auxiliary" | "auxiliaryAssessment" | "traffic" | "rules" | "compression" = "overview";
-  constructor(private plugin: SimpleAIPlugin) { super(plugin.app, plugin); }
-  display(): void { this.render(); }
-  renderInto(container: HTMLElement): void { this.containerEl = container; this.render(); }
+  private page: AiSettingsPage = "overview";
+  constructor(private plugin: SimpleAIPlugin) {}
+  renderInto(container: HTMLElement, page?: AiSettingsPage): void {
+    if (page) this.page = page;
+    this.containerEl = container; this.render();
+  }
   render(): void {
     this.hide();
     const el = this.containerEl; el.empty(); el.addClass("simple-ai-settings");

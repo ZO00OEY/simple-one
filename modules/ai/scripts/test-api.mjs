@@ -225,4 +225,10 @@ await check("Streaming CORS failures never retry a paid request or suggest a ret
   await assert.rejects(client.chat(source,'','m','',[],[],undefined,()=>{}), error=>error.message.includes('CORS') && !error.message.includes('关闭「流式回复」'));
   assert.equal(streamRequests,1);assert.equal(fallbackRequests,0);
 });
+await check("Missing streaming body reports a usable error without retry or retired setting", async () => {
+  let streamRequests=0, fallbackRequests=0;
+  const client=new ApiClient(async()=>{fallbackRequests++;return reply({});},30000,async()=>{streamRequests++;return new Response(null,{headers:{'content-type':'text/event-stream'}});});
+  await assert.rejects(client.chat(source,'','m','',[],[],undefined,()=>{}),error=>error.message.includes('无法读取流式回复')&&error.message.includes('本次不会自动重试')&&!error.message.includes('关闭'));
+  assert.equal(streamRequests,1);assert.equal(fallbackRequests,0);
+});
 console.log(`${checks} API checks passed; no real network requests or keys used.`);

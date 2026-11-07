@@ -7,7 +7,7 @@ export interface Message {
   delegateCallId?: string;
   usage?: RequestUsage;
   taskId?: string;
-  execution?: { recordId: string; taskId?: string; sourceId: string; sourceName?: string; modelId: string; modelName?: string; role: ModelRole; started?: number; ended?: number; state?: "running" | "done" | "failed" | "interrupted" };
+  execution?: { recordId: string; taskId?: string; sourceId: string; sourceName?: string; modelId: string; modelName?: string; role: RecordedModelRole; started?: number; ended?: number; state?: "running" | "done" | "failed" | "interrupted" };
   timestamp?: number;
   inherited?: boolean;
   diagnostic?: boolean;
@@ -49,6 +49,8 @@ export const agentDefaults = (): AgentSettings => ({
   memory: { selected: null, follow: "auxiliary", quietMinutes: 5, requestGapSeconds: 60, enabled: false, path: "SIMPLE_AI.md", idleHours: 6, intervalHours: 12, inputLimitChars: 0, maxAgeDays: 30, batch: 16, dailyRequests: 20, ignored: "" },
 });
 export type ModelRole = "main" | "auxiliary" | "memory" | "examiner";
+// Retired roles remain readable in history, never as new request/configuration roles.
+export type RecordedModelRole = ModelRole | "review";
 export type ModelSelection = { sourceId: string; modelId: string } | null;
 export interface AuxiliaryCandidate {
   sourceId: string; modelId: string; description: string;

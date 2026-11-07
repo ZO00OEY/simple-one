@@ -379,6 +379,33 @@ await check('Full authorization applies plans without bypassing scope or stale-f
   e.session.folders=[];await e.tools.execute(call('apply_plan',{ids:JSON.stringify([id])}));assert.equal(e.text.get('Notes/a.md'),'alpha updated');assert.equal(e.session.changes[0].state,'applied');
 });
 
+await check('Plan IDs validate before writes, deduplicate and preserve saved partial completion', async () => {
+  for (const ids of [null, {}, [], ['valid', 1], Array(51).fill('valid')]) {
+    const e=env();e.session.permission='full';
+    await assert.rejects(e.tools.execute(call('apply_plan',{ids:JSON.stringify(ids)})),/1至50/);
+    assert.equal(e.session.changes.length,0);
+  }
+  const e=env(), saved=[];e.session.permission='full';
+  const tools=new VaultTools(e.app,e.session,e.cfg,async()=>{saved.push(e.session.changes.map(c=>({id:c.id,state:c.state})));},()=>false);
+  await tools.execute(call('propose_changes',{items:[{name:'create_note',arguments:{path:'Notes/plan-first.md',content:'first'}},{name:'create_note',arguments:{path:'Notes/plan-second.md',content:'second'}}]}));
+  const [first,second]=e.session.changes;
+  assert.deepEqual(Array.from((await tools.execute(call('apply_plan',{ids:JSON.stringify([first.id,first.id])}))).applied),[first.id]);
+  assert.equal(e.text.get(first.path),'first');assert.equal(first.state,'applied');
+  assert(saved.some(snapshot=>snapshot.some(c=>c.id===first.id&&c.state==='applied')));
+  await assert.rejects(tools.execute(call('apply_plan',{ids:JSON.stringify([second.id,'missing'])})),/方案不存在/);
+  assert.equal(e.text.get(second.path),'second');assert.equal(second.state,'applied');
+  assert(saved.at(-1).some(c=>c.id===second.id&&c.state==='applied'));
+});
+await check('Canvas contents require an object with nodes and edges arrays before creating changes', async () => {
+  const e=env();
+  for (const data of [null, [], 'canvas', 7, {}, {nodes:[],edges:{}}, {nodes:{},edges:[]}]) {
+    await assert.rejects(e.tools.execute(call('create_note',{path:'Notes/check.canvas',content:JSON.stringify(data)})),/Canvas 必须/);
+    assert.equal(e.session.changes.length,0);assert(!e.files.has('Notes/check.canvas'));
+  }
+  const content=JSON.stringify({nodes:[],edges:[]});
+  await e.tools.execute(call('create_note',{path:'Notes/check.canvas',content}));assert.equal(e.text.get('Notes/check.canvas'),content);
+});
+
 await check('Status clearance follows actual overlap and does not double-reserve native layout space', () => {
   const pane={left:600,right:1000,top:50,bottom:800};
   assert.equal(bottomOverlap(pane,[{left:500,right:1000,top:772,bottom:800}]),28);

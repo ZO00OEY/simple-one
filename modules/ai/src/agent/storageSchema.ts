@@ -76,12 +76,14 @@ function message(value: unknown): Message {
     const execution = object(value);
     fields(execution, ["recordId", "taskId", "sourceId", "sourceName", "modelId", "modelName", "role", "state"], string);
     for (const key of ["recordId", "sourceId", "modelId"]) execution[key] = string(execution[key]);
-    execution.role = choice(execution.role, ["main", "auxiliary", "memory", "examiner"]);
+    execution.role = choice(execution.role, ["main", "auxiliary", "memory", "examiner", "review"]);
     optional(execution, "state", v => choice(v, ["running", "done", "failed", "interrupted"]));
     fields(execution, ["started", "ended"], number); return execution;
   });
   return { ...o, role: choice(o.role, ["user", "assistant", "tool"]), text: string(o.text) };
 }
+// The other private JSON stores use the same lossless boundary checks.
+export { object, string, number, boolean, choice, array, optional, fields, strings, selection, message as decodeMessage };
 function version(value: unknown): ObjectValue {
   const o = object(value); for (const key of ["path", "before", "after"]) o[key] = string(o[key]); return o;
 }

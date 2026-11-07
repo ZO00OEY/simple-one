@@ -135,7 +135,10 @@ export class VaultTools {
     const change: Change = { id: call.id, kind: call.name === "create_folder" ? "folder-create" : call.name === "delete_folder" ? "folder-delete" : "folder-move", path, target, before, after: "[]", createdFolders,
       state: preview || requiresApproval ? "proposed" : "pending", batchId: this.batchId };
     this.session.changes.push(change); await this.save(); this.check();
-    if (change.state === "proposed") return { proposed: true, changeId: change.id, path, target, entries: before ? JSON.parse(before) : [], instruction: "待用户在操作记录确认应用，尚未操作目录。删除后可从 Obsidian 回收站恢复。" };
+    if (change.state === "proposed") {
+      const entries: unknown = before ? JSON.parse(before) : [];
+      return { proposed: true, changeId: change.id, path, target, entries, instruction: "待用户在操作记录确认应用，尚未操作目录。删除后可从 Obsidian 回收站恢复。" };
+    }
     try {
       if (change.kind === "folder-create") {
         for (const p of createdFolders) { this.check(); await vault.createFolder(p); }
@@ -169,7 +172,7 @@ export class VaultTools {
     if (call.name === "apply_plan") {
       if (this.session.permission !== "full") throw new Error("自动模式需要用户通过确认按钮应用方案。");
       const ids: unknown = JSON.parse(a.ids as string);
-      if (!Array.isArray(ids) || !ids.length || ids.length > 50 || ids.some(id => typeof id !== "string")) throw new Error("请提供1至50个方案 ID。");
+      if (!Array.isArray(ids) || !ids.length || ids.length > 50 || !ids.every((id: unknown): id is string => typeof id === "string")) throw new Error("请提供1至50个方案 ID。");
       const applied: string[] = [];
       for (const id of [...new Set(ids)]) {
         const c = this.session.changes.find(c => c.id === id && c.state === "proposed");
@@ -245,7 +248,7 @@ export class VaultTools {
       }
     }
     if (after.length > 250000) throw new Error("单篇笔记超过250000字符，请拆分任务。");
-    if (call.name !== "delete_note" && path.endsWith(".canvas")) { const data = JSON.parse(after); if (!Array.isArray(data.nodes) || !Array.isArray(data.edges)) throw new Error("Canvas 必须包含 nodes 与 edges 数组。"); }
+    if (call.name !== "delete_note" && path.endsWith(".canvas")) { const data: unknown = JSON.parse(after); if (!isRecord(data) || !Array.isArray(data.nodes) || !Array.isArray(data.edges)) throw new Error("Canvas 必须包含 nodes 与 edges 数组。"); }
     const change: Change = { id: call.id, kind: call.name === "create_note" ? "create" : call.name === "edit_note" ? "edit" : call.name === "delete_note" ? "delete" : "move", path, target, before, after, state: preview || call.name === "delete_note" && !this.approved && this.session.permission !== "full" ? "proposed" : "pending", batchId: this.batchId };
     this.session.changes.push(change); await this.save(); this.check();
     if (change.state === "proposed") return { proposed: true, changeId: change.id, path, target, instruction: "待用户在操作记录中应用，尚未写入。" };

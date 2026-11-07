@@ -536,7 +536,7 @@ export class ChatView extends ItemView {
     const prior = Array.from(this.body.querySelectorAll<HTMLElement>(":scope > .simple-ai-message-assistant[data-task-id]")).filter(row => row.dataset.taskId === actor.taskId).pop();
     card.row.classList.toggle("simple-ai-reply-continuation", !!prior);
     if (prior) prior.addClass("simple-ai-reply-has-next");
-    card.label.setText(`${roleNames[actor.role]} · [${actor.sourceName ?? actor.sourceId}] ${actor.modelName ?? actor.modelId}`);
+    card.label.setText(`${roleNames[actor.role] ?? "历史角色（已停用）"} · [${actor.sourceName ?? actor.sourceId}] ${actor.modelName ?? actor.modelId}`);
     card.status.hidden = !!message.text;
     card.status.setAttribute("aria-label", r.activity);
     card.text.hidden = !message.text;
@@ -671,7 +671,7 @@ export class ChatView extends ItemView {
         const entry = process.requests.createEl("details", { cls: "simple-ai-request" });
         entry.dataset.requestId = record.id; entry.open = expanded.has(record.id);
         const summary = entry.createEl("summary");
-        summary.createSpan({ cls: "simple-ai-request-model", text: `${roleNames[record.role]} · [${record.sourceName}] ${record.modelId}` });
+        summary.createSpan({ cls: "simple-ai-request-model", text: `${roleNames[record.role] ?? "历史角色（已停用）"} · [${record.sourceName}] ${record.modelId}` });
         summary.createSpan({ cls: "simple-ai-request-usage", text: usageText(record.usage) });
         summary.createSpan({ cls: "simple-ai-request-time", text: `${new Date(record.started).toLocaleTimeString("zh-CN", { hour12: false })} · ${seconds}` });
         const content = entry.createDiv("simple-ai-request-content");
@@ -732,7 +732,7 @@ export class ChatView extends ItemView {
         const scrub = (value: string) => secrets.reduce((text, secret) => text.split(secret).join("[密钥已隐藏]"), value);
         const payload = { format: "simple-ai-diagnostics", version: 1, exportedAt: new Date().toISOString(), scope: index === undefined ? "conversation" : "reply", session: { id: session.id, title: session.title, parent: session.parent }, messages, records,
           configuration: { selected: session.selected ?? this.plugin.settings.selected, auxiliary: this.plugin.settings.agent.cooperation.auxiliary, examiner: this.plugin.settings.agent.cooperation.examiner, autoCompactTokens: this.plugin.settings.agent.autoCompactTokens } };
-        const json = JSON.stringify(payload, (key, value) => key === "data" ? undefined : typeof value === "string" ? scrub(value) : value, 2);
+        const json = JSON.stringify(payload, (key, value: unknown) => key === "data" ? undefined : typeof value === "string" ? scrub(value) : value, 2);
         const directory = "999 attachment/Simple AI 日志";
         for (const folder of ["999 attachment", directory]) if (!await this.app.vault.adapter.exists(folder)) await this.app.vault.createFolder(folder);
         const path = directory + '/' + 'simple-ai-' + Date.now() + '-' + crypto.randomUUID().slice(0, 8) + '.json';
@@ -750,7 +750,7 @@ export class ChatView extends ItemView {
     for (const record of records) {
       const entry = modal.contentEl.createEl("details", { cls: "simple-ai-request" });
       const heading = entry.createEl("summary");
-      heading.createSpan({ cls: "simple-ai-request-model", text: roleNames[record.role] + ' · [' + record.sourceName + '] ' + record.modelId });
+      heading.createSpan({ cls: "simple-ai-request-model", text: (roleNames[record.role] ?? "历史角色（已停用）") + ' · [' + record.sourceName + '] ' + record.modelId });
       heading.createSpan({ cls: "simple-ai-request-usage", text: usageText(record.usage) });
       heading.createSpan({ cls: "simple-ai-request-time", text: new Date(record.started).toLocaleString("zh-CN", { hour12: false }) });
       const content = entry.createDiv("simple-ai-request-content");

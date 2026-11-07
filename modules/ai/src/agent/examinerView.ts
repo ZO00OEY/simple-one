@@ -106,7 +106,7 @@ export class ExaminerModal extends Modal {
       const actor = data.actors[record.actor];
       const state = { done: "请求成功", running: "执行中", failed: "请求失败", interrupted: "请求已中断" }[record.state];
       const item = modal.contentEl.createEl("details");
-      item.createEl("summary", { text: `${record.stage} · ${state} · ${roleNames[actor.role]} · [${actor.sourceName}] ${actor.modelId}` });
+      item.createEl("summary", { text: `${record.stage} · ${state} · ${roleNames[actor.role] ?? "历史角色（已停用）"} · [${actor.sourceName}] ${actor.modelId}` });
       item.createEl("p", { text: `${record.elapsedMs === undefined ? "耗时未记录" : (record.elapsedMs / 1000).toFixed(1) + " 秒"} · ${usageText(record.usage)}`, cls: "simple-ai-hint" });
       if (record.error) item.createEl("p", { text: record.error, cls: "simple-ai-memory-result is-error" });
       if (record.delegation?.text) item.createEl("pre", { text: "委派要求：" + record.delegation.text });
