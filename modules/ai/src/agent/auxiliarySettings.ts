@@ -1,11 +1,11 @@
 import { Setting } from "../ui";
 import { Modal, Notice, setIcon } from "obsidian";
 import { childPolicy } from "./workPolicies";
+import { setNativeTooltip } from "../tooltipText";
 import type SimpleAIPlugin from "../main";
 import { type CooperationSettings } from "./types";
 
 export function auxiliarySettings(el: HTMLElement, plugin: SimpleAIPlugin, refresh: () => void): void {
-  const cfg = plugin.settings.agent.cooperation.auxiliary;
   let pending = Promise.resolve();
   const save = (update: (draft: CooperationSettings["auxiliary"]) => void, redraw = false) => {
     pending = pending.then(async () => {
@@ -17,12 +17,15 @@ export function auxiliarySettings(el: HTMLElement, plugin: SimpleAIPlugin, refre
     }).catch(error => { new Notice(error instanceof Error ? error.message : "保存失败"); if (el.isConnected) refresh(); });
     return pending;
   };
-  new Setting(el).setName("通用补充指令").setDesc("所有子 agent 共用；留空使用默认规则。")
+  new Setting(el).setName("通用提示词").setDesc("所有子 Agent 共用的行为要求。编辑时可查看内置规则并补充指令；模型各自擅长的任务由用途说明提供。")
     .addButton(button => button.setButtonText("编辑").onClick(() => {
       const modal = new Modal(plugin.app);
       modal.modalEl.addClass("simple-ai-candidate-editor");
-      modal.titleEl.setText("子 agent 通用补充指令");
-      const input = modal.contentEl.createEl("textarea", { attr: { placeholder: "例如：输出简洁，引用资料路径，明确标注不确定信息。", "aria-label": "子 agent 通用补充指令" } });
+      modal.titleEl.setText("子 Agent 通用提示词");
+      const rules = modal.contentEl.createEl("details", { cls: "simple-ai-child-rules" });
+      rules.createEl("summary", { text: "内置规则（只读）" });
+      rules.createEl("p", { text: childPolicy });
+      const input = modal.contentEl.createEl("textarea", { attr: { placeholder: "补充指令，例如：输出简洁，引用资料路径，明确标注不确定信息。留空使用内置规则。", "aria-label": "通用提示词补充指令" } });
       input.value = plugin.settings.agent.cooperation.auxiliary.supplementalInstructions ?? "";
       new Setting(modal.contentEl)
         .addButton(button => button.setButtonText("取消").onClick(() => modal.close()))
@@ -35,14 +38,9 @@ export function auxiliarySettings(el: HTMLElement, plugin: SimpleAIPlugin, refre
         }));
       modal.open(); input.focus();
     }));
-  const supplement = cfg.supplementalInstructions?.trim();
-  if (supplement) el.createEl("p", { cls: "simple-ai-supplement-preview", text: supplement, attr: { "aria-label": supplement } });
-  const rules = el.createEl("details", { cls: "simple-ai-child-rules" });
-  rules.createEl("summary", { text: "查看内置规则" });
-  rules.createEl("p", { text: childPolicy });
   {
-    el.createEl("p", { cls: "simple-ai-hint", text: "用途说明帮助主 agent 选择模型；行为要求填在“通用补充指令”。" });
-    const selection = new Setting(el).setName("子 agent 可用模型").setDesc("至少选择一个模型，可与主 agent 相同。");
+    const selection = new Setting(el).setName("子 Agent 可用模型").setDesc("勾选可委派任务的模型，可与主 Agent 相同。悬停模型名查看用途说明；用途说明由你编辑；考官实测附注单独显示，带样本数与日期，不改手写说明。")
+      .setClass("simple-ai-auxiliary-selection");
     const picker = selection.controlEl.createEl("details", { cls: "simple-ai-role-picker" });
     const summary = picker.createEl("summary");
     const count = summary.createSpan();
@@ -50,12 +48,10 @@ export function auxiliarySettings(el: HTMLElement, plugin: SimpleAIPlugin, refre
     const panel = picker.createDiv("simple-ai-role-options");
     const search = panel.createEl("input", { type: "search", attr: { placeholder: "搜索来源或模型", "aria-label": "搜索子 agent 候选模型" } });
     const list = panel.createDiv("simple-ai-role-list");
-    const explanation = el.createEl("p", { cls: "simple-ai-hint", text: "为每个模型填写擅长的任务和限制。" });
     const cards = el.createDiv("simple-ai-auxiliary-candidates");
     const renderCards = () => {
       const candidates = plugin.settings.agent.cooperation.auxiliary.candidates ?? [];
       count.setText(`已选择 ${candidates.length} 个模型`);
-      explanation.hidden = !candidates.length;
       cards.empty();
       for (const candidate of candidates) {
         const source = plugin.settings.sources.find(s => s.id === candidate.sourceId);
@@ -63,12 +59,12 @@ export function auxiliarySettings(el: HTMLElement, plugin: SimpleAIPlugin, refre
         const name = `[${source?.name ?? "来源已删除"}] ${model?.alias.trim() || candidate.modelId}${model ? "" : "（不可用）"}`;
         const row = new Setting(cards).setName(name);
         row.settingEl.addClass("simple-ai-auxiliary-row");
-        row.nameEl.setAttribute("aria-label", name);
         const change = (update: (item: typeof candidate) => void) => save(draft => {
           const item = draft.candidates.find(c => c.sourceId === candidate.sourceId && c.modelId === candidate.modelId);
           if (item) update(item);
         });
-        row.nameEl.setAttribute("aria-label", name + (candidate.description ? "\n用途：" + candidate.description : ""));
+        setNativeTooltip(row.nameEl, name + "\n用途：" + (candidate.description || "暂无手写用途说明。"));
+        row.setDesc("考官实测附注：" + (plugin.cooperation.observedNote?.(candidate.sourceId, candidate.modelId) ?? "样本不足：n=0"));
         row.addExtraButton(button => button.setIcon("pencil").setTooltip("编辑模型用途说明").onClick(() => {
           const modal = new Modal(plugin.app);
           modal.modalEl.addClass("simple-ai-candidate-editor");
@@ -83,7 +79,7 @@ export function auxiliarySettings(el: HTMLElement, plugin: SimpleAIPlugin, refre
               const value = input.value.trim();
               await change(item => { item.description = value; });
               const current = plugin.settings.agent.cooperation.auxiliary.candidates.find(c => c.sourceId === candidate.sourceId && c.modelId === candidate.modelId);
-              if (current?.description === value) { modal.close(); if (el.isConnected) renderCards(); }
+              if (current?.description === value) { modal.close(); if (el.isConnected) { renderCards(); renderList(); } }
               else button.setDisabled(false);
             }));
           modal.open();
@@ -103,7 +99,9 @@ export function auxiliarySettings(el: HTMLElement, plugin: SimpleAIPlugin, refre
           const row = group.createEl("label", { cls: "simple-ai-auxiliary-option" });
           const checkbox = row.createEl("input", { type: "checkbox" });
           checkbox.checked = (plugin.settings.agent.cooperation.auxiliary.candidates ?? []).some(c => c.sourceId === source.id && c.modelId === model.id);
-          row.createSpan({ text: model.alias.trim() || model.id });
+          const name = row.createSpan({ text: model.alias.trim() || model.id });
+          const candidate = plugin.settings.agent.cooperation.auxiliary.candidates.find(c => c.sourceId === source.id && c.modelId === model.id);
+          setNativeTooltip(name, (model.alias.trim() || model.id) + "\n" + (candidate?.description || "暂无用途说明；选择后可编辑；考官附注独立保存。"));
           checkbox.onchange = async () => {
             const checked = checkbox.checked; checkbox.disabled = true;
             await save(draft => {

@@ -119,3 +119,11 @@ Include reproduction steps, platform and Obsidian version in [Issues](https://gi
 ## Floating editing toolbar
 
 Select text to format it, choose custom colors, search your vault or the web, and customize toolbar controls. Translation uses the built-in AI catalogue, credentials and usage records; preview preserves the original text and inserts each translation below its paragraph. API credentials stay in Obsidian SecretStorage. Configure the model, language pair and prompt under Editing → Floating toolbar. No standalone AI plugin is required, and translation works with the AI interface disabled.
+
+## AI memory and examiner
+
+Memory and the examiner remain off by default. At the end of a completed turn, the main model can propose up to three durable facts or preferences; a memory model validates user evidence, deduplicates entries and retires superseded rules. Idle processing is a fallback, limited to 16 sessions per batch by default. Each readable entry in SIMPLE_AI.md has provenance and supports individual editing, forgetting and undo; handwritten content outside its automatic region is preserved. Legacy summaries remain available and migrate as pending entries.
+
+Requests include up to ten core memories and eight task matches, within a combined 6000-character entry budget, with included/omitted counts. Matching uses recent user messages, session folders and reference paths. Entries unconfirmed for 30 days become stale and are marked as needing confirmation; matching alone does not confirm them. Fresh user evidence or explicit editing restores active status.
+
+Examiner capability notes stay separate from user memory and handwritten candidate descriptions. Fewer than three independent task samples cannot justify a model switch. Recommendations still require a user click and unchanged configuration baselines; user corrections outweigh examiner inference. Existing Simple One controls and styling are retained. See the [Chinese guide](USAGE.zh-CN.md#ai-记忆与考官) for management details.

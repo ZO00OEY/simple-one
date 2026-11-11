@@ -62,6 +62,7 @@ export class ExaminerModal extends Modal {
       for (const { actor: first, records } of groups.values()) {
         const details = this.target.createEl("details", { cls: "simple-ai-examiner-card" });
         details.createEl("summary", { text: `[${first.sourceName}] ${first.modelId} · ${(roleNames[first.role] ?? "历史角色（已停用）")}` });
+        details.createEl("p", { text: service.observedNote(first.sourceId, first.modelId, first.role) });
         const finished = records.filter(r => r.ended), elapsed = finished.reduce((sum, r) => sum + r.ended! - r.started, 0);
         details.createEl("p", { text: `${records.length} 次请求 · ${records.filter(r => r.state === "done").length} 次接口返回成功 · 平均 ${finished.length ? Math.round(elapsed / finished.length / 1000) : 0} 秒（含失败；接口成功不代表任务完成）` });
         for (const a of state.assessments) for (const f of a.findings.filter(f => f.actor ? f.actor.sourceId === first.sourceId && f.actor.modelId === first.modelId && f.actor.role === first.role : records.some(r => r.id === f.recordId))) {
@@ -126,6 +127,10 @@ export class ExaminerModal extends Modal {
     const details = this.target.createEl("details", { cls: "simple-ai-examiner-card" }); details.createEl("summary", { text: new Date(a.created).toLocaleString() + " · " + a.summary.slice(0, 70) });
     this.markdown(details.createDiv(), a.summary);
     if (!full) return;
+    for (const model of a.modelDescriptions ?? []) {
+      const source = this.plugin.settings.sources.find(s => s.id === model.sourceId);
+      details.createEl("p", { text: `考官实测附注（手写用途说明未改）：[${source?.name ?? model.sourceId}] ${model.modelId}：${model.description}` });
+    }
     for (const f of a.findings) {
       const record = this.plugin.cooperation.state.records.find(r => r.id === f.recordId);
       const actor = record ?? f.actor;
@@ -145,7 +150,7 @@ export class ExaminerModal extends Modal {
   }
   private recommendation(el: HTMLElement, r: Recommendation): void {
     const name = (selected: Recommendation["baseline"]) => selected ? `[${this.plugin.settings.sources.find(s => s.id === selected.sourceId)?.name ?? selected.sourceId}] ${selected.modelId}` : "跟随主 Agent";
-    new Setting(el).setName(r.role === "auxiliary" ? `子 Agent 候选：加入 ${name(r)}` : `${(roleNames[r.role] ?? "历史角色（已停用）")}：${name(r.baseline)} → ${name(r)}`).setDesc(r.reason + (r.role === "main" ? "。更改全局默认，当前会话选择不变。" : ""))
-      .addButton(b => b.setButtonText(r.applied ? "恢复旧配置" : r.role === "auxiliary" ? "加入候选" : "应用建议").setDisabled(this.loading || !Object.prototype.hasOwnProperty.call(roleNames, r.role)).onClick(() => { void this.perform(() => this.plugin.cooperation.applyRecommendation(r, !!r.applied)); }));
+    new Setting(el).setName(r.role === "auxiliary" ? `子 Agent 候选：加入 ${name(r)}` : `${(roleNames[r.role] ?? "历史角色（已停用）")}：${name(r.baseline)} → ${name(r)}`).setDesc(this.plugin.cooperation.recommendationIssue(r) + " " + r.reason + (r.role === "main" ? "。更改全局默认，当前会话选择不变。" : ""))
+      .addButton(b => b.setButtonText(r.applied ? "恢复旧配置" : r.role === "auxiliary" ? "加入候选" : "应用建议").setDisabled(this.loading || !Object.prototype.hasOwnProperty.call(roleNames, r.role) || !r.applied && !!this.plugin.cooperation.recommendationIssue(r)).onClick(() => { void this.perform(() => this.plugin.cooperation.applyRecommendation(r, !!r.applied)); }));
   }
 }

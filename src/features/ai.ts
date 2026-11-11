@@ -87,10 +87,10 @@ export default class AiFeature extends Component {
       this.settingsTab = new ApiSettingsTab(core);
     } catch (error) { this.stop(); throw error; }
   }
-  renderInto(container: HTMLElement, page?: AiSettingsPage): void {
+  renderInto(container: HTMLElement, page?: AiSettingsPage, onNavigate?: (page: AiSettingsPage) => void): void {
     this.hideSettings();
     if (!this.settingsTab) { container.createEl("p", { text: "AI 尚未启动，请在拓展中重新启用。" }); return; }
-    this.settingsTab.renderInto(container, page);
+    this.settingsTab.renderInto(container, page, { onNavigate });
   }
   hideSettings(): void { this.settingsTab?.hide(); }
   stop(detachViews = true): void {

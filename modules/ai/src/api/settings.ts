@@ -308,21 +308,24 @@ class SourceEditor extends Modal {
 }
 export type AiSettingsPage = "overview" | "sources" | "skills" | "memory" | "examiner" | "auxiliary" | "auxiliaryAssessment" | "traffic" | "rules" | "compression";
 
-/** Embedded in the host settings tab; only the host owns the native settings index. */
+/** Embedded in the host settings tab. */
 export class ApiSettingsTab {
   private containerEl!: HTMLElement;
   private stopAgentStatus?: () => void;
   hide(): void { this.stopAgentStatus?.(); this.stopAgentStatus = undefined; }
   private page: AiSettingsPage = "overview";
+  private navigation: { onNavigate?: (page: AiSettingsPage) => void } = {};
   constructor(private plugin: SimpleAIPlugin) {}
-  renderInto(container: HTMLElement, page?: AiSettingsPage): void {
+  renderInto(container: HTMLElement, page?: AiSettingsPage, navigation: typeof this.navigation = {}): void {
     if (page) this.page = page;
+    this.navigation = navigation;
     this.containerEl = container; this.render();
   }
   render(): void {
     this.hide();
     const el = this.containerEl; el.empty(); el.addClass("simple-ai-settings");
     el.classList.toggle("simple-ai-settings-overview", this.page === "overview");
+    this.navigation.onNavigate?.(this.page);
     if (this.page === "traffic") {
       const heading = el.createDiv("simple-ai-library-header").createDiv("simple-ai-library-heading");
       new ButtonComponent(heading).setIcon("arrow-left").setTooltip("返回 AI 设置").onClick(() => { this.page = "overview"; this.render(); });

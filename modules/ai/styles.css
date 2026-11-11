@@ -1,9 +1,12 @@
 .simple-ai-editor { width: min(720px, 94vw); }
+/* Native buttons keep their resting background when hovered. */
+:is(.simple-ai-settings, .simple-ai-config-modal, .simple-ai-editor, .simple-ai-chat, .simple-ai-candidate-editor) { --interactive-hover: var(--interactive-normal); }
+:is(.simple-ai-settings, .simple-ai-config-modal, .simple-ai-editor, .simple-ai-chat, .simple-ai-candidate-editor) .clickable-icon:hover { background-color: transparent; }
 .simple-ai-settings-navigation { cursor: pointer; }
 .simple-ai-settings .simple-ai-model-settings-module .simple-ai-send-shortcut-setting .setting-item-control { width: 248px !important; max-width: 100%; flex: 0 0 248px; }
 .simple-ai-settings .simple-ai-model-settings-module .simple-ai-send-shortcut-setting .simple-ai-send-shortcut { width: 248px; max-width: 100%; }
 .simple-ai-send-shortcut .simple-ai-role-options { width: 100%; min-width: 0; inset-inline: 0; }
-.simple-ai-settings .simple-ai-send-shortcut .simple-ai-role-option:focus-visible { background: var(--background-modifier-hover); outline: 1px solid var(--background-modifier-border-hover); outline-offset: -1px; }
+.simple-ai-settings .simple-ai-send-shortcut .simple-ai-role-option:focus-visible { outline: 1px solid var(--background-modifier-border-hover); outline-offset: -1px; }
 .simple-ai-settings .setting-item-name { color: var(--text-normal); }
 .simple-ai-settings-navigation:is(:hover, :focus-visible) .setting-item-name { color: var(--interactive-accent); }
 .simple-ai-settings-navigation:hover { background: transparent; }
@@ -416,7 +419,7 @@
 .simple-ai-examiner-container { padding: 0; }
 .simple-ai-examiner .modal-title { display: flex; align-items: center; gap: 12px; flex-shrink: 0; margin: 0 30px 14px 0; font-size: var(--font-ui-medium); }
 .simple-ai-examiner-expand { margin-inline-start: auto; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 5px; border: 0; background: transparent; box-shadow: none; color: var(--text-muted); }
-.simple-ai-examiner-expand:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.simple-ai-examiner-expand:hover { color: var(--text-normal); }
 .simple-ai-examiner-expand svg { width: 16px; height: 16px; }
 .simple-ai-examiner .modal-content { flex: 1; min-height: 0; margin: 0; overflow-y: auto; font-size: var(--font-ui-small); }
 .simple-ai-examiner :is(p, li, summary, .setting-item-name, button.simple-action-button, input, select, textarea) { font-size: var(--font-ui-small); }
@@ -549,10 +552,10 @@ body.is-mobile .simple-ai-editor { --simple-ai-field-columns: minmax(0, 1fr); --
   .simple-ai-traffic-value { text-align: end; }
 }
 .simple-ai-chat .simple-ai-history-group-select { box-shadow: none; background: transparent; border: 0; padding: 4px 6px; height: auto; min-height: 32px; color: inherit; font-size: inherit; text-align: left; }
-.simple-ai-chat .simple-ai-history-group-select:hover { background: var(--background-modifier-hover); }
 .simple-ai-chat .simple-ai-history-group-select[aria-pressed="true"],
 .simple-ai-chat .simple-ai-history-group-select.is-partially-selected { color: var(--interactive-accent); }
-.simple-ai-chat .simple-ai-history-group-select[aria-pressed="true"] { background: var(--background-modifier-hover); }
+body .simple-ai-chat button.simple-action-button.simple-action-button.simple-action-button--text.simple-ai-history-group-select:is([aria-pressed="true"], .is-partially-selected)[class],
+body .simple-ai-chat button.simple-action-button.simple-action-button.simple-action-button--text.simple-ai-history-group-select:is([aria-pressed="true"], .is-partially-selected)[class]:is(:hover, :focus-visible):not(:disabled) { background: transparent; }
 .simple-ai-chat div.simple-ai-chat-header { flex: 1; min-width: 0; cursor: default; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .simple-ai-config-modal .setting-item-info { min-width: 0; overflow-wrap: anywhere; }
 .simple-ai-config-modal .setting-item-description { white-space: pre-wrap; }
@@ -737,21 +740,20 @@ body.is-mobile .simple-ai-chat .simple-ai-reasoning-text > :last-child { margin-
   .simple-ai-candidate-editor textarea { min-height: 160px; font-size: 16px; }
 }
 
-.simple-ai-supplement-preview { color: var(--text-muted); font-size: var(--font-ui-smaller); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .simple-ai-child-rules { margin-block: 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); }
 .simple-ai-child-rules summary { cursor: pointer; }
 .simple-ai-child-rules p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
 
 /* Candidate rows must not inherit full-width mobile text-input sizing. */
 .simple-ai-settings .simple-ai-role-list .simple-ai-auxiliary-option {
-  display: flex; width: 100%; box-sizing: border-box; align-items: center; gap: 8px; min-width: 0;
+  display: flex; width: 100%; box-sizing: border-box; align-items: center; justify-content: flex-start; gap: 8px; min-width: 0; text-align: start;
 }
 .simple-ai-settings .simple-ai-role-list .simple-ai-auxiliary-option input[type="checkbox"] {
-  appearance: auto; -webkit-appearance: checkbox;
-  flex: 0 0 16px !important; width: 16px !important; min-width: 16px !important; max-width: 16px !important;
-  height: 16px !important; min-height: 16px !important; margin: 0; padding: 0 !important;
+  flex: 0 0 auto; width: var(--checkbox-size); min-width: var(--checkbox-size); max-width: var(--checkbox-size);
+  height: var(--checkbox-size); min-height: var(--checkbox-size); margin: 0; padding: 0;
 }
-.simple-ai-settings .simple-ai-auxiliary-option > span { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; writing-mode: horizontal-tb; }
+.simple-ai-settings .simple-ai-auxiliary-option > span { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; writing-mode: horizontal-tb; text-align: start; }
+.simple-ai-settings .simple-ai-auxiliary-selection { flex-wrap: nowrap; }
 .simple-ai-settings .simple-ai-model-settings-module .simple-ai-auxiliary-row { display: flex; flex-direction: row; align-items: center; flex-wrap: nowrap; gap: 8px; }
 .simple-ai-settings .simple-ai-model-settings-module .simple-ai-auxiliary-row .setting-item-info { align-items: baseline; gap: 12px; margin: 0; display: block; flex: 1; min-width: 0; }
 .simple-ai-settings .simple-ai-model-settings-module .simple-ai-auxiliary-row .setting-item-name { white-space: normal; overflow-wrap: anywhere; font-size: var(--font-ui-small); }
@@ -843,18 +845,17 @@ body.is-mobile .simple-ai-chat .simple-ai-reasoning-text > :last-child { margin-
   background: transparent;
   box-shadow: none;
 }
-.simple-ai-option:is(:hover, :focus-visible):not(:disabled),
-.simple-ai-settings .simple-ai-role-option:is(:hover, :focus-visible):not(:disabled),
-:is(.simple-ai-role-picker, .simple-ai-reference-picker, .simple-ai-role-source, .simple-ai-model-group) > summary:is(:hover, :focus-visible) {
-  background: var(--background-modifier-hover);
-}
 .simple-ai-option.is-selected,
-.simple-ai-option.is-selected:is(:hover, :focus-visible):not(:disabled) {
+.simple-ai-option.is-selected:is(:hover, :focus-visible):not(:disabled),
+body .simple-ai-options button.simple-action-button.simple-action-button.simple-action-button--text.simple-ai-option.is-selected[class],
+body .simple-ai-options button.simple-action-button.simple-action-button.simple-action-button--text.simple-ai-option.is-selected[class]:is(:hover, :focus-visible):not(:disabled) {
   background: var(--interactive-accent);
   color: var(--text-on-accent);
 }
 .simple-ai-settings .simple-ai-role-option[aria-pressed="true"],
-.simple-ai-settings .simple-ai-role-option[aria-pressed="true"]:is(:hover, :focus-visible):not(:disabled) {
+.simple-ai-settings .simple-ai-role-option[aria-pressed="true"]:is(:hover, :focus-visible):not(:disabled),
+body .simple-ai-settings button.simple-action-button.simple-action-button.simple-action-button--text.simple-ai-role-option[aria-pressed="true"][class],
+body .simple-ai-settings button.simple-action-button.simple-action-button.simple-action-button--text.simple-ai-role-option[aria-pressed="true"][class]:is(:hover, :focus-visible):not(:disabled) {
   color: var(--interactive-accent);
   background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
 }
@@ -874,10 +875,6 @@ body .simple-ai-chat .simple-ai-approval-segments > button.simple-action-button 
   min-height: 25px;
   padding: 3px 6px;
 }
-/* Shared text-button bases are more specific than their hover rule on some hosts. */
-body .simple-ai-chat .simple-ai-model-popover :is(button.simple-ai-group-model, .simple-ai-approval-segments > button).simple-action-button.simple-action-button--text[class]:not([aria-pressed="true"]):is(:hover, :focus-visible):not(:disabled) {
-  background: var(--background-modifier-hover);
-}
 body .simple-ai-chat .simple-ai-model-popover :is(button.simple-ai-group-model, .simple-ai-approval-segments > button).simple-action-button.simple-action-button--text[class][aria-pressed="true"] {
   color: var(--interactive-accent);
   background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
@@ -887,6 +884,7 @@ body .simple-ai-chat .simple-ai-model-popover .simple-ai-approval-options .simpl
   color: var(--text-error);
 }
 body .simple-ai-chat .simple-ai-drawer .simple-ai-history-tabs button.simple-action-button.simple-action-button--text[class][aria-pressed="true"] {
+  background: var(--background-primary);
   color: var(--interactive-accent);
   box-shadow: inset 0 -1px var(--interactive-accent);
 }

@@ -90,9 +90,15 @@ export interface Session {
   status: "idle" | "running" | "interrupted"; problem: string; summary: string;
 }
 export interface MemorySummary { revision: number; text: string; updated: number; fingerprint?: string; processedChars?: number; prefixHash?: string; complete?: boolean; }
+export interface MemoryItem {
+  id: string; kind: "preference" | "correction" | "fact" | "rule"; text: string; scope?: string;
+  sourceSessionId?: string; sourceDate: number; lastConfirmedAt: number;
+  confidence: "low" | "medium" | "high"; status: "active" | "pending" | "stale" | "retired";
+  retiredReason?: string; pinned?: boolean;
+}
 export interface PrivateState {
   sessions: Session[]; active: string;
-  memory: { lastRunAt?: number; forgotten?: string[]; summaries: Record<string, MemorySummary>; merged: string; day: string; requests: number; versions: { path: string; before: string; after: string }[]; lastError: string; lastResult?: { kind: "success" | "error" | "paused"; text: string; at: number }; };
+  memory: { items?: MemoryItem[]; migratedAt?: number; forgottenItems?: string[]; itemVersions?: { id: string; before?: MemoryItem; after?: MemoryItem }[]; lastRunAt?: number; forgotten?: string[]; summaries: Record<string, MemorySummary>; merged: string; day: string; requests: number; versions: { path: string; before: string; after: string }[]; lastError: string; lastResult?: { kind: "success" | "error" | "paused"; text: string; at: number }; };
 }
 export const newState = (): PrivateState => ({ sessions: [], active: "", memory: { summaries: {}, merged: "", day: "", requests: 0, versions: [], lastError: "" } });
 export function newSession(selected: Session["selected"]): Session {

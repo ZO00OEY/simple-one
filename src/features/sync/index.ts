@@ -1,6 +1,7 @@
 import { tooltipText } from "../../shared/tooltipText";
 import { createFileListLayout, fileListPanel, renderLayoutToggle, FileListLayout, renderFileTree, renderPathTree } from "./fileTree";
 import { remoteSnapshotRef } from "./directRemote";
+import { localRuleMergeTarget } from "./localRuleMerge";
 import { legacyScopeRules, readRootIgnore, rootIgnoreMatcher, organizedLocalIgnore } from "./localIgnore";
 import { inspectIgnoreTracking, applyIgnoreTracking, preserveRootIgnore, type IgnoreTrackingPlan } from "./nativeIgnore";
 import { setActionIcon, styleActionButton } from "../../shared/actionButton";
@@ -327,6 +328,9 @@ export default class SyncFeature extends Component {
   private sharedSettingsWritable = true;
   private deferredMergePaths: string[] = [];
   private syncActivity?: ViewStatusState;
+  private syncBlocker?: ViewStatusState;
+
+  getSyncBlocker(): ViewStatusState | undefined { return this.syncBlocker; }
   private setupPreview?: SetupPreview;
   private setupActivity?: ViewStatusState;
 
@@ -1067,6 +1071,7 @@ export default class SyncFeature extends Component {
       this.desktopTaskActive = true;
       try {
       const isFetchTask = !!errorContext && (errorContext.includes("Fetch") || errorContext.includes("Pull"));
+      this.syncBlocker = undefined;
       const isPushTask = !!errorContext && (errorContext.includes("Push") || errorContext.includes("同步"));
       this.desktopGitTrace = this.settings.recordSyncPerformance && (isFetchTask || isPushTask)
         ? [
@@ -1098,6 +1103,7 @@ export default class SyncFeature extends Component {
     this.desktopGitQueue = run.catch(async (error) => {
       this.clearSyncActivity();
       if (error instanceof SyncDeferredError) {
+        this.syncBlocker = { tone: "pending", text: error.message };
         this.setStatus(error.message);
         await this.refreshSyncView();
         return;
@@ -1504,6 +1510,7 @@ export default class SyncFeature extends Component {
     if (this.syncing || this.switchingSyncMode || this.host.share?.busy) throw new Error("请等待当前同步或发布结束再处理下载待办。");
     const engine = this.getMobileGithub();
     this.syncing = true;
+    this.syncBlocker = undefined;
     this.syncLog = { context: "轻量同步 · 手动继续下载", timings: [], recorded: false };
     const expectedCommit = engine.state.pending?.commit;
     try {
@@ -1792,6 +1799,7 @@ export default class SyncFeature extends Component {
       return;
     }
     this.syncing = true;
+    this.syncBlocker = undefined;
     this.setStatus(this.useLightweightSync() ? "正在同步…" : "准备检查本机修改…");
     const logContext = `${this.useLightweightSync() ? "轻量同步" : "完整同步"} · ${showNotice ? "手动" : "自动"}`;
     this.syncLog = { context: logContext, timings: [], recorded: false };
@@ -1818,6 +1826,7 @@ export default class SyncFeature extends Component {
       if (showNotice) new Notice("同步：同步完成");
     } catch (error) {
       if (error instanceof SyncDeferredError) {
+        this.syncBlocker = { tone: "pending", text: error.message };
         this.setStatus(error.message);
         if (showNotice) new Notice(error.message);
         return;
@@ -2324,7 +2333,9 @@ export default class SyncFeature extends Component {
           this.desktopGitProcesses.delete(child);
           markFinished();
           if (error) {
-            const diagnostic = (stderr || stdout || error.message).trim();
+            const diagnostic = ((error as Error & { killed?: boolean }).killed
+              ? `Git 命令超时（${Math.round(timeoutMs / 1000)} 秒），已停止本次操作。\n${stderr || stdout || error.message}`
+              : stderr || stdout || error.message).trim();
             const secret = stdinText?.trim();
             reject(new Error(secret ? diagnostic.split(secret).join("[hidden]") : diagnostic));
           }
@@ -2489,15 +2500,24 @@ export default class SyncFeature extends Component {
     }
     const mergeBase = (await this.gitRaw(["merge-base", "HEAD", "FETCH_HEAD"])).trim();
     const localChanges = parseGitStatus(await this.gitRaw(["status", "--porcelain=v1", "--untracked-files=no", "-z"]));
-    const remoteChanges = parseGitNameStatus(
+    let remoteChanges = parseGitNameStatus(
       await this.gitRaw(["diff", "--name-status", "-z", "--find-renames", mergeBase, "FETCH_HEAD"])
     );
     const ignored = rootIgnoreMatcher(await readRootIgnore(this.app.vault.adapter), this.app.vault.configDir);
     const headFiles = new Set((await this.gitRaw(["ls-tree", "-r", "--name-only", "-z", "HEAD"])).split("\0").filter(Boolean));
-    if (remoteChanges.some(change => (ignored(change.path) || (change.oldPath && ignored(change.oldPath))) &&
-      !(change.kind === "deleted" && !headFiles.has(change.path)))) {
-      throw new SyncDeferredError("远端更新涉及本机排除文件，已在合并前停止。请先在已接入设备修复远端追踪，或重新打开接入引导预览历史迁移；本机规则和状态文件未被覆盖。");
+    const localRule = `${this.app.vault.configDir}/plugins/${this.manifest.id}/.gitignore`;
+    const localRules = remoteChanges.filter(change => change.path === localRule && ignored(change.path) &&
+      !headFiles.has(change.path) && !change.oldPath).map(change => change.path);
+    const blocked = remoteChanges.filter(change => !localRules.includes(change.path) &&
+      (ignored(change.path) || (change.oldPath && ignored(change.oldPath))) &&
+      !(change.kind === "deleted" && !headFiles.has(change.path)));
+    if (blocked.length) {
+      throw new SyncDeferredError(`同步暂缓 · 远端更新涉及 ${blocked.length} 个本机排除文件：${blocked.map(change => change.path).join("、")}。请在接入引导中预览并修复文件追踪；本机文件未被覆盖。`);
     }
+    const mergeTarget = await localRuleMergeTarget((args, stdin) =>
+      this.exec("git", args, false, false, 120000, undefined, stdin),
+    (await this.git(["rev-parse", "FETCH_HEAD"])).trim(), localRules);
+    remoteChanges = remoteChanges.filter(change => !localRules.includes(change.path));
     const overlappingPaths = findRemoteChangeOverlaps(localChanges, remoteChanges);
     if (overlappingPaths.length > 0) {
       this.deferredMergePaths = overlappingPaths;
@@ -2524,7 +2544,7 @@ export default class SyncFeature extends Component {
     this.setSyncActivity("正在合并云端更新…", "merge");
     try {
       await preserveRootIgnore(this.app.vault.adapter, args => this.gitRaw(args), () =>
-        this.traceDesktopGitStep("Git merge（合并远端提交）", () => this.git(["merge", "--no-edit", "FETCH_HEAD"])));
+        this.traceDesktopGitStep("Git merge（合并远端提交）", () => this.git(["merge", "--no-edit", mergeTarget])));
     } catch (error) {
       const conflicts = await this.getUnmergedPaths();
       if (conflicts.length === 0) {
@@ -3375,7 +3395,7 @@ class ZoeySyncView extends ItemView {
     };
     if (changesError) addError("无法读取更改", changesError);
     const activeError = this.plugin.getActiveSyncError();
-    if (activeError) addError(activeError.context || "同步", activeError.message);
+    if (activeError && !this.plugin.getSyncBlocker?.()) addError(activeError.context || "同步", activeError.message);
     if (this.downloadPage && this.transferError) addError("下载恢复", this.transferError);
     for (const [message, contexts] of errors) statusCopy.createDiv({
       text: [...contexts].join(" / ") + "：" + message, cls: "simple-one-sync-view__error-detail", attr: { role: "alert" }
@@ -3512,6 +3532,9 @@ class ZoeySyncView extends ItemView {
 
     const lightweightPending = this.plugin.getLightweightPendingStatus();
     if (lightweightPending) return lightweightPending;
+
+    const blocker = this.plugin.getSyncBlocker?.();
+    if (blocker) return blocker;
 
     const { lastSyncAt, lastPullAt } = this.plugin.settings;
     const showPull = this.plugin.nativeGitEnabled() && this.showLastPull;

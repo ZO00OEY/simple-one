@@ -1,4 +1,4 @@
-import { newState, type Call, type Change, type ImageInput, type MemorySummary, type Message, type PrivateState, type Session, type TextInput } from "./types";
+import { newState, type Call, type Change, type ImageInput, type MemoryItem, type MemorySummary, type Message, type PrivateState, type Session, type TextInput } from "./types";
 
 // Decode copies, retaining unknown fields for newer versions. Missing historical
 // fields may receive defaults; present but malformed collections must never be
@@ -114,6 +114,15 @@ export function decodeSession(value: unknown, expectedId?: string): Session {
     draft: string(o.draft ?? ""), images, changes, messages,
     status: choice(o.status ?? "idle", ["idle", "running", "interrupted"]), problem: string(o.problem ?? ""), summary: string(o.summary ?? "") };
 }
+export function decodeMemoryItem(value: unknown): MemoryItem {
+  const o = object(value);
+  fields(o, ["scope", "sourceSessionId", "retiredReason"], string); optional(o, "pinned", boolean);
+  const result = { ...o, id: id(o.id), text: string(o.text), kind: choice(o.kind, ["preference", "correction", "fact", "rule"]),
+    confidence: choice(o.confidence, ["low", "medium", "high"]), status: choice(o.status, ["active", "pending", "stale", "retired"]),
+    sourceDate: number(o.sourceDate), lastConfirmedAt: number(o.lastConfirmedAt) };
+  if (!result.text.trim() || result.sourceDate < 0 || result.lastConfirmedAt < 0) throw new Error("记忆条目格式无效。");
+  return result;
+}
 export function decodeMemory(value: unknown): PrivateState["memory"] {
   const o = object(value), rawSummaries = object(o.summaries), summaries: Record<string, MemorySummary> = {};
   for (const [key, value] of Object.entries(rawSummaries)) {
@@ -123,7 +132,15 @@ export function decodeMemory(value: unknown): PrivateState["memory"] {
     Object.defineProperty(summaries, key, { value: { ...summary, text: string(summary.text), revision: number(summary.revision), updated: number(summary.updated) }, enumerable: true, writable: true, configurable: true });
   }
   const versions = array(o.versions, value => { const v = version(value); return { ...v, path: string(v.path), before: string(v.before), after: string(v.after) }; });
-  optional(o, "forgotten", strings);
+  optional(o, "forgotten", strings); optional(o, "forgottenItems", strings); optional(o, "migratedAt", number);
+  optional(o, "items", value => {
+    const items = array(value, decodeMemoryItem);
+    if (new Set(items.map(item => item.id)).size !== items.length) throw new Error("记忆 ID 重复。");
+    return items;
+  });
+  optional(o, "itemVersions", value => array(value, entry => {
+    const v = object(entry); v.id = id(v.id); fields(v, ["before", "after"], decodeMemoryItem); return v;
+  }));
   fields(o, ["merged", "day", "lastError"], string); fields(o, ["requests", "lastRunAt"], number);
   optional(o, "lastResult", value => { const result = object(value); result.kind = choice(result.kind, ["success", "error", "paused"]); result.text = string(result.text); result.at = number(result.at); return result; });
   return { ...o, summaries, versions,

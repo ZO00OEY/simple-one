@@ -44,6 +44,7 @@ export class ChatView extends ItemView {
   private unsubscribe?: () => void;
   private body!: HTMLElement;
   private status!: HTMLElement;
+  private memoryNotice!: HTMLElement;
   private approval!: HTMLElement;
   private composer!: HTMLTextAreaElement;
   private tokenPreview!: HTMLElement;
@@ -113,6 +114,7 @@ export class ChatView extends ItemView {
     const scrollLayout = new ResizeObserver(() => this.updateScrollToLatest());
     scrollLayout.observe(this.body);
     this.register(() => scrollLayout.disconnect());
+    this.memoryNotice = el.createDiv("simple-ai-hint"); this.memoryNotice.setAttribute("aria-live", "polite");
     this.status = el.createDiv("simple-ai-chat-status");
     this.approval = el.createDiv("simple-ai-chat-actions");
     this.links = el.createDiv("simple-ai-bound-notes");
@@ -196,6 +198,16 @@ export class ChatView extends ItemView {
     });
   }
   private refresh(): void {
+    if (this.memoryNotice) {
+      this.memoryNotice.empty();
+      const runtime = this.plugin.runtime;
+      for (const update of runtime.memoryUpdates.filter(update => update.sessionId === runtime.active.id)) {
+        const row = this.memoryNotice.createDiv({ text: "已记住：" + update.text });
+        new ButtonComponent(row).setButtonText("撤销").setDisabled(runtime.busy || runtime.memoryBusy).onClick(() => { void this.perform(async () => {
+          await runtime.memories.undo(update.id); runtime.memoryUpdates = runtime.memoryUpdates.filter(item => item !== update); runtime.changed();
+        }); });
+      }
+    }
     const r = this.plugin.runtime, s = r.active; if (!s || !this.body) return;
     this.scheduleTokenPreview();
     if (this.shownId !== s.id || r.busy) this.modelPopover?.close();

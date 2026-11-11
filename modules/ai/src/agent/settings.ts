@@ -49,7 +49,7 @@ class AgentSettingsModal extends Modal {
       field.value = cfg.instructions;
       field.onchange = () => { cfg.instructions = field.value; void perform(() => this.save()); };
       const memory = settingsSection(el, "工作记忆");
-      memory.createEl("p", { cls: "simple-ai-hint", text: "AI 按自动记忆规则从会话中提取工作习惯，生成并更新工作记忆。开启后会在空闲时整理，并将记忆文件作为模型的工作参考；与模型协作中的自动记忆共用同一开关。" });
+      memory.createEl("p", { cls: "simple-ai-hint", text: "AI 按自动记忆规则从会话中提取工作习惯，生成并更新工作记忆。开启后会在回复结束时校验长期偏好，空闲整理负责补漏；模型按当前任务检索相关条目，过期条目标为待确认；与模型协作中的自动记忆共用同一开关。" });
       new Setting(memory).setName("启用工作记忆")
         .addToggle(t => settingsCheckbox(t).setValue(cfg.memory.enabled).onChange(async value => {
           cfg.memory.enabled = value;
@@ -60,7 +60,7 @@ class AgentSettingsModal extends Modal {
         .addButton(button => button.setIcon("file-text").setTooltip("打开工作记忆文件").onClick(() => {
           const file = this.app.vault.getAbstractFileByPath(cfg.memory.path);
           if (file instanceof TFile) { void this.app.workspace.getLeaf(false).openFile(file); this.close(); }
-          else new Notice("尚未生成工作记忆；开启后由 AI 在空闲时整理生成。");
+          else new Notice("尚未生成工作记忆；开启后可在对话中表达长期偏好，或手动提取。");
         }));
       const preview = memory.createEl("textarea", { cls: "simple-ai-config-text", attr: { "aria-label": "AI 生成的工作记忆", readonly: "true" } });
       const file = this.app.vault.getAbstractFileByPath(cfg.memory.path);
@@ -120,8 +120,37 @@ class AgentSettingsModal extends Modal {
       if (result) status.createEl("p", { cls: "simple-ai-memory-result is-" + result.kind, text: "上次结果：" + result.text + (result.at ? "（" + new Date(result.at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) + "）" : "（时间未记录）") });
     };
     this.unsubscribe = this.plugin.runtime.subscribe(renderStatus); renderStatus();
+    const entries = settingsSection(el, "逐条记忆", "simple-ai-memory-section");
+    const renderItems = async () => {
+      const store = this.plugin.runtime.memories;
+      if (!store) return;
+      try {
+        const items = await store.migrate();
+        if (!entries.isConnected) return;
+        entries.empty();
+        if (this.plugin.runtime.state.memory.migratedAt) entries.createEl("p", { cls: "simple-ai-hint", text: "旧摘要已保留并迁移为待确认条目；原摘要仍保留作迁移来源。记忆文件是正文真相来源。" });
+        for (const item of items) {
+          const row = new Setting(entries).setName(item.text).setDesc(item.kind + " · " + item.confidence + " · " + item.status + " · " + new Date(item.sourceDate).toLocaleString());
+          row.addButton(b => b.setButtonText("来源").onClick(() => {
+            const source = this.plugin.runtime.state.sessions.find(s => s.id === item.sourceSessionId);
+            const modal = new Modal(this.app); modal.titleEl.setText(source?.title ?? item.sourceSessionId ?? "来源未记录（待确认）");
+            modal.contentEl.createEl("pre", { text: source ? source.messages.filter(m => (m.role === "user" || m.role === "assistant") && !m.process && !m.generated).map(m => m.role + "：" + m.text).join("\n\n") : "来源：" + (item.sourceSessionId ?? "历史导入") + "\n时间：" + new Date(item.sourceDate).toLocaleString() }); modal.open();
+          }));
+          row.addButton(b => b.setButtonText("编辑").onClick(() => {
+            const modal = new Modal(this.app); modal.titleEl.setText("编辑并确认记忆"); let text = item.text, scope = item.scope ?? "", pinned = item.pinned ?? false;
+            new Setting(modal.contentEl).setName("正文").addTextArea(t => t.setValue(text).onChange(v => { text = v; }));
+            new Setting(modal.contentEl).setName("适用范围").addText(t => t.setValue(scope).onChange(v => { scope = v; }));
+            new Setting(modal.contentEl).setName("置顶").addToggle(t => settingsCheckbox(t).setValue(pinned).onChange(v => { pinned = v; }));
+            new ButtonComponent(modal.contentEl).setButtonText("保存").onClick(() => { void perform(async () => { await store.edit(item.id, { text, scope, pinned }); modal.close(); await renderItems(); }); }); modal.open();
+          }));
+          row.addButton(b => b.setButtonText("忘掉").onClick(() => { void perform(async () => { await store.edit(item.id, null); await renderItems(); }); }));
+        }
+        for (const version of this.plugin.runtime.state.memory.itemVersions ?? []) new ButtonComponent(entries).setButtonText("撤销：" + (version.after?.text ?? version.before?.text ?? version.id).slice(0, 50)).onClick(() => { void perform(async () => { await store.undo(version.id); await renderItems(); }); });
+      } catch (error) { entries.setText(error instanceof Error ? error.message : "记忆读取失败。"); }
+    };
+    void renderItems();
     const options = settingsSection(el, "记忆整理设置", "simple-ai-memory-section");
-    options.createEl("p", { cls: "simple-ai-hint", text: "打开 Obsidian 且停止操作 5 分钟后执行；错过的周期只补一次。已有进度保存在本机。" });
+    options.createEl("p", { cls: "simple-ai-hint", text: "回复结束时校验候选记忆；闲时补漏须打开 Obsidian 且停止操作 5 分钟，默认每批最多 16 个会话。默认 30 天未证实的条目标为待确认，确认后恢复生效；已有进度保存在本机。" });
     for (const [key, name, min, max, fallback, description] of [
       ["intervalHours", "整理频率（小时）", 1, 720, 12, "距离上次完成整理的间隔；手动整理不受频率限制。"],
       ["idleHours", "会话闲置时长（小时）", 1, 720, 6, "会话最后更新距今达到此时长才处理，正在对话的会话跳过。"],

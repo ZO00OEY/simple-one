@@ -73,6 +73,31 @@ function declaration(element, property, width = 900) {
   }
   return best?.value;
 }
+// Selected entries must survive the shared button hover cascade.
+for (const [parentClass, buttonClass, attributes, expected] of [
+  ['simple-ai-options', 'simple-ai-option is-selected', {}, 'var(--interactive-accent)'],
+  ['simple-ai-settings', 'simple-ai-role-option', {'aria-pressed': 'true'}, 'color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary))'],
+  ['simple-ai-chat', 'simple-ai-history-group-select', {'aria-pressed': 'true'}, 'transparent'],
+  ['simple-ai-chat', 'simple-ai-history-group-select is-partially-selected', {'aria-pressed': 'mixed'}, 'transparent'],
+]) {
+  const parent = el(doc.body, 'div', {cls: parentClass});
+  const button = el(parent, 'button', {cls: 'simple-action-button simple-action-button--text ' + buttonClass, attr: attributes});
+  assert.equal(declaration(button, 'background'), expected, buttonClass);
+  for (const state of ['css-hover', 'css-focus-visible']) {
+    button.classList.add(state);
+    assert.equal(declaration(button, 'background'), expected, buttonClass + ' preserves selection on ' + state);
+    button.classList.remove(state);
+  }
+}
+const nativeOption = el(doc.body, 'button', {cls: 'simple-ai-option is-selected css-hover'});
+assert.equal(declaration(nativeOption, 'background'), 'var(--interactive-accent)', 'native selected option keeps its accent on hover');
+const historyChat = el(doc.body, 'div', {cls: 'simple-ai-chat'});
+const historyDrawer = el(historyChat, 'div', {cls: 'simple-ai-drawer'});
+const historyTabs = el(historyDrawer, 'div', {cls: 'simple-ai-history-tabs'});
+const historyTab = el(historyTabs, 'button', {cls: 'simple-action-button simple-action-button--text', attr: {'aria-pressed': 'true'}});
+assert.equal(declaration(historyTab, 'background'), 'var(--background-primary)');
+historyTab.classList.add('css-hover');
+assert.equal(declaration(historyTab, 'background'), 'var(--background-primary)', 'selected history tab keeps its underline without a gray hover bar');
 let saves = 0;
 const plugin = {app: {}, settings: defaults(), runtime: {busy: false, memoryBusy: false, userActive() {}, save: async () => {saves++;}}, cooperation: {busy: false}, update: async () => {}};
 plugin.settings.sources = [{id: 'one', name: 'Source', models: [{id: 'alpha', alias: 'Alpha'}, {id: 'beta', alias: 'Beta'}]}];
@@ -95,8 +120,9 @@ for (const button of [models[0], chat.querySelector('.simple-ai-approval-segment
   button.disabled = false;
   button.classList.remove('css-hover');
 }
+const modelBackground = declaration(models[1], 'background');
 models[1].classList.add('css-hover');
-assert.equal(declaration(models[1], 'background'), 'var(--background-modifier-hover)', 'unselected hover comes from the host');
+assert.equal(declaration(models[1], 'background'), modelBackground, 'unselected models keep their resting background on hover');
 models[1].disabled = true;
 assert.notEqual(declaration(models[1], 'background'), 'var(--background-modifier-hover)', 'disabled controls do not hover');
 models[1].disabled = false;
@@ -132,7 +158,16 @@ for (const row of settingsHost.querySelectorAll('.simple-ai-settings-navigation'
   assert.equal(row.getAttribute('tabindex'), null);
   assert(row.querySelector('button.simple-action-button'));
 }
-const editor = el(doc.body, 'div', {cls: 'simple-ai-editor simple-settings'});
+const editor = el(doc.body, 'div', {cls: 'simple-ai-editor'});
+const section = el(editor, 'fieldset', {cls: 'simple-preview-checkbox-group simple-ai-settings-section'});
+assert.equal(declaration(section, 'border-radius'), '6px', 'source editor frames are rounded without a settings-page ancestor');
+for (const parentClass of ['simple-ai-settings', 'simple-ai-config-modal', 'simple-ai-editor', 'simple-ai-chat', 'simple-ai-candidate-editor', 'simple-settings']) {
+  const parent = el(doc.body, 'div', {cls: parentClass});
+  const button = el(parent, 'button', {cls: 'simple-action-button simple-action-button--plain'});
+  const background = declaration(button, 'background');
+  button.classList.add('css-hover');
+  assert.equal(declaration(button, 'background'), parentClass === 'simple-settings' ? 'var(--background-modifier-hover)' : background, parentClass + ' button hover');
+}
 for (const [parentClass, tabsClass, attribute] of [
   ['simple-settings simple-ai-settings', 'simple-ai-settings-tabs', 'aria-selected'],
   ['simple-ai-config-modal simple-ai-examiner', 'simple-ai-examiner-tabs', 'aria-pressed'],
