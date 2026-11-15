@@ -94,6 +94,7 @@ const cleanupPlugin = { app: {
   metadataCache: { resolvedLinks: { "note.md": { "Attachments/used.png": 1 } } },
   vault: {
     getMarkdownFiles: () => [],
+    getFiles: () => [],
     getAbstractFileByPath: path => entries.get(path),
     adapter: { list: async path => ({ files: diskFiles.get(path) || [], folders: entries.get(path).children.filter(child => child instanceof TFolder).map(child => child.path) }) },
   },

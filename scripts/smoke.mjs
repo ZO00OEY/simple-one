@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import "./test-action-buttons.mjs";
 import "./test-attachment-actions.mjs";
 import "./test-attachment-automation.mjs";
+import "./test-note-deletion-attachments.mjs";
 import "./test-attachment-reference-jump.mjs";
 import "./test-mermaid-viewer.mjs";
 import { build } from "esbuild";
@@ -180,6 +181,7 @@ const organizerPlugin = {
     vault: {
       configDir: '.obsidian', getConfig: () => organizerLocation,
       getFiles: () => organizerFiles,
+      read: async () => '{"nodes":[]}',
       getMarkdownFiles: () => organizerFiles.filter(file => file.extension === 'md'),
       getAbstractFileByPath: path => path === 'Attachments' ? organizerFolder : organizerFiles.find(file => file.path === path),
     },

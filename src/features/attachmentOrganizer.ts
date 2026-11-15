@@ -39,6 +39,7 @@ type AutomaticRun = {
   paths?: ReadonlySet<string>;
   notes?: TFile[];
   canDelete?: (file: TFile | TFolder) => boolean;
+  deletedNoteAttachments?: ReadonlySet<string>;
 };
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif"]);
@@ -117,7 +118,7 @@ export async function checkUnusedAttachments(plugin: SimplePlugin, automatic?: A
   if (!folder) return;
   if (!attachmentReferencesReady(plugin)) { if (!automatic) new Notice(REFERENCES_PENDING); return; }
 
-  const used = referencedPaths(plugin);
+  const used = await referencedPaths(plugin);
   const items: UnusedAttachment[] = [...filesInFolder(folder), ...rootAttachmentFiles(plugin).filter(isImage)]
     .filter((file) => isAttachmentCandidate(file) && !used.has(file.path))
     .map((file) => ({ file, checked: isImage(file) && !isRootFile(file) }));
@@ -125,7 +126,7 @@ export async function checkUnusedAttachments(plugin: SimplePlugin, automatic?: A
   if (!attachmentReferencesReady(plugin)) { if (!automatic) new Notice(REFERENCES_PENDING); return; }
 
   if (automatic) {
-    const selected = items.filter(item => item.checked && automatic.canDelete?.(item.file));
+    const selected = items.filter(item => (item.checked || automatic.deletedNoteAttachments?.has(item.file.path)) && automatic.canDelete?.(item.file));
     if (automatic.active()) await deleteUnusedAttachments(plugin, selected, automatic.active);
     return;
   }
@@ -313,7 +314,9 @@ async function deleteUnusedAttachments(plugin: SimplePlugin, selected: UnusedAtt
       await plugin.app.fileManager.trashFile(item.file);
       deleted.folders++;
     } else {
-      if (referencedPaths(plugin).has(item.file.path)) continue;
+      if ((await referencedPaths(plugin)).has(item.file.path)) continue;
+      if (!active()) break;
+      if (!attachmentReferencesReady(plugin)) throw new Error(REFERENCES_PENDING);
       await plugin.app.fileManager.trashFile(item.file);
       deleted.files++;
     }
@@ -333,8 +336,15 @@ function rootAttachmentFiles(plugin: SimplePlugin): TFile[] {
   return plugin.app.vault.getFiles().filter((file) => isRootFile(file) && isAttachmentCandidate(file));
 }
 
-function referencedPaths(plugin: SimplePlugin): Set<string> {
+async function referencedPaths(plugin: SimplePlugin): Promise<Set<string>> {
   const paths = new Set<string>();
+  // Canvas file nodes are not included in the Markdown reference index.
+  for (const file of plugin.app.vault.getFiles().filter(file => file.extension === "canvas")) {
+    const canvas = JSON.parse(await plugin.app.vault.read(file)) as { nodes?: { type?: string; file?: string }[] };
+    for (const node of canvas.nodes ?? []) {
+      if (node.type === "file" && typeof node.file === "string") paths.add(normalizePath(node.file));
+    }
+  }
   for (const links of Object.values(plugin.app.metadataCache.resolvedLinks)) {
     for (const path of Object.keys(links)) paths.add(path);
   }

@@ -8400,11 +8400,15 @@ body .simple-diary-inline-settings-section .setting-item[class] .setting-item-co
 .simple-one-sync-file-tree .simple-one-sync-view__group-count { margin-left: auto; flex-shrink: 0; }
 .simple-one-sync-file-tree .simple-one-sync-view__path { min-width: 0; overflow-wrap: anywhere; }
 .simple-one-sync-file-tree__pager { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-block: 8px; }
+.simple-one-sync-view__pager { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px; max-width: 100%; overflow-x: auto; white-space: nowrap; font-size: var(--font-ui-smaller); }
+.simple-one-sync-view__pager > * { flex-shrink: 0; }
 
 .simple-one-sync-file-list { min-width: 0; }
 .simple-one-sync-file-list .simple-one-sync-view__path { min-width: 0; max-width: 100%; }
 
 .simple-one-sync-view__error-detail { color: var(--text-error); white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+.simple-one-sync-view__error-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 10; overflow: hidden; }
+.simple-one-sync-view__error-detail.is-expanded .simple-one-sync-view__error-text { display: block; -webkit-line-clamp: unset; }
 
 /* Shared whole-file version selection. */
 .simple-one-sync-preview-modal.simple-one-sync-version-modal:not(.is-mobile-review-modal) {

@@ -517,7 +517,16 @@ fail = false;
 plugin.getActiveSyncError = () => ({ context: '自动同步', message: 'Error: independent sync failure', timestamp: Date.now() });
 await view.render();
 assert.match(leaf.containerEl.querySelector('.simple-one-sync-view__status-text').textContent, /同步失败/);
-assert.equal(leaf.containerEl.querySelector('.simple-one-sync-view__status .simple-one-sync-view__error-detail').textContent, '自动同步：independent sync failure');
+assert.equal(leaf.containerEl.querySelector('.simple-one-sync-view__status .simple-one-sync-view__error-text').textContent, '自动同步：independent sync failure');
+const errorDetail = leaf.containerEl.querySelector('.simple-one-sync-view__error-detail');
+const errorToggle = errorDetail.querySelector('button');
+assert.equal(errorToggle.getAttribute('aria-expanded'), 'false');
+errorToggle.click();
+assert(errorDetail.classList.contains('is-expanded'));
+assert.equal(errorToggle.getAttribute('aria-expanded'), 'true');
+errorToggle.click();
+assert(!errorDetail.classList.contains('is-expanded'));
+assert.equal(errorToggle.textContent, '展开完整错误日志');
 assert.equal(leaf.containerEl.textContent.split('independent sync failure').length - 1, 1);
 plugin.getActiveSyncError = () => undefined;
 

@@ -155,6 +155,7 @@ export interface SimplePluginSettings {
   readableLineWidth: string;
   popupWindowScale: string;
   enableWindowPositionOptimization: boolean;
+  enableAutoCollapseRightSidebar: boolean;
   mobileSwitches: Record<string, boolean | string[]>;
   mobileDisplay: {
     readableLineWidth: string;
@@ -775,6 +776,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   readableLineWidth: "900",
   popupWindowScale: "70",
   enableWindowPositionOptimization: false,
+  enableAutoCollapseRightSidebar: true,
   mobileSwitches: {},
   mobileDisplay: { readableLineWidth: "", imageMaxHeight: "", popupWindowScale: "0", headerButtonSize: "29", disableThemeHeaderButtons: true, compactBottomBar: true },
   enableMermaidEnhancer: true,

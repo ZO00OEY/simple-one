@@ -9,6 +9,14 @@ export function registerAttachmentAutomation(plugin: SimplePlugin): () => void {
   const { vault, metadataCache, workspace } = plugin.app;
   const pending = new Set<string>();
   const unreferenced = new Map<string, { since: number; stamp: string }>();
+  const noteReferences = new Map<string, string[]>();
+  const deletedNoteAttachments = new Set<string>();
+  const rememberReferences = () => {
+    noteReferences.clear();
+    for (const [path, links] of Object.entries(metadataCache.resolvedLinks)) {
+      if (path.endsWith(".md")) noteReferences.set(path, Object.keys(links));
+    }
+  };
   let timer: number | undefined;
   let disposed = false, ready = false, resolved = false, running = false, full = false, cleanupDue = false;
   registerAttachmentCleanupGuard(plugin, () => !disposed && ready && resolved);
@@ -57,22 +65,31 @@ export function registerAttachmentAutomation(plugin: SimplePlugin): () => void {
         && vault.getMarkdownFiles().every(file => metadataCache.getFileCache(file))) {
         cleanupDue = false;
         const seen = new Set<string>();
-        await attempt(() => checkUnusedAttachments(plugin, {
-          active: () => active("autoCleanAttachments")() && resolved,
-          canDelete: (file: TFile | TFolder) => {
-            seen.add(file.path);
-            const now = Date.now();
-            const stamp = file instanceof TFile ? `${file.stat.mtime}:${file.stat.size}` : "folder";
-            const first = unreferenced.get(file.path);
-            if (!first || first.stamp !== stamp) {
-              unreferenced.set(file.path, { since: now, stamp });
-              return false;
-            }
-            // Allow pasted files time to acquire references; require two stable scans.
-            return now - first.since >= 60_000 && (!(file instanceof TFile) || now - file.stat.mtime >= 300_000);
-          },
-        }));
-        for (const path of unreferenced.keys()) if (!seen.has(path)) unreferenced.delete(path);
+        const deletedCandidates = new Set(deletedNoteAttachments);
+        let completed = false;
+        await attempt(async () => {
+          await checkUnusedAttachments(plugin, {
+            deletedNoteAttachments: deletedCandidates,
+            active: () => active("autoCleanAttachments")() && resolved,
+            canDelete: (file: TFile | TFolder) => {
+              seen.add(file.path);
+              const now = Date.now();
+              const stamp = file instanceof TFile ? `${file.stat.mtime}:${file.stat.size}` : "folder";
+              const first = unreferenced.get(file.path);
+              if (!first || first.stamp !== stamp) {
+                unreferenced.set(file.path, { since: now, stamp });
+                return false;
+              }
+              // Allow pasted files time to acquire references; require two stable scans.
+              return now - first.since >= 60_000 && (!(file instanceof TFile) || now - file.stat.mtime >= 300_000);
+            },
+          });
+          completed = true;
+        });
+        if (completed) {
+          for (const path of unreferenced.keys()) if (!seen.has(path)) unreferenced.delete(path);
+          for (const path of deletedCandidates) if (!seen.has(path) || !vault.getAbstractFileByPath(path)) deletedNoteAttachments.delete(path);
+        }
       }
     } finally {
       running = false;
@@ -90,15 +107,28 @@ export function registerAttachmentAutomation(plugin: SimplePlugin): () => void {
   plugin.registerEvent(vault.on("create", changed));
   plugin.registerEvent(vault.on("modify", changed));
   plugin.registerEvent(vault.on("rename", changed));
-  plugin.registerEvent(vault.on("delete", changed));
+  plugin.registerEvent(vault.on("delete", (file) => {
+    if (file instanceof TFile && file.extension === "md") {
+      if (plugin.settings.autoCleanAttachments) {
+        for (const path of noteReferences.get(file.path) ?? Object.keys(metadataCache.resolvedLinks[file.path] ?? {})) {
+          deletedNoteAttachments.add(path);
+        }
+        cleanupDue = true;
+      }
+      noteReferences.delete(file.path);
+    }
+    changed(file);
+  }));
   plugin.registerEvent(metadataCache.on("resolved", () => {
     resolved = true;
+    rememberReferences();
     if (pending.size || full || cleanupDue) schedule();
   }));
   workspace.onLayoutReady(() => {
     if (disposed) return;
     ready = true;
     resolved = vault.getMarkdownFiles().every(file => Boolean(metadataCache.getFileCache(file)));
+    rememberReferences();
     full = enabled();
     cleanupDue = full;
     schedule();
@@ -114,6 +144,8 @@ export function registerAttachmentAutomation(plugin: SimplePlugin): () => void {
     if (timer !== undefined) window.clearTimeout(timer);
     pending.clear();
     unreferenced.clear();
+    noteReferences.clear();
+    deletedNoteAttachments.clear();
   });
   return () => {
     const current = KEYS.map(key => Boolean(plugin.settings[key]));
@@ -123,7 +155,10 @@ export function registerAttachmentAutomation(plugin: SimplePlugin): () => void {
     previous = current;
     previousImageMode = plugin.settings.imageAttachmentFolderMode;
     previousAttachmentMode = plugin.settings.attachmentFolderMode;
-    if (!plugin.settings.autoCleanAttachments) unreferenced.clear();
+    if (!plugin.settings.autoCleanAttachments) {
+      unreferenced.clear();
+      deletedNoteAttachments.clear();
+    }
     cleanupDue = Boolean(plugin.settings.autoCleanAttachments);
     if (!enabled()) {
       full = false;

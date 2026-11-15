@@ -34,6 +34,7 @@ import { registerNewNoteDefaults } from "./features/newNoteDefaults";
 import { registerNoteFilenameFilter } from "./features/noteFilenameFilter";
 import { registerPopupWindowSizing } from "./features/popupWindowSizing";
 import { registerWindowPositionOptimization } from "./features/windowPositionOptimization";
+import { registerAutoCollapseRightSidebar } from "./features/autoCollapseRightSidebar";
 import { registerQuickCopyLink } from "./features/quickCopyLink";
 import { registerNotionColumns } from "./features/notionColumns";
 import { applyQuickFormatStyles, repairHeadingFontSizes, registerQuickFormat } from "./features/quickFormat";
@@ -99,6 +100,7 @@ export default class SimplePlugin extends Plugin {
   openReformatSettings: () => void = () => {};
   openAISettings: () => void = () => {};
   refreshPopupWindowSizing: () => void = () => {};
+  refreshAutoCollapseRightSidebar: () => void = () => {};
   refreshTypography: () => void = () => {};
   refreshThemeAppearance: () => void = () => {};
   refreshAttachmentAutomation: () => void = () => {};
@@ -247,6 +249,7 @@ export default class SimplePlugin extends Plugin {
     this.refreshSearchFolderControls = registerSearchFolderFilter(this);
     this.refreshPopupWindowSizing = registerPopupWindowSizing(this);
     registerWindowPositionOptimization(this);
+    this.refreshAutoCollapseRightSidebar = registerAutoCollapseRightSidebar(this);
 
     this.sync = this.addChild(new SyncFeature(this));
     await this.sync.initialize().catch(reportError);

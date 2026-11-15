@@ -712,6 +712,12 @@ export class SimpleSettingTab extends PluginSettingTab {
           String(settings.desktopTypography[key]), String(TYPOGRAPHY_DEFAULTS[key]), min, max, step, labels[key][1],
           value => { settings.desktopTypography[key] = Number(value); });
       }
+      this.renderDisplayCheckbox(group, "空间不足时自动收起右侧栏", "中间正文区不足 400 像素时收起一次，之后可手动展开；空间恢复充足后再次变窄才会重新触发。",
+        settings.enableAutoCollapseRightSidebar, async value => {
+          settings.enableAutoCollapseRightSidebar = value;
+          await this.plugin.saveSettings();
+          this.plugin.refreshAutoCollapseRightSidebar();
+        });
     }
     if (mobile) {
       this.renderDisplayParameter(group, true, "headerButtonSize", "顶部按钮大小", "调整顶部操作按钮和侧边栏按钮的大小；关闭后跟随主题。",
@@ -1113,7 +1119,7 @@ export class SimpleSettingTab extends PluginSettingTab {
       this.renderAttachmentOrganizerAction(
         card,
         "清理未引用附件与空文件夹",
-        "扫描附件目录中的未引用附件、空文件夹（含整条为空的子目录链）及根目录遗留图片；保留附件根目录，根目录图片与非图片附件默认不勾选，确认后移入 Obsidian 回收站。",
+        "扫描未引用附件与空文件夹，手动清单中根目录图片与非图片附件默认不勾选。开启自动处理后，删除笔记也会清理附件目录内仅被它引用的附件（含 EMF、PDF 等）；其他笔记或 Canvas 仍引用的附件保留，经过缓冲检查后移入回收站。",
         "开始检查",
         disabledReasons.unused,
         () => void checkUnusedAttachments(this.plugin),

@@ -1,3 +1,14 @@
+# Simple One 1.0.40
+
+- 重写中英文 README：先概括同步、分享、日程、AI、拓展、编辑、显示与主题，再按实际使用场景介绍功能和平台要求。
+- 桌面端正文空间不足时自动收起右侧栏；支持手动重新展开，不在移动端重复提供该选项。
+- 自动附件清理启用后，删除笔记可清理附件目录内仅被该笔记引用的附件（含 EMF、PDF 等）；保留其他笔记及 Canvas 引用，保留缓冲检查与关闭取消机制。
+- 同步侧栏错误日志默认最多显示 10 行，可展开和收起；分页信息使用与同步状态一致的小字号，分页控件保持单行。
+- 本版未调整 Git 上传的 120 秒超时策略，也未取消同步失败通知。
+- Release 仅包含 main.js、manifest.json、styles.css，不含个人设置、凭据、聊天、日志或同步状态。
+
+English: rewrite both READMEs around everyday workflows; collapse the desktop right sidebar when writing space is limited; improve opt-in cleanup of deleted-note attachments while preserving other note and Canvas references; collapse long sync errors and compact the pager. The Git push timeout policy and failure notifications are unchanged. Release assets contain only the plugin program, manifest and styles.
+
 # Simple One 1.0.39
 
 - 修复彩色删除线等 HTML 行内格式前后意外换行。

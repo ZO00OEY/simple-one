@@ -10,6 +10,7 @@ const SHARED_DISPLAY_FEATURES = new Set([
   "enableNotionColumns",
   "enableImageZoom",
   "enableWindowPositionOptimization",
+  "enableAutoCollapseRightSidebar",
   "enableMermaidEnhancer",
   "enableColorPreview",
   "enableHtmlPreview",

@@ -3397,9 +3397,19 @@ class ZoeySyncView extends ItemView {
     const activeError = this.plugin.getActiveSyncError();
     if (activeError && !this.plugin.getSyncBlocker?.()) addError(activeError.context || "同步", activeError.message);
     if (this.downloadPage && this.transferError) addError("下载恢复", this.transferError);
-    for (const [message, contexts] of errors) statusCopy.createDiv({
-      text: [...contexts].join(" / ") + "：" + message, cls: "simple-one-sync-view__error-detail", attr: { role: "alert" }
-    });
+    for (const [message, contexts] of errors) {
+      const detail = statusCopy.createDiv({ cls: "simple-one-sync-view__error-detail" });
+      detail.createDiv({ text: [...contexts].join(" / ") + "：" + message,
+        cls: "simple-one-sync-view__error-text", attr: { role: "alert" } });
+      const toggle = styleActionButton(detail.createEl("button", {
+        text: "展开完整错误日志", attr: { type: "button", "aria-expanded": "false" }
+      }), "text");
+      toggle.addEventListener("click", () => {
+        const expanded = detail.classList.toggle("is-expanded");
+        toggle.setAttr("aria-expanded", String(expanded));
+        toggle.setText(expanded ? "收起错误日志" : "展开完整错误日志");
+      });
+    }
     if (changesError) statusCopy.createSpan({ text: this.changesSnapshot?.length
       ? "暂时保留上次文件列表，请重新刷新。" : "暂无可显示的文件列表，请重新刷新。", cls: "simple-one-sync-view__refresh-time" });
     const statusMeta = statusCopy.createDiv({ cls: "simple-one-sync-view__status-meta" });
@@ -3492,7 +3502,7 @@ class ZoeySyncView extends ItemView {
           this.lightweightPage = Math.min(this.lightweightPage, pages - 1);
           visible = changes.slice(this.lightweightPage * 100, (this.lightweightPage + 1) * 100);
           if (pages > 1) {
-            const paging = section.createDiv();
+            const paging = section.createDiv({ cls: "simple-one-sync-view__pager" });
             const prev = styleActionButton(paging.createEl("button", { text: "上一页" }), "text");
             prev.disabled = this.lightweightPage === 0;
             prev.addEventListener("click", () => { this.lightweightPage--; void this.render(true); });
