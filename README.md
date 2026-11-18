@@ -75,7 +75,8 @@ Web capture depends on site structure, access restrictions and rules; some rende
 - Save desktop and mobile display settings separately, including note width, image height and popout scale. Mobile also has header-button and compact-bottom-bar options.
 - **On desktop**, optionally collapse the right sidebar when the writing area becomes too narrow; it can still be reopened manually. This option is not duplicated on mobile.
 - Preview HTML code blocks without executing embedded scripts. Apply display-only text replacement rules without changing the source.
-- Open and zoom images; fit, pan, zoom or view Mermaid diagrams full screen; preview color codes in the editor.
+- Open and zoom images; preview color codes in the editor.
+- **Flowchart display** (Display → Rendering previews): render naturally with no tool selected, shrinking only oversized diagrams to the available width. Tall diagrams fade and collapse at half the window. Controls include fit width, fit height (70% of the window, also limited by available width), reset and fullscreen. The leftmost reset clears zoom, pan and tool selections. Hold the left mouse button still for 350 ms over a non-text area, then move to pan; release to stop. Moving early or leaving cancels the hold. Text and links retain their normal behavior, and no pan button is needed. Plus/minus applies one small zoom step without changing the wheel zoom toggle. Click the magnifier icon, labeled “滚动缩放”, to enable wheel zoom with a gray highlight; click again to resume page scrolling while retaining the zoom.
 
 ### Theme: adjust note appearance in one place
 

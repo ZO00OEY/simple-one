@@ -86,13 +86,22 @@ export class Cooperation {
     const operation = this.writes.then(async () => {
       const adapter = this.plugin.app.vault.adapter, root = `${this.plugin.manifest.dir}/private`;
       if (!await adapter.exists(root)) await adapter.mkdir(root);
+      const write = async (path: string, text: string) => {
+        try { await adapter.write(path, text); }
+        catch (error) {
+          if (!/\b(?:UNKNOWN|EBUSY|EPERM|EACCES)\b/.test(String(error))) throw error;
+          await new Promise(resolve => setTimeout(resolve, 200));
+          await adapter.write(path, text);
+        }
+      };
       // Keep the last known valid snapshot rather than copying a corrupt primary.
       if (await adapter.exists(this.path)) {
         const old = await adapter.read(this.path); let valid = false;
+        if (old === snapshot) return;
         try { const parsed: unknown = JSON.parse(old); decodeCooperation(parsed); valid = true; } catch { /* Never rotate a corrupt primary over a valid recovery copy. */ }
-        if (valid) await adapter.write(this.path + ".previous", old);
+        if (valid) await write(this.path + ".previous", old);
       }
-      await adapter.write(this.path, snapshot);
+      await write(this.path, snapshot);
     }); this.writes = operation.catch(() => {}); return operation;
   }
   stop(): void { this.controller?.abort(); }

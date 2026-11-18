@@ -170,6 +170,7 @@ export interface SimplePluginSettings {
   enableImageZoom: boolean;
   enableInlineCodeCopy: boolean;
   enableHtmlPreview: boolean;
+  enableQuotedTables: boolean;
   enableVaultTagRename: boolean;
   enableTextDisplayReplacement: boolean;
   enableReadableCustomTags: boolean;
@@ -205,6 +206,8 @@ export interface SearchFolderSettings {
 
 export interface NewNoteDefaultsSettings {
   enabled: boolean;
+  recordCreationTime: boolean;
+  updateModifiedTime: boolean;
   rules: NewNoteDatabaseRule[];
 }
 
@@ -784,6 +787,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   enableImageZoom: true,
   enableInlineCodeCopy: true,
   enableHtmlPreview: true,
+  enableQuotedTables: true,
   enableVaultTagRename: true,
   enableTextDisplayReplacement: true,
   enableReadableCustomTags: true,
@@ -916,6 +920,8 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   },
   newNoteDefaults: {
     enabled: true,
+    recordCreationTime: true,
+    updateModifiedTime: true,
     rules: [],
   },
   searchFolders: {

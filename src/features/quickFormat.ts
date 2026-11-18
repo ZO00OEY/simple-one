@@ -250,7 +250,7 @@ function applyQuickFormat(plugin: SimplePlugin): void {
 }
 
 export function formatSelection(plugin: SimplePlugin, text: string, mode: QuickFormatMode): string {
-  if (mode === "quote") return formatQuote(text);
+  if (mode === "quote") return formatCallout(text, "quote", "引用");
   return formatCallout(text, calloutTypeFromMode(plugin, mode));
 }
 
@@ -264,20 +264,20 @@ function formatCurrentLineAsHeading(editor: Editor, level: 1 | 2 | 3 | 4 | 5 | 6
   editor.replaceRange(formatted, { line: cursor.line, ch: 0 }, { line: cursor.line, ch: line.length });
 }
 
-function formatQuote(text: string): string {
+export function formatPlainQuote(text: string): string {
   return text
     .split("\n")
     .map((line) => line.startsWith(">") ? line : `> ${line}`)
     .join("\n");
 }
 
-function formatCallout(text: string, type: string): string {
+function formatCallout(text: string, type: string, title = ""): string {
   const body = text
     .split("\n")
     .map((line) => line.replace(/^>\s?/, ""))
     .map((line) => line ? `> ${line}` : ">")
     .join("\n");
-  return `> [!${type}]\n${body}`;
+  return `> [!${type}]+${title ? ` ${title}` : ""}\n${body}`;
 }
 
 export function modeIcon(mode: QuickFormatMode): string {

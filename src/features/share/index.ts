@@ -302,13 +302,19 @@ export default class ShareFeature extends Component {
     return `${safe.toLowerCase()}-share`;
   }
   async initialize(): Promise<void> {
+    let cancelled = false;
+    this.register(() => { cancelled = true; });
     await this.reload().catch(error => { this.error = String(error); });
+    if (cancelled) return;
     if (!this.manifest.site.repo) {
       const existing = Object.entries(this.libraries)[0]?.[0];
       if (existing) await this.change(manifest => selectLibrary(manifest, existing), false);
     }
+    if (cancelled) return;
     await this.edgeone.load().catch(error => { this.edgeone.error = error instanceof Error ? error.message : String(error); });
+    if (cancelled) return;
     await this.readTemplateSelection().catch(error => { this.templateMessage = error instanceof Error ? error.message : String(error); });
+    if (cancelled) return;
     const progress = this.manifest.site.guideProgress ?? (this.manifest.site.initialized ? 7 : this.manifest.site.repo ? 3 : 1);
     this.guideStep = Math.min(4, progress); this.guideAvailableStep = Math.min(4, progress);
     const settingsBadge = '<path d="M71 60h12l2 7 7 2 4 10-5 5 1 8-10 4-5-5-8 1-4-10 5-5-1-8 7-4z"/><circle cx="79" cy="79" r="6"/>';
@@ -368,6 +374,7 @@ export default class ShareFeature extends Component {
       this.addShareFilesMenu(item => { menu.addItem(item); }, files);
     }));
     this.host.app.workspace.onLayoutReady(() => {
+      if (cancelled) return;
       const plugins = (this.host.app as typeof this.host.app & { plugins?: { getPlugin(id: string): unknown } }).plugins;
       const navigator = plugins?.getPlugin("notebook-navigator") as {
         api?: { menus?: { registerFileMenu(callback: (context: {
@@ -391,8 +398,9 @@ export default class ShareFeature extends Component {
       if (disposeFolder) this.register(disposeFolder);
     });
     const schedule = () => {
+      if (cancelled) return;
       if (this.scanTimer) window.clearTimeout(this.scanTimer);
-      this.scanTimer = window.setTimeout(() => { void this.scan().catch(error => this.fail(error)); }, 900);
+      this.scanTimer = window.setTimeout(() => { if (!cancelled) void this.scan().catch(error => this.fail(error)); }, 900);
     };
     this.registerEvent(this.host.app.vault.on("modify", file => { if (!file.path.startsWith(SHARE_FOLDER + "/") && file.path !== this.path("share-local.json")) schedule(); }));
     this.registerEvent(this.host.app.vault.on("rename", schedule));
@@ -400,12 +408,14 @@ export default class ShareFeature extends Component {
     this.registerEvent(this.host.app.metadataCache.on("changed", schedule));
     this.host.app.workspace.onLayoutReady(schedule);
     this.host.registerInterval(window.setInterval(() => {
-      if (this.busy) return;
+      if (cancelled || this.busy) return;
       const adapter = this.host.app.vault.adapter;
       void adapter.exists(this.path("share-manifest.json")).then(async exists => {
+        if (cancelled) return;
         const text = exists ? await adapter.read(this.path("share-manifest.json")) : "";
+        if (cancelled) return;
         if (text !== this.manifestText) schedule();
-      }).catch(error => this.fail(error));
+      }).catch(error => { if (!cancelled) this.fail(error); });
     }, 5000));
     this.register(() => {
       if (this.scanTimer) window.clearTimeout(this.scanTimer);

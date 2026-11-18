@@ -59,6 +59,7 @@ export function registerAttachmentReferenceJump(plugin: SimplePlugin): () => voi
       .onClick(event => jump(file, event)));
   }));
   const refresh = () => {
+    if (disposed) return;
     const navigator = (plugin.app as App & {
       plugins?: { plugins?: Record<string, { api?: { menus?: NavigatorMenus } }> };
     }).plugins?.plugins?.["notebook-navigator"];

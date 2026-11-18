@@ -28,6 +28,7 @@ import { initializeAttachmentDefaults } from "./features/attachmentOrganizer";
 import { registerAttachmentAutomation } from "./features/attachmentAutomation";
 import { registerAttachmentReferenceJump } from "./features/attachmentReferenceJump";
 import { registerImageZoom } from "./features/imageZoom";
+import { observeQuotedTables, refreshQuotedTables } from "./features/quotedTables";
 import { registerMermaidEnhancer } from "./features/mermaidEnhancer";
 import { registerLinkFilter } from "./features/linkFilter";
 import { registerNewNoteDefaults } from "./features/newNoteDefaults";
@@ -79,6 +80,7 @@ type RenderedPreviewObservers = {
   root: HTMLElement;
   color: MutationObserver;
   html: MutationObserver;
+  quotedTables: MutationObserver;
 };
 
 export default class SimplePlugin extends Plugin {
@@ -112,6 +114,15 @@ export default class SimplePlugin extends Plugin {
   private ownsFloatingButtonOptOut = false;
 
   async onload() {
+    try { await this.initialize(); }
+    catch (error) {
+      // Obsidian retains failed plugin instances; release partial registrations before a retry.
+      this.unload();
+      throw error;
+    }
+  }
+
+  private async initialize(): Promise<void> {
     let loadCancelled = false;
     this.register(() => { loadCancelled = true; });
     document.body.classList.add("simple-one-active");
@@ -122,7 +133,7 @@ export default class SimplePlugin extends Plugin {
     const initializedFormatting = initializeFormattingDefaults(this.settings);
     if (initializedHeadings || initializedFormatting) await this.saveSettings();
     if (loadCancelled) return;
-    await initializeAttachmentDefaults(this).catch(reportError);
+    await initializeAttachmentDefaults(this, () => !loadCancelled).catch(reportError);
     if (loadCancelled) return;
     if (this.needsPlatformSwitchSave) await this.saveSettings();
     if (loadCancelled) return;
@@ -226,6 +237,7 @@ export default class SimplePlugin extends Plugin {
     this.registerMarkdownPostProcessor((el) => {
       this.decorateCustomTags(el);
       refreshRenderedHtmlPreviews(el, this.settings.enableHtmlPreview, this.displayReplacementRules());
+      refreshQuotedTables(el, this.settings.enableQuotedTables);
     });
 
     // ── Feature 4: 日记 ──
@@ -461,6 +473,12 @@ export default class SimplePlugin extends Plugin {
     }
   }
 
+  refreshQuotedTables(): void {
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      refreshQuotedTables(leaf.view.containerEl, this.settings.enableQuotedTables);
+    }
+  }
+
   applyReadableCustomTagStyles(): void {
     const docs = new Set<Document>([document]);
     this.app.workspace.iterateAllLeaves((leaf) => docs.add(leaf.getContainer().doc));
@@ -529,12 +547,16 @@ export default class SimplePlugin extends Plugin {
   }
 
   private registerRenderedPreviewObservers(): void {
+    let disposed = false;
     const observers = new Map<MarkdownView, RenderedPreviewObservers>();
     const disconnect = (entry: RenderedPreviewObservers) => {
       entry.color.disconnect();
       entry.html.disconnect();
+      entry.quotedTables.disconnect();
+      refreshQuotedTables(entry.root, false);
     };
     const refresh = () => {
+      if (disposed) return;
       const openViews = new Set<MarkdownView>();
       this.app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
         if (!(leaf.view instanceof MarkdownView)) return;
@@ -549,6 +571,7 @@ export default class SimplePlugin extends Plugin {
           root,
           color: observeRenderedColorPreviews(root, () => this.settings.enableColorPreview),
           html: observeRenderedHtmlPreviews(root, () => this.settings.enableHtmlPreview, () => this.displayReplacementRules()),
+          quotedTables: observeQuotedTables(root, () => this.settings.enableQuotedTables),
         });
       });
 
@@ -560,7 +583,7 @@ export default class SimplePlugin extends Plugin {
     };
     let queued = false;
     const scheduleRefresh = () => {
-      if (queued) return;
+      if (disposed || queued) return;
       queued = true;
       window.setTimeout(() => {
         queued = false;
@@ -572,6 +595,7 @@ export default class SimplePlugin extends Plugin {
     this.registerEvent(this.app.workspace.on("active-leaf-change", scheduleRefresh));
     this.app.workspace.onLayoutReady(scheduleRefresh);
     this.register(() => {
+      disposed = true;
       for (const entry of observers.values()) disconnect(entry);
       observers.clear();
     });

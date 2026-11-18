@@ -14,6 +14,7 @@ const SHARED_DISPLAY_FEATURES = new Set([
   "enableMermaidEnhancer",
   "enableColorPreview",
   "enableHtmlPreview",
+  "enableQuotedTables",
   "enableTextDisplayReplacement",
   "enableReadableCustomTags",
   "htmlPreviewRules",

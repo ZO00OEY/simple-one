@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 let supported=true,created=0,prepared=0,uiStarts=0,unloaded=0,failStart=false;
-let hold=false,entered;
+let hold=false,entered,preparationGate;
 class Component{constructor(){this.children=[];}load(){this.onload?.();}unload(){this.onunload?.();for(const c of this.children)c.unload();this.children=[];}addChild(c){this.children.push(c);c.load();return c;}removeChild(c){c.unload();this.children=this.children.filter(x=>x!==c);return c;}}
 class Core extends Component{
  constructor(app,manifest){super();created++;this.app=app;this.manifest=manifest;this.settings={sources:[]};this.ui=false;}
- async prepareRequests(){prepared++;this.settings=await this.loadData();}
+ async prepareRequests(){prepared++;this.settings=await this.loadData();if(preparationGate)await preparationGate();}
  async start(){if(failStart)throw Error('startup failed');uiStarts++;this.ui=true;}
  stopUI(){this.ui=false;}
  async translateSelection(input,signal,update){assert(this.settings.sources.some(s=>s.id===input.sourceId));if(hold)return new Promise((_r,reject)=>{entered();signal.addEventListener('abort',()=>reject(new DOMException('cancelled','AbortError')),{once:true});});update?.('译文');return '译文';}
@@ -27,5 +27,16 @@ failStart=true;await assert.rejects(feature.setEnabled(true),/startup failed/);a
 supported=false;const fresh=new Feature(host);await assert.rejects(fresh.translateSelection({sourceId:'source',modelId:'one',text:'x',prompt:'p'}),/1.11.4/);supported=true;
 const cancelled=new AbortController();cancelled.abort();await assert.rejects(feature.translateSelection({sourceId:'source',modelId:'one',text:'x',prompt:'p'},cancelled.signal),e=>e.name==='AbortError');
 hold=true;const ready=new Promise(resolve=>{entered=resolve;});const pending=feature.translateSelection({sourceId:'source',modelId:'one',text:'x',prompt:'p'});await ready;feature.unload();await assert.rejects(pending,e=>e.name==='AbortError');assert.equal(unloaded,1);assert.equal(feature.children.length,0);
-assert(saves>=2);delete globalThis.aiCoreMock;
+assert(saves>=2);
+for(const stage of ['directory','requests']) {
+ let release,reached,saved=0;const ready=new Promise(resolve=>{reached=resolve;});
+ const pause=()=>new Promise(resolve=>{release=resolve;reached();});
+ const localHost={...host,settings:{...host.settings,enableAI:false},app:{...host.app,vault:{adapter:{...host.app.vault.adapter,exists:stage==='directory'?pause:async()=>true}}},saveSettings:async()=>{saved++;}};
+ preparationGate=stage==='requests'?pause:undefined;
+ const enabling=new Feature(localHost);const starting=enabling.setEnabled(true);
+ await ready;enabling.unload();release(true);await starting;
+ assert.equal(saved,0,'unloaded AI must not save a late enable');assert.equal(localHost.settings.enableAI,false);assert.equal(enabling.core,undefined);assert.equal(enabling.children.length,0);
+ await enabling.setEnabled(true);assert.equal(saved,0,'unloaded AI must not restart');
+}
+preparationGate=undefined;delete globalThis.aiCoreMock;
 console.log('AI runtime: off-switch translation, no UI/background startup, shared service/usage state, enable/disable, save rollback, startup failure, version guard and unload cancellation passed.');

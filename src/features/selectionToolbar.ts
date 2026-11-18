@@ -440,6 +440,7 @@ export function registerSelectionToolbar(plugin: SimplePlugin, changed: () => vo
     render(rect, doc);
   };
   const observe = () => {
+    if (disposed) return;
     for (const leaf of plugin.app.workspace.getLeavesOfType("markdown")) {
       const doc = leaf.view.containerEl.ownerDocument;
       if (documents.has(doc)) continue;

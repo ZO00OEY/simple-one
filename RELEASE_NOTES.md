@@ -1,3 +1,12 @@
+# Simple One 1.0.41
+
+- 修复启动时误读旧笔记导致工作区恢复缓慢的问题。通过 Obsidian 新建入口创建空白笔记时，可按所在目录的 .base 补全属性。
+- 编辑优化新增“创建时间”和“最后编辑时间”开关。属性使用系统本地时间，已有创建时间会保留。
+- 加强插件与 AI 界面启动失败后的清理，避免重试时重复注册视图。
+- 改善流程图缩放、拖动与折叠，以及引用和 Callout 中的表格渲染。带交互嵌入内容的段落保留原样。
+
+English: fix slow workspace startup caused by reading existing notes, add local creation and edit time properties, clean up partial startup registrations, and improve Mermaid controls and quoted table rendering.
+
 # Simple One 1.0.40
 
 - 重写中英文 README：先概括同步、分享、日程、AI、拓展、编辑、显示与主题，再按实际使用场景介绍功能和平台要求。

@@ -6,7 +6,7 @@ import { Component, MarkdownRenderChild, MarkdownRenderer, MarkdownView, Notice,
 import type SimplePlugin from "../main";
 import type { Editor, Menu } from "obsidian";
 import type { QuickFormatMode } from "../types";
-import { formatSelection, isHeadingMode, setQuickFormatColumnTarget } from "./quickFormat";
+import { formatPlainQuote, formatSelection, isHeadingMode, setQuickFormatColumnTarget } from "./quickFormat";
 import { parseColumns as parse } from "../shared/columns";
 
 type Columns = { widths: number[]; content: string[] };
@@ -1150,7 +1150,7 @@ class ColumnsSurface {
       const line = view.state.doc.lineAt(from);
       const end = to === from ? line.to : to;
       const source = view.state.doc.sliceString(from === to ? line.from : from, end);
-      const replacement = formatSelection(this.plugin, source, command === "editor:toggle-blockquote" ? "quote" : "callout-note");
+      const replacement = command === "editor:toggle-blockquote" ? formatPlainQuote(source) : formatSelection(this.plugin, source, "callout-note");
       view.dispatch({ changes: { from: from === to ? line.from : from, to: end, insert: replacement }, selection: { anchor: (from === to ? line.from : from) + replacement.length } });
     } else {
       const markers: Record<string, string> = {

@@ -353,15 +353,22 @@ export default class SyncFeature extends Component {
   private mobileAutomationGeneration = 0;
 
   async initialize(): Promise<void> {
+    let cancelled = false;
+    this.register(() => { cancelled = true; });
     await migrateLinkFiles(this.app.vault.adapter, this.app.vault.configDir, this.manifest.id, !legacySyncRunning(this.app), SHARED_SETTING_KEYS);
-    await this.loadSettings();
+    if (cancelled) return;
+    await this.loadSettings(() => !cancelled);
+    if (cancelled) return;
     if (this.settings.enabled && legacySyncRunning(this.app)) {
       this.settings.enabled = false;
-      await this.saveSettings();
+      await this.saveSettings(() => !cancelled);
+      if (cancelled) return;
       new Notice("旧 Simple Link 仍在运行，请先关闭旧插件的同步，再启用同步。");
     }
     if (this.settings.enabled && this.useLightweightSync()) await this.getMobileGithub().load();
-    if (!Platform.isMobile) await this.detectDesktopGitDefaults();
+    if (cancelled) return;
+    if (!Platform.isMobile) await this.detectDesktopGitDefaults(() => !cancelled);
+    if (cancelled) return;
     this.statusEl = this.host.addStatusBarItem();
     this.host.registerView(ZoeySyncView.type, (leaf) => new ZoeySyncView(leaf, this));
     this.host.registerView(ZoeySyncConflictView.type, (leaf) => new ZoeySyncConflictView(leaf, this));
@@ -749,11 +756,13 @@ export default class SyncFeature extends Component {
     await this.resumeDesktopDirtyState(false);
   }
 
-  async loadSettings(): Promise<void> {
+  async loadSettings(active = () => true): Promise<void> {
     const saved = (await this.loadData()) as
       | (Partial<PluginSettings> & { desktopAutoSyncMinutes?: number; autoPushIntervalMinutes?: number })
       | null;
+    if (!active()) return;
     const shared = await this.loadSharedSettings();
+    if (!active()) return;
     const legacyShared = pickSharedSettings(saved ?? {});
     this.settings = Object.assign(
       {},
@@ -797,12 +806,13 @@ export default class SyncFeature extends Component {
     if (!this.settings.deviceName) {
       this.settings.deviceName = Platform.isMobile ? "Zoey Mobile" : "Zoey Desktop";
     }
-    await this.saveSettings();
+    await this.saveSettings(active);
   }
 
-  async saveSettings(): Promise<void> {
+  async saveSettings(active = () => true): Promise<void> {
+    if (!active()) return;
     await this.saveData(pickLocalSettings(this.settings));
-    if (this.sharedSettingsWritable) await this.saveSharedSettings();
+    if (active() && this.sharedSettingsWritable) await this.saveSharedSettings(active);
 
   }
 
@@ -824,11 +834,14 @@ export default class SyncFeature extends Component {
     }
   }
 
-  private async saveSharedSettings(): Promise<void> {
+  private async saveSharedSettings(active = () => true): Promise<void> {
     const path = this.sharedSettingsPath();
     const content = `${JSON.stringify(pickSharedSettings(this.settings), null, 2)}\n`;
-    if (await this.app.vault.adapter.exists(path)) {
+    const exists = await this.app.vault.adapter.exists(path);
+    if (!active()) return;
+    if (exists) {
       const current = await this.app.vault.adapter.read(path);
+      if (!active()) return;
       if (current === content) return;
     }
     await this.app.vault.adapter.write(path, content);
@@ -2282,7 +2295,7 @@ export default class SyncFeature extends Component {
     return adapter.getBasePath();
   }
 
-  private async detectDesktopGitDefaults(): Promise<void> {
+  private async detectDesktopGitDefaults(active = () => true): Promise<void> {
     const needsAuthorName =
       !this.settings.gitAuthorName || this.settings.gitAuthorName === DEFAULT_GIT_AUTHOR_NAME;
     const needsAuthorEmail =
@@ -2294,11 +2307,12 @@ export default class SyncFeature extends Component {
         ["remote", "get-url", "origin"], ["branch", "--show-current"],
         ["config", "user.name"], ["config", "user.email"]
       ].map(args => this.git(args).then(value => value.trim()).catch(() => "")));
+      if (!active()) return;
       if (!this.settings.gitRemoteUrl) this.settings.gitRemoteUrl = remote;
       if (branch) this.settings.gitBranch = branch;
       if (needsAuthorName && authorName) this.settings.gitAuthorName = authorName;
       if (needsAuthorEmail && authorEmail) this.settings.gitAuthorEmail = authorEmail;
-      await this.saveSettings();
+      await this.saveSettings(active);
     } catch {
       // 尚未初始化 Git 时保留设置页默认值，由用户填写后再同步。
     }
@@ -3175,7 +3189,7 @@ class ZoeySyncView extends ItemView {
     // initialization wait for a vault-wide hash scan or thousands of DOM rows.
     this.app.workspace.onLayoutReady(() => {
       window.setTimeout(() => {
-        if (this.leaf.view !== this) return;
+        if (this.closed || this.leaf.view !== this) return;
         void this.render().catch((error) => {
           new Notice(`同步 面板加载失败：${messageOf(error)}`, 10000);
         });

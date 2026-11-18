@@ -1,9 +1,10 @@
 {
   "name": "simple-one",
-  "version": "1.0.40",
+  "version": "1.0.41",
   "description": "A collection of practical Obsidian tools",
   "main": "main.js",
   "scripts": {
+    "test:quoted-tables": "node scripts/test-quoted-tables.mjs",
     "test:selection": "node scripts/test-translation-api.mjs && node scripts/test-translation-settings.mjs && node scripts/test-selection-toolbar.mjs && node scripts/test-translation-paragraphs.mjs && node scripts/test-inline-translation.mjs && node scripts/test-translation-cards.mjs && node scripts/test-theme-color-picker.mjs && node scripts/test-paragraph-link.mjs",
     "dev": "node esbuild.config.mjs",
     "postinstall": "node scripts/setup-local-ignore.mjs",
@@ -16,7 +17,7 @@
     "test:display": "node scripts/test-display-replacement.mjs",
     "test:sync": "node scripts/sync/test-local-ignore.mjs && node scripts/sync/test-native-ignore.mjs && node scripts/sync/test-operation-timing.mjs && node scripts/sync/test-transfer-progress.mjs && node scripts/sync/test-hash-cache.mjs && node scripts/sync/test-download-cache.mjs && node scripts/sync/test-download-queue.mjs && node scripts/sync/test-dirty.mjs && node scripts/sync/test-plugin-data-tracking.mjs && node scripts/sync/test-onboarding.mjs && node scripts/sync/test-lightweight-guide.mjs && node scripts/sync/test-mobile-sync.mjs && node scripts/sync/test-local-edit-recheck.mjs && node scripts/sync/test-mobile-runtime.mjs && node scripts/sync/test-migration.mjs && node scripts/sync/test-desktop-backup.mjs && node scripts/sync/test-direct-remote.mjs && node scripts/sync/test-sync-panel.mjs && node scripts/sync/test-sync-mode-switch.mjs",
     "test:ai": "node scripts/test-ai-style-integration.mjs && node scripts/test-ai-runtime.mjs && node scripts/test-ai-settings.mjs && node scripts/test-ai-settings-search.mjs && npm test --prefix modules/ai",
-    "test:build": "node scripts/test-reader-payload.mjs",
+    "test:build": "node scripts/test-reader-payload.mjs && node scripts/test-startup-cancellation.mjs && node scripts/test-delayed-startup.mjs && node scripts/test-view-startup-recovery.mjs && node scripts/test-note-properties.mjs && npm run test:quoted-tables",
     "build:verify": "node scripts/verify-build.mjs"
   },
   "devDependencies": {

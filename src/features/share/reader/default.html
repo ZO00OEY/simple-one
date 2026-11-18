@@ -137,11 +137,11 @@ main .simple-mermaid-frame .mermaid { margin:0; padding:0; background:transparen
 .simple-mermaid-frame.is-fullscreen { position:fixed; inset:16px; z-index:1000; margin:0; display:flex; flex-direction:column }
 .simple-mermaid-frame.is-fullscreen .simple-mermaid-viewport { flex:1; max-height:none }
 .simple-mermaid-canvas { width:100%; transform-origin:0 0 }
-.simple-mermaid-frame[data-mode="fit"] .simple-mermaid-canvas { transform:none }
-.simple-mermaid-frame[data-mode="canvas"] .simple-mermaid-viewport { overflow:hidden; cursor:grab; touch-action:none; user-select:none; min-height:240px }
-.simple-mermaid-frame[data-mode="canvas"] .simple-mermaid-viewport.is-dragging { cursor:grabbing }
-.simple-mermaid-frame[data-mode="canvas"] .simple-mermaid-canvas { will-change:transform }
+.simple-mermaid-frame[data-mode="native"] .simple-mermaid-canvas { transform:none }
+.simple-mermaid-viewport.is-dragging { overflow:hidden; touch-action:none; user-select:none }
+.simple-mermaid-frame[data-mode="manual"] .simple-mermaid-canvas { will-change:transform }
 .simple-mermaid-toolbar button.is-active { color:var(--share-accent); border-color:var(--share-accent) }
+.simple-mermaid-toolbar button[data-mermaid-interaction="zoom"].is-active { color:var(--share-text); background:color-mix(in srgb,var(--share-text) 10%,var(--share-bg)) }
 @media(prefers-color-scheme:dark){.share-tag{background:color-mix(in srgb,#478f14 22%,transparent);color:#478f14}main h3{color:#80b4ff}}
 @media(max-width:740px){.layout{grid-template-columns:min(38vw,var(--share-sidebar-width)) minmax(0,1fr)}.sidebar-resizer{display:none}main{padding-inline:28px 18px;min-width:0}.heading-toggle{left:-28px;width:26px}.simple-mermaid-frame.is-fullscreen{inset:8px}}
 

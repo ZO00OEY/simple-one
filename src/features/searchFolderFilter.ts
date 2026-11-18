@@ -36,6 +36,7 @@ type SearchControlState = {
 
 export function registerSearchFolderFilter(plugin: SimplePlugin): () => void {
   const states = new Map<HTMLElement, SearchControlState>();
+  let disposed = false;
 
   const queryInput = (view: SearchViewLike): HTMLInputElement | null =>
     view.searchComponent?.inputEl
@@ -228,6 +229,7 @@ export function registerSearchFolderFilter(plugin: SimplePlugin): () => void {
   };
 
   const refresh = (): void => {
+    if (disposed) return;
     if (addAttachmentFolderToSearchExclusions(plugin)) runAsync(() => plugin.saveSettings())();
     for (const [root, state] of states) {
       if (!root.isConnected || !plugin.settings.searchFolders.enabled) {
@@ -258,6 +260,7 @@ export function registerSearchFolderFilter(plugin: SimplePlugin): () => void {
   plugin.registerEvent(plugin.app.workspace.on("active-leaf-change", scheduleRefresh));
   plugin.app.workspace.onLayoutReady(refresh);
   plugin.register(() => {
+    disposed = true;
     for (const state of states.values()) {
       const input = queryInput(state.view);
       if (state.inputTimer !== null) window.clearTimeout(state.inputTimer);

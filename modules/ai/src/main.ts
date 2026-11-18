@@ -35,18 +35,23 @@ export default class SimpleAIPlugin extends Plugin {
   private startupStage = "初始化";
   private active = true;
   private ui?: Plugin;
+  private uiGeneration = 0;
   private requestsReady?: Promise<void>;
   prepareRequests(): Promise<void> {
     return this.requestsReady ??= this.initializeRequests().catch(error => { this.requestsReady = undefined; throw error; });
   }
   stopUI(): void {
+    ++this.uiGeneration;
     this.runtime.stop(); this.cooperation.stop();
     if (this.ui) { const ui = this.ui; this.ui = undefined; this.removeChild(ui); }
   }
   onload(): void {}
   async start(): Promise<void> {
-    try { await this.initialize(); }
+    const generation = this.uiGeneration;
+    try { await this.initialize(generation); }
     catch (error) {
+      if (!this.active || generation !== this.uiGeneration) return;
+      this.stopUI();
       const detail = error instanceof Error ? error.message : String(error);
       console.error(`Simple AI 启动失败（${this.startupStage}）`, error);
       new Notice(`Simple AI 加载失败（${this.startupStage}）：${detail}`, 0);
@@ -57,14 +62,18 @@ export default class SimpleAIPlugin extends Plugin {
     this.startupStage = "读取设置";
     this.settingsLoadFailed = true;
     const synced: unknown = await this.loadData();
+    if (!this.active) return;
     const settings = decodeSettings(synced ?? {});
     const localPath = `${this.manifest.dir}/private/settings.json`;
     let restored = false, found = false;
     for (const path of [localPath, localPath + ".previous"]) {
-      if (!await this.app.vault.adapter.exists(path)) continue;
+      const exists = await this.app.vault.adapter.exists(path);
+      if (!this.active) return;
+      if (!exists) continue;
       found = true;
       try {
         const raw: unknown = JSON.parse(await this.app.vault.adapter.read(path)), local = object(raw);
+        if (!this.active) return;
         // Only the API catalogue comes from the synchronised data.json.
         delete local.sources;
         this.settings = decodeSettings({ ...settings, ...local, sources: settings.sources }); restored = true; break;
@@ -93,9 +102,9 @@ export default class SimpleAIPlugin extends Plugin {
     await this.update(this.settings);
     if (!this.active) return;
   }
-  private async initialize(): Promise<void> {
+  private async initialize(generation: number): Promise<void> {
     await this.prepareRequests();
-    if (!this.active || this.ui) return;
+    if (!this.active || generation !== this.uiGeneration || this.ui) return;
     const ui = this.addChild(new AIInterface(this.app, this.manifest));
     this.ui = ui;
     this.startupStage = "注册界面与命令";
@@ -116,7 +125,15 @@ export default class SimpleAIPlugin extends Plugin {
     ui.registerView(CHAT_VIEW, leaf => new ChatView(leaf, this));
     ui.addRibbonIcon("bot", "AI", () => { void this.openChat(); });
     ui.addCommand({ id: "open-chat", name: "打开聊天", callback: () => { void this.openChat(); } });
-    const memoryCheck = () => { void (async () => { await this.checkAttachmentCleanup(); await this.runtime.checkMemory(); await this.cooperation.autoCheck(); })().catch(() => new Notice("闲时任务状态保存失败。")); };
+    const isCurrentUI = () => this.active && this.ui === ui;
+    const memoryCheck = () => { void (async () => {
+      if (!isCurrentUI()) return;
+      await this.checkAttachmentCleanup();
+      if (!isCurrentUI()) return;
+      await this.runtime.checkMemory();
+      if (!isCurrentUI()) return;
+      await this.cooperation.autoCheck();
+    })().catch(() => { if (isCurrentUI()) new Notice("闲时任务状态保存失败。"); }); };
     ui.registerInterval(window.setInterval(memoryCheck, 60000));
     ui.registerDomEvent(document, "pointerdown", () => this.runtime.userActive());
     ui.registerDomEvent(document, "keydown", () => this.runtime.userActive());

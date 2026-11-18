@@ -23,3 +23,29 @@ console.log('AI startup cancellation: unloading during catalogue/session reads c
  await plugin.prepareRequests();await plugin.prepareRequests();assert.equal(reads,2,'request state initializes once, with no interface, note events, ribbon or timers');
 }
 console.log('Request-only initialization is reusable and does not start the AI interface or background work.');
+
+// Turning off the interface while shared request preparation is pending must cancel that UI start.
+{
+ let release;const gate=new Promise(resolve=>{release=resolve;});
+ const plugin=Object.create(Plugin.prototype);
+ Object.assign(plugin,{active:true,uiGeneration:0,prepareRequests:()=>gate,runtime:{stop(){}},cooperation:{stop(){}},addChild:()=>assert.fail('stopped startup must not register UI')});
+ const starting=plugin.start();plugin.stopUI();release();await starting;
+ assert.equal(plugin.ui,undefined);
+}
+// A background check already awaiting I/O must not start its next phase after the UI stops.
+for(const stage of ['attachments','memory']) {
+ let release,reached;const ready=new Promise(resolve=>{reached=resolve;});
+ const pause=()=>new Promise(resolve=>{release=resolve;reached();});
+ const cleanups=[],layout=[];
+ const ui={registerEvent(){},registerInterval(){},registerDomEvent(){},registerView(){},addRibbonIcon(){},addCommand(){},register:fn=>cleanups.push(fn)};
+ context.window={setInterval:()=>1};context.document={};
+ const plugin=Object.create(Plugin.prototype);
+ Object.assign(plugin,{active:true,uiGeneration:0,app:{workspace:{getActiveFile:()=>null,on(){},onLayoutReady:fn=>layout.push(fn)},vault:{on(){}}},
+   prepareRequests:async()=>{},addChild:()=>ui,removeChild:()=>cleanups.forEach(fn=>fn()),
+   checkAttachmentCleanup:stage==='attachments'?pause:async()=>{},
+   runtime:{stop(){},checkMemory:stage==='memory'?pause:()=>assert.fail('unloaded check must not start memory')},
+   cooperation:{stop(){},autoCheck:()=>assert.fail('unloaded check must not start cooperation')}});
+ await plugin.start();layout[0]();await ready;plugin.stopUI();release();
+ await Promise.resolve();await Promise.resolve();
+}
+console.log('AI UI cancellation: pending interface starts and background check continuations stop when disabled.');

@@ -100,6 +100,7 @@ export class DiaryView extends ItemView {
   private showRecurringPanel = false;
   private showCalendarAnnotations = true;
   private showSettingsPanel = false;
+  private openGeneration = 0;
   private readonly navigatorSettingsListenerId = `simple-diary-${crypto.randomUUID()}`;
 
   constructor(leaf: WorkspaceLeaf, plugin: SimplePlugin) {
@@ -112,6 +113,7 @@ export class DiaryView extends ItemView {
   getIcon(): string { return "calendar-days"; }
 
   async onOpen(): Promise<void> {
+    const generation = ++this.openGeneration;
     this.containerEl.children[1].empty();
     this.containerEl.children[1].addClass("simple-diary-view");
     const navigator = getNotebookNavigatorPlugin(this.app);
@@ -119,6 +121,7 @@ export class DiaryView extends ItemView {
       navigator.settings.calendarWeekendDays = "sat-sun";
       await navigator.saveSettingsAndUpdate();
     }
+    if (generation !== this.openGeneration) return;
     navigator?.registerSettingsUpdateListener(
       this.navigatorSettingsListenerId,
       () => this.refresh()
@@ -127,6 +130,7 @@ export class DiaryView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    ++this.openGeneration;
     getNotebookNavigatorPlugin(this.app)?.unregisterSettingsUpdateListener(this.navigatorSettingsListenerId);
   }
 

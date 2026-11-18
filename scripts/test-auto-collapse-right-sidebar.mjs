@@ -4,12 +4,12 @@ import vm from 'node:vm';
 
 const output = await build({ entryPoints: ['src/features/autoCollapseRightSidebar.ts'], bundle: true, platform: 'node', format: 'cjs', write: false });
 const module = { exports: {} };
-let pending, resize, disconnected = false;
+let pending, resize, disconnected = false, observations = 0;
 const context = vm.createContext({ module,
   window: { setTimeout(fn) { pending = fn; return 1; }, clearTimeout() { pending = undefined; } },
   ResizeObserver: class {
     constructor(fn) { resize = fn; }
-    observe() {}
+    observe() { observations++; }
     disconnect() { disconnected = true; }
   },
 });
@@ -50,5 +50,14 @@ cleanups.forEach(fn => fn()); flush();
 assert.equal(collapses, 2, 'unload cancels pending work');
 assert.equal(disconnected, true);
 refresh(); assert.equal(pending, undefined, 'unloaded callback is inert');
+const startupWorkspace = { rootSplit: null, rightSplit: right,
+  onLayoutReady(fn) { this.ready = fn; }, on() {} };
+const startup = { ...plugin, app: { workspace: startupWorkspace }, register() {}, registerEvent() {} };
+const startupRefresh = registerAutoCollapseRightSidebar(startup);
+startupRefresh();
+assert.equal(observations, 1, 'layout is not observed before it exists');
+startupWorkspace.rootSplit = { containerEl: root };
+startupWorkspace.ready();
+assert.equal(observations, 2, 'observer starts when the layout becomes ready');
 registerAutoCollapseRightSidebar({ isMobile: true })();
 console.log('Auto-collapse right sidebar checks passed');

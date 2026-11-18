@@ -450,9 +450,19 @@ export class SimpleSettingTab extends PluginSettingTab {
     const translationSettings = translationRow.createEl("button", { cls: "simple-reformat-rule-link", attr: { type: "button", "aria-label": "AI 翻译设置" } });
     setActionIcon(translationSettings, "settings", "bordered");
     translationSettings.addEventListener("click", () => new TranslationSettingsModal(this.plugin).open());
-    this.renderDisplayCheckbox(basic, "新建笔记自动补全属性", "沿用现有规则，按当前目录关联的 Obsidian 数据库视图自动补全属性。",
+    this.renderDisplayCheckbox(basic, "新建笔记自动补全属性", "通过新建按钮、快捷键或链接新建空白笔记时，参考当前目录关联的 .base 数据库补全属性；不处理启动扫描、同步或导入的笔记。",
       this.plugin.settings.newNoteDefaults.enabled, async value => {
         this.plugin.settings.newNoteDefaults.enabled = value;
+        await this.plugin.saveSettings();
+      });
+    this.renderDisplayCheckbox(basic, "新建笔记时自动填入创建时间", "手动新建笔记时填写“创建时间”日期时间属性，已有值会保留。",
+      this.plugin.settings.newNoteDefaults.recordCreationTime, async value => {
+        this.plugin.settings.newNoteDefaults.recordCreationTime = value;
+        await this.plugin.saveSettings();
+      });
+    this.renderDisplayCheckbox(basic, "保存笔记时自动更新最后编辑时间", "保存正文修改或编辑属性时更新“最后编辑时间”；打开笔记、同步和导入不会触发更新。",
+      this.plugin.settings.newNoteDefaults.updateModifiedTime, async value => {
+        this.plugin.settings.newNoteDefaults.updateModifiedTime = value;
         await this.plugin.saveSettings();
       });
     const replacementRow = this.renderDisplayCheckbox(basic, "文本显示替换", "仅改变显示效果，不修改笔记原文。",
@@ -888,14 +898,17 @@ export class SimpleSettingTab extends PluginSettingTab {
     this.renderPlatformDisplayGroup(container, true);
     const group = settingsFieldset(container, "渲染预览");
     const options = [
+      { key: "enableQuotedTables", name: "引用块内支持显示表格",
+        desc: "在阅读模式和实时预览的引用块、Callout 中，补渲染被当作普通文字的 Markdown 表格，不修改笔记原文。",
+        refresh: () => this.plugin.refreshQuotedTables() },
       { key: "enableHtmlPreview", name: "HTML 代码渲染",
         desc: "将 HTML 代码块渲染为网页效果，不执行内嵌脚本；与文本仅显示替换独立。",
         refresh: () => this.plugin.refreshHtmlPreviews() },
       { key: "enableImageZoom", name: "图片交互优化",
         desc: "点击笔记中的图片打开大图；在大图上滚轮缩放，点空白处或按 Esc 关闭。",
         refresh: () => {} },
-      { key: "enableMermaidEnhancer", name: "流程图交互优化",
-        desc: "为流程图提供适应面板宽度、滚轮缩放与拖动画布，以及全屏查看。",
+      { key: "enableMermaidEnhancer", name: "流程图显示",
+        desc: "默认自然显示，过宽时缩至可用宽度，长图超过半屏自动折叠；提供适应宽高、恢复原始大小和全屏。鼠标在图表非文字区域按住 350 毫秒不动即可拖动，松开结束。加减只做单次小幅缩放；“滚动缩放”单独开关滚轮缩放。",
         refresh: () => this.plugin.refreshMermaidEnhancements() },
       { key: "enableColorPreview", name: "颜色代码预览",
         desc: "在编辑器中的 HEX、RGB、RGBA、HSL 和 HSLA 颜色代码前显示对应的颜色方块。",

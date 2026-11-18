@@ -18,14 +18,16 @@ export default class AiFeature extends Component {
 
   async initialize(): Promise<void> { if (this.host.settings.enableAI) await this.start(); }
   async setEnabled(enabled: boolean): Promise<void> {
-    if (this.changing) return;
+    if (!this.alive || this.changing) return;
     this.changing = true;
     const previous = this.host.settings.enableAI;
     try {
       if (enabled) await this.start(); else this.stop();
+      if (!this.alive) return;
       this.host.settings.enableAI = enabled;
       await this.host.saveSettings();
     } catch (error) {
+      if (!this.alive) return;
       this.host.settings.enableAI = previous;
       if (!previous) this.stop();
       else if (!this.core) await this.start();
@@ -52,8 +54,12 @@ export default class AiFeature extends Component {
       if (!requireApiVersion("1.11.4")) throw new Error("AI 功能需要 Obsidian 1.11.4 或更高版本。");
       const root = `${this.host.manifest.dir}/private/ai`;
       const adapter = this.host.app.vault.adapter;
-      if (!await adapter.exists(`${this.host.manifest.dir}/private`)) await adapter.mkdir(`${this.host.manifest.dir}/private`);
-      if (!await adapter.exists(root)) await adapter.mkdir(root);
+      for (const path of [`${this.host.manifest.dir}/private`, root]) {
+        const exists = await adapter.exists(path);
+        if (!this.alive) throw new DOMException("AI 已卸载", "AbortError");
+        if (!exists) await adapter.mkdir(path);
+        if (!this.alive) throw new DOMException("AI 已卸载", "AbortError");
+      }
       if (!this.alive) throw new DOMException("AI 已卸载", "AbortError");
       const core = this.addChild(new SimpleAIPlugin(this.host.app, { ...this.host.manifest, id: "simple-one-ai", name: "Simple One AI", dir: root }));
       this.service = core;
@@ -85,7 +91,7 @@ export default class AiFeature extends Component {
       await core.start();
       if (this.core !== core) return;
       this.settingsTab = new ApiSettingsTab(core);
-    } catch (error) { this.stop(); throw error; }
+    } catch (error) { if (!this.alive) return; this.stop(); throw error; }
   }
   renderInto(container: HTMLElement, page?: AiSettingsPage, onNavigate?: (page: AiSettingsPage) => void): void {
     this.hideSettings();

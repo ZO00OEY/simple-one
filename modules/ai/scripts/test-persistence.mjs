@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const result = await build({ stdin: { contents: `export { default as SimpleAIPlugin } from './src/main'; export * from './src/agent/cooperation'; export * from './src/agent/cooperationSchema'; export * from './src/agent/storage'; export * from './src/agent/types'; export * from './src/settingsSchema'; export * from './src/api/types';`, resolveDir: root }, bundle: true, write: false, format: 'cjs', platform: 'browser', external: ['obsidian'] });
-const context = vm.createContext({ module: { exports: {} }, require: () => new Proxy({}, { get: () => class {} }), crypto: webcrypto, console, TextEncoder, AbortController });
+const context = vm.createContext({ module: { exports: {} }, require: () => new Proxy({}, { get: () => class {} }), crypto: webcrypto, console, TextEncoder, AbortController, setTimeout: fn => fn() });
 vm.runInContext(result.outputFiles[0].text, context);
 const { SimpleAIPlugin, Cooperation, decodeCooperation, decodeSettings, defaults, SessionStore, newState, newSession, roleNames } = context.module.exports;
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -35,6 +35,31 @@ await check('Normal and historical work snapshots preserve unknown fields throug
   assert.equal(saved.assessments[0].findings[0].futureFinding, true); assert.equal(saved.assessments[0].recommendations[0].futureRecommendation, true);
   assert.equal(saved.discussion[0].futureMessage, true); assert.equal(saved.records[0].rules, ''); assert.equal(saved.day, '');
   const loaded = new Cooperation(e.plugin); await loaded.load(); assert.equal(loaded.state.records[0].output, 'answer');
+});
+await check('Unchanged work does not rewrite its primary or recovery copy', async () => {
+  const e = environment();
+  e.disk.set(e.workPath, JSON.stringify(work()));
+  await e.service.load();
+  await e.service.save();
+  const before = e.writes.length;
+  await e.service.save();
+  assert.equal(e.writes.length, before);
+});
+await check('Transient backup open failure retries without losing work', async () => {
+  const e = environment();
+  e.disk.set(e.workPath, JSON.stringify(work()));
+  await e.service.load();
+  const adapter = e.plugin.app.vault.adapter, original = adapter.write;
+  let attempts = 0;
+  adapter.write = async (path, text) => {
+    if (path === e.workPath + '.previous' && attempts++ === 0) throw new Error('UNKNOWN: unknown error, open');
+    return original(path, text);
+  };
+  e.service.state.requests++;
+  await e.service.save();
+  assert.equal(attempts, 2);
+  assert.equal(JSON.parse(e.disk.get(e.workPath)).requests, 1);
+  assert.equal(JSON.parse(e.disk.get(e.workPath + '.previous')).records[0].output, 'answer');
 });
 const badWork = [
   value => { value.records = [null]; }, value => { value.records[0].input = []; }, value => { value.records[0].rules = null; }, value => { value.records[0].started = '1'; },

@@ -3,18 +3,18 @@ import type SimplePlugin from "../main";
 export function registerAutoCollapseRightSidebar(plugin: SimplePlugin): () => void {
   if (plugin.isMobile) return () => {};
   const workspace = plugin.app.workspace;
-  const root = (workspace.rootSplit as unknown as { containerEl?: HTMLElement }).containerEl;
-  if (!root) return () => {};
+  let root: HTMLElement | undefined;
+  let observer: ResizeObserver | undefined;
   let timer: number | undefined;
   let disposed = false;
   let collapsedForSpace = false;
   let sidebarWidth = 0;
   const refresh = (): void => {
-    if (disposed) return;
+    if (disposed || !root) return;
     window.clearTimeout(timer);
     // Wait for sidebar transitions and layout changes to settle before measuring.
     timer = window.setTimeout(() => {
-      if (!plugin.settings.enableAutoCollapseRightSidebar) {
+      if (!root || !plugin.settings.enableAutoCollapseRightSidebar) {
         collapsedForSpace = false;
         return;
       }
@@ -34,14 +34,19 @@ export function registerAutoCollapseRightSidebar(plugin: SimplePlugin): () => vo
       }
     }, 150);
   };
-  const observer = new ResizeObserver(refresh);
-  observer.observe(root);
   plugin.registerEvent(workspace.on("layout-change", refresh));
   plugin.register(() => {
     disposed = true;
     window.clearTimeout(timer);
-    observer.disconnect();
+    observer?.disconnect();
   });
-  workspace.onLayoutReady(refresh);
+  workspace.onLayoutReady(() => {
+    if (disposed) return;
+    root = (workspace.rootSplit as { containerEl?: HTMLElement } | null)?.containerEl;
+    if (!root) return;
+    observer = new ResizeObserver(refresh);
+    observer.observe(root);
+    refresh();
+  });
   return refresh;
 }

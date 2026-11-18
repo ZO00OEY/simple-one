@@ -57,8 +57,8 @@ function attachmentReferencesReady(plugin: SimplePlugin): boolean {
 }
 const REFERENCES_PENDING = "笔记引用索引尚未完成，请等待后重新扫描附件。";
 
-export async function initializeAttachmentDefaults(plugin: SimplePlugin): Promise<void> {
-  if (plugin.settings.attachmentDefaultsInitialized) return;
+export async function initializeAttachmentDefaults(plugin: SimplePlugin, active = () => true): Promise<void> {
+  if (!active() || plugin.settings.attachmentDefaultsInitialized) return;
   const vault = plugin.app.vault as typeof plugin.app.vault & {
     getConfig?: (key: string) => unknown;
     setConfig?: (key: string, value: string) => void | Promise<void>;
@@ -70,7 +70,9 @@ export async function initializeAttachmentDefaults(plugin: SimplePlugin): Promis
     const folder = vault.getAbstractFileByPath(DEFAULT_ATTACHMENT_FOLDER);
     if (folder && !(folder instanceof TFolder)) throw new Error(`${DEFAULT_ATTACHMENT_FOLDER} 已被文件占用，请手动选择附件文件夹`);
     if (!folder) await vault.createFolder(DEFAULT_ATTACHMENT_FOLDER);
+    if (!active()) return;
     await vault.setConfig("attachmentFolderPath", DEFAULT_ATTACHMENT_FOLDER);
+    if (!active()) return;
     if (vault.getConfig("attachmentFolderPath") !== DEFAULT_ATTACHMENT_FOLDER) throw new Error("Obsidian 未应用默认附件目录设置");
   }
   plugin.settings.attachmentDefaultsInitialized = true;

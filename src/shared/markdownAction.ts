@@ -11,8 +11,10 @@ export function registerMarkdownAction(
   sync: ActionSync
 ): () => void {
   const actions = new WeakMap<MarkdownView, HTMLElement>();
+  let disposed = false;
 
   const refresh = () => {
+    if (disposed) return;
     plugin.app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
       if (!(leaf.view instanceof MarkdownView)) return;
       const view = leaf.view;
@@ -39,7 +41,7 @@ export function registerMarkdownAction(
   const cleanup = () => document.querySelectorAll<HTMLElement>(`[${attr}="true"]`).forEach((action) => action.remove());
   let queued = false;
   const scheduleRefresh = () => {
-    if (queued) return;
+    if (disposed || queued) return;
     queued = true;
     window.setTimeout(() => {
       queued = false;
@@ -49,7 +51,7 @@ export function registerMarkdownAction(
 
   plugin.registerEvent(plugin.app.workspace.on("layout-change", scheduleRefresh));
   plugin.registerEvent(plugin.app.workspace.on("active-leaf-change", scheduleRefresh));
-  plugin.register(cleanup);
+  plugin.register(() => { disposed = true; cleanup(); });
   plugin.app.workspace.onLayoutReady(scheduleRefresh);
 
   return refresh;

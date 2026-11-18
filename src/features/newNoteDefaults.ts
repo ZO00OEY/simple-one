@@ -1,5 +1,6 @@
 import {
   Modal,
+  MarkdownView,
   Notice,
   Setting,
   TFile,
@@ -10,25 +11,108 @@ import {
 import type SimplePlugin from "../main";
 import { styleActionButton } from "../shared/actionButton";
 import { nextId, type NewNoteDatabaseRule } from "../types";
+import { reportError } from "../shared/async";
 
-export function registerNewNoteDefaults(plugin: SimplePlugin): void {
-  plugin.registerEvent(plugin.app.vault.on("create", (file) => {
-    if (!(file instanceof TFile) || file.extension !== "md") return;
-    window.setTimeout(() => {
-      void applyNewNoteDefaults(plugin, file);
-    }, 0);
-  }));
+const CREATED = "创建时间";
+const MODIFIED = "最后编辑时间";
+
+/** Obsidian's datetime-local property control displays clock fields without converting UTC. */
+export function noteTimestamp(date = new Date()): string {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 19);
 }
 
-export async function applyNewNoteDefaults(plugin: SimplePlugin, file: TFile): Promise<void> {
-  if (!plugin.settings.newNoteDefaults.enabled) return;
+export function registerNewNoteDefaults(plugin: SimplePlugin): void {
+  let disposed = false;
+  plugin.register(() => { disposed = true; });
+  const active = () => !disposed && plugin.app.workspace.layoutReady;
+  const writing = new Set<TFile>();
+  // The new-note buttons, commands and link creation use FileManager; sync/import uses Vault.
+  const manager = plugin.app.fileManager as typeof plugin.app.fileManager & {
+    createNewMarkdownFile(parent: TFolder | null, name?: string, content?: string): Promise<TFile | null>;
+  };
+  /* eslint-disable @typescript-eslint/unbound-method -- Calls bind the receiver; cleanup needs the original identity. */
+  const originalCreate = manager.createNewMarkdownFile;
+  const originalProperties = manager.processFrontMatter;
+  const originalSave = MarkdownView.prototype.save;
+  /* eslint-enable @typescript-eslint/unbound-method -- Subsequent calls use explicit receivers. */
+  const saveDescriptor = Object.getOwnPropertyDescriptor(MarkdownView.prototype, "save");
+  const ensureDateType = async (name: string) => {
+    const types = (plugin.app as typeof plugin.app & { metadataTypeManager?: {
+      getAssignedWidget(name: string): string | null;
+      setType(name: string, type: string): Promise<void>;
+    } }).metadataTypeManager;
+    if (active() && types && !types.getAssignedWidget(name)) await types.setType(name, "datetime").catch(reportError);
+  };
+  const timestamp = async (file: TFile, created: boolean) => {
+    if (!active() || plugin.app.vault.getAbstractFileByPath(file.path) !== file || file.extension !== "md") return;
+    const settings = plugin.settings.newNoteDefaults;
+    if (!(created && settings.recordCreationTime) && !settings.updateModifiedTime) return;
+    writing.add(file);
+    try {
+      if (created && settings.recordCreationTime) await ensureDateType(CREATED);
+      if (settings.updateModifiedTime) await ensureDateType(MODIFIED);
+      if (!active()) return;
+      await originalProperties.call(manager, file, (properties: Record<string, unknown>) => {
+        if (!active()) return;
+        const now = noteTimestamp();
+        if (created && settings.recordCreationTime && !properties[CREATED]) properties[CREATED] = now;
+        if (settings.updateModifiedTime) properties[MODIFIED] = now;
+      });
+    } finally { writing.delete(file); }
+  };
+  const create: typeof originalCreate = async function (this: typeof manager, ...args) {
+    const file = await originalCreate.apply(this, args);
+    if (!file || !active() || file.extension !== "md") return file;
+    writing.add(file);
+    try {
+      await applyNewNoteDefaults(plugin, file, active).catch(reportError);
+      await timestamp(file, true);
+    } catch (error) { reportError(error); }
+    finally { writing.delete(file); }
+    return file;
+  };
+  const properties: typeof originalProperties = async function (this: typeof manager, file, edit, options) {
+    if (!active() || writing.has(file) || file.extension !== "md" || !plugin.settings.newNoteDefaults.updateModifiedTime) {
+      return originalProperties.call(this, file, edit, options);
+    }
+    await ensureDateType(MODIFIED);
+    return originalProperties.call(this, file, (frontmatter: Record<string, unknown>) => {
+      const before = JSON.stringify(frontmatter);
+      edit(frontmatter);
+      if (active() && before !== JSON.stringify(frontmatter)) frontmatter[MODIFIED] = noteTimestamp();
+    }, options);
+  };
+  const save: typeof originalSave = async function (this: MarkdownView, ...args) {
+    const file = this.file;
+    const changed = file && active() && plugin.settings.newNoteDefaults.updateModifiedTime
+      && this.data !== this.getViewData();
+    await originalSave.apply(this, args);
+    if (file && changed && active() && !writing.has(file)) {
+      await timestamp(file, false).catch(reportError);
+    }
+  };
+  manager.createNewMarkdownFile = create;
+  manager.processFrontMatter = properties;
+  MarkdownView.prototype.save = save;
+  plugin.register(() => {
+    if (manager.createNewMarkdownFile === create) manager.createNewMarkdownFile = originalCreate;
+    if (manager.processFrontMatter === properties) manager.processFrontMatter = originalProperties;
+    if (MarkdownView.prototype.save === save) {
+      if (saveDescriptor) Object.defineProperty(MarkdownView.prototype, "save", saveDescriptor);
+      else delete (MarkdownView.prototype as Partial<MarkdownView>).save;
+    }
+  });
+}
+
+export async function applyNewNoteDefaults(plugin: SimplePlugin, file: TFile, active = () => true): Promise<void> {
+  if (!active() || !plugin.settings.newNoteDefaults.enabled) return;
   if (file.extension !== "md") return;
   const content = await plugin.app.vault.read(file);
-  if (content.trim()) return;
+  if (!active() || content.trim()) return;
 
   const rule = findRule(plugin, file.parent);
   if (rule) {
-    await applyRule(plugin, file, rule);
+    await applyRule(plugin, file, rule, active);
     return;
   }
 
@@ -39,14 +123,15 @@ export async function applyNewNoteDefaults(plugin: SimplePlugin, file: TFile): P
   if (bases.length === 1) {
     const created = rememberRule(plugin, folder.path, bases[0].path);
     await plugin.saveSettings();
-    await applyRule(plugin, file, created);
+    if (active()) await applyRule(plugin, file, created, active);
     return;
   }
 
   new BaseChoiceModal(plugin, folder.path, bases, async (base) => {
+    if (!active()) return;
     const created = rememberRule(plugin, folder.path, base.path);
     await plugin.saveSettings();
-    await applyRule(plugin, file, created);
+    if (active()) await applyRule(plugin, file, created, active);
   }).open();
 }
 
@@ -64,11 +149,12 @@ function findRule(plugin: SimplePlugin, folder: TFolder | null): NewNoteDatabase
     .find((rule) => rule.databasePath && normalizePath(rule.folder) === path) ?? null;
 }
 
-async function applyRule(plugin: SimplePlugin, file: TFile, rule: NewNoteDatabaseRule): Promise<void> {
+async function applyRule(plugin: SimplePlugin, file: TFile, rule: NewNoteDatabaseRule, active = () => true): Promise<void> {
   const properties = await databaseProperties(plugin, rule.databasePath);
-  if (properties.length === 0) return;
+  if (!active() || properties.length === 0) return;
 
   await plugin.app.fileManager.processFrontMatter(file, (frontmatter) => {
+    if (!active()) return;
     for (const property of properties) {
       if (!(property in frontmatter)) (frontmatter as Record<string, unknown>)[property] = null;
     }

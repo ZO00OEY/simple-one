@@ -11,7 +11,7 @@ export function registerMermaidEnhancer(plugin: SimplePlugin): () => void {
     if (!plugin.settings.enableMermaidEnhancer || viewers.has(node)) return;
     if (!node.closest(".markdown-reading-view, .markdown-preview-view, .markdown-rendered, .markdown-source-view.is-live-preview")) return;
     const source = node.parentElement;
-    const dispose = enhanceMermaid(node, setIcon);
+    const dispose = enhanceMermaid(node, setIcon, true);
     if (dispose) viewers.set(node, { dispose, source });
   };
 
