@@ -16,6 +16,10 @@ import { reportError } from "../shared/async";
 const CREATED = "创建时间";
 const MODIFIED = "最后编辑时间";
 
+type MarkdownWriter = MarkdownView & {
+  writeData(file: TFile, data: string, previous: string): Promise<void>;
+};
+
 /** Obsidian's datetime-local property control displays clock fields without converting UTC. */
 export function noteTimestamp(date = new Date()): string {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 19);
@@ -33,9 +37,10 @@ export function registerNewNoteDefaults(plugin: SimplePlugin): void {
   /* eslint-disable @typescript-eslint/unbound-method -- Calls bind the receiver; cleanup needs the original identity. */
   const originalCreate = manager.createNewMarkdownFile;
   const originalProperties = manager.processFrontMatter;
-  const originalSave = MarkdownView.prototype.save;
+  const markdown = MarkdownView.prototype as MarkdownWriter;
+  const originalWrite = markdown.writeData;
   /* eslint-enable @typescript-eslint/unbound-method -- Subsequent calls use explicit receivers. */
-  const saveDescriptor = Object.getOwnPropertyDescriptor(MarkdownView.prototype, "save");
+  const writeDescriptor = Object.getOwnPropertyDescriptor(markdown, "writeData");
   const ensureDateType = async (name: string) => {
     const types = (plugin.app as typeof plugin.app & { metadataTypeManager?: {
       getAssignedWidget(name: string): string | null;
@@ -82,24 +87,22 @@ export function registerNewNoteDefaults(plugin: SimplePlugin): void {
       if (active() && before !== JSON.stringify(frontmatter)) frontmatter[MODIFIED] = noteTimestamp();
     }, options);
   };
-  const save: typeof originalSave = async function (this: MarkdownView, ...args) {
-    const file = this.file;
-    const changed = file && active() && plugin.settings.newNoteDefaults.updateModifiedTime
-      && this.data !== this.getViewData();
-    await originalSave.apply(this, args);
-    if (file && changed && active() && !writing.has(file)) {
+  // Existing editors can retain a bound save callback, but save calls writeData on the view.
+  const write: typeof originalWrite = async function (this: MarkdownWriter, file, data, previous) {
+    await originalWrite.call(this, file, data, previous);
+    if (this.app === plugin.app && data !== previous && active() && !writing.has(file)) {
       await timestamp(file, false).catch(reportError);
     }
   };
   manager.createNewMarkdownFile = create;
   manager.processFrontMatter = properties;
-  MarkdownView.prototype.save = save;
+  if (typeof originalWrite === "function") markdown.writeData = write;
   plugin.register(() => {
     if (manager.createNewMarkdownFile === create) manager.createNewMarkdownFile = originalCreate;
     if (manager.processFrontMatter === properties) manager.processFrontMatter = originalProperties;
-    if (MarkdownView.prototype.save === save) {
-      if (saveDescriptor) Object.defineProperty(MarkdownView.prototype, "save", saveDescriptor);
-      else delete (MarkdownView.prototype as Partial<MarkdownView>).save;
+    if (markdown.writeData === write) {
+      if (writeDescriptor) Object.defineProperty(markdown, "writeData", writeDescriptor);
+      else delete (markdown as Partial<MarkdownWriter>).writeData;
     }
   });
 }

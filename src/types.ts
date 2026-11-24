@@ -171,6 +171,7 @@ export interface SimplePluginSettings {
   enableInlineCodeCopy: boolean;
   enableHtmlPreview: boolean;
   enableQuotedTables: boolean;
+  enableCalloutLiveEditing: boolean;
   enableVaultTagRename: boolean;
   enableTextDisplayReplacement: boolean;
   enableReadableCustomTags: boolean;
@@ -788,6 +789,7 @@ export const DEFAULT_SETTINGS: SimplePluginSettings = {
   enableInlineCodeCopy: true,
   enableHtmlPreview: true,
   enableQuotedTables: true,
+  enableCalloutLiveEditing: true,
   enableVaultTagRename: true,
   enableTextDisplayReplacement: true,
   enableReadableCustomTags: true,

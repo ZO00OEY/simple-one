@@ -901,6 +901,9 @@ export class SimpleSettingTab extends PluginSettingTab {
       { key: "enableQuotedTables", name: "引用块内支持显示表格",
         desc: "在阅读模式和实时预览的引用块、Callout 中，补渲染被当作普通文字的 Markdown 表格，不修改笔记原文。",
         refresh: () => this.plugin.refreshQuotedTables() },
+      { key: "enableCalloutLiveEditing", name: "Callout 内编辑时保留渲染",
+        desc: "在桌面端实时预览中保留 Callout 的样式。点击表格单元格可直接编辑，按 Enter 或移开焦点保存，按 Esc 取消。",
+        refresh: () => this.plugin.refreshCalloutEditing() },
       { key: "enableHtmlPreview", name: "HTML 代码渲染",
         desc: "将 HTML 代码块渲染为网页效果，不执行内嵌脚本；与文本仅显示替换独立。",
         refresh: () => this.plugin.refreshHtmlPreviews() },
@@ -918,6 +921,7 @@ export class SimpleSettingTab extends PluginSettingTab {
         refresh: () => this.plugin.applyReadableCustomTagStyles() },
     ] as const;
     for (const option of options) {
+      if (option.key === "enableCalloutLiveEditing" && this.plugin.isMobile) continue;
       const label = group.createEl("label", {
         cls: "simple-preview-checkbox-row",
         attr: { "aria-label": option.desc },

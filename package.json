@@ -1,7 +1,19 @@
 {
   "name": "simple-one",
-  "version": "1.0.41",
+  "version": "1.0.42",
   "description": "A collection of practical Obsidian tools",
+  "author": {
+    "name": "ZO.oEY",
+    "url": "https://github.com/ZO00OEY"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZO00OEY/simple-one.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ZO00OEY/simple-one/issues"
+  },
+  "homepage": "https://github.com/ZO00OEY/simple-one#readme",
   "main": "main.js",
   "scripts": {
     "test:quoted-tables": "node scripts/test-quoted-tables.mjs",

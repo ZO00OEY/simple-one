@@ -276,6 +276,10 @@ function messageOf(error: unknown): string {
     ? error.message : String(error);
 }
 
+function latestSyncTime({ lastSyncAt, lastPullAt }: PluginSettings): number {
+  return Math.max(lastSyncAt || 0, lastPullAt || 0);
+}
+
 function formatRelativeTime(timestamp: number): string {
   const elapsed = Math.max(0, Date.now() - timestamp);
   const minutes = Math.floor(elapsed / 60000);
@@ -3103,8 +3107,7 @@ class ErrorLogModal extends Modal {
     };
     for (const [label, timestamp] of [
       ["上次本地备份", lastCommitAt],
-      ["上次同步", this.plugin.settings.lastSyncAt],
-      ["上次云端检查", this.plugin.settings.lastPullAt]
+      ["上次同步", latestSyncTime(this.plugin.settings)]
     ] as const) {
       const row = lastTimes.createDiv({ cls: "simple-one-sync-error-modal__last-time" });
       row.createSpan({ text: label });
@@ -3154,14 +3157,11 @@ class ZoeySyncView extends ItemView {
   static readonly type = "simple-one-sync-view";
   private renderGeneration = 0;
   private lightweightPage = 0;
-  private showLastPull = false;
   private review?: ZoeySyncConflictPreviewModal;
   private closed = false;
   private changesSnapshot?: ChangeItem[];
   private snapshotError?: unknown;
-  private refreshing = false;
   private fileLayout?: FileListLayout;
-  private lastRefreshAt = 0;
   private promptCancel?: () => void;
   private downloadPage = false;
   private transferError = "";
@@ -3321,7 +3321,6 @@ class ZoeySyncView extends ItemView {
     if (generation !== this.renderGeneration) return;
     if (!changesError && !verifiedPlan) this.changesSnapshot = changes;
     this.snapshotError = changesError;
-    if (this.refreshing && !changesError) this.lastRefreshAt = Date.now();
     container.empty();
     container.addClass("simple-one-sync-view");
     const recentLogs = this.plugin.getRecentErrorLogs();
@@ -3342,10 +3341,9 @@ class ZoeySyncView extends ItemView {
       if (refreshButton.getAttr("aria-busy") === "true") return;
       refreshButton.setAttr("aria-busy", "true");
       refreshButton.addClass("is-loading");
-      this.refreshing = true;
       container.querySelector(".simple-one-sync-view__status-text")?.setText("正在刷新文件列表…");
       try { await this.render(); }
-      finally { this.refreshing = false; refreshButton.removeClass("is-loading"); refreshButton.removeAttribute("aria-busy"); }
+      finally { refreshButton.removeClass("is-loading"); refreshButton.removeAttribute("aria-busy"); }
     }));
     if (recentLogs.length > 0) {
       const errorButton = actions.createDiv({
@@ -3384,24 +3382,6 @@ class ZoeySyncView extends ItemView {
         ? "正在执行本次已核验计划；范围、文件和云端状态变化时会停止并要求重新核对。"
         : "候选文件仅反映本机变化；同步时核验内容并检查云端，实际传输数量可能不同。");
     }
-    if (this.plugin.nativeGitEnabled()) {
-      statusText.setAttr("role", "button");
-      statusText.setAttr("tabindex", "0");
-      const hint = this.showLastPull ? "点击查看上次上传时间" : "点击查看上次获取云端更新时间";
-      statusText.setAttr("aria-label", hint);
-      setTooltip(statusText, hint);
-      const toggleTime = asyncAction(async () => {
-        this.showLastPull = !this.showLastPull;
-        await this.render();
-      });
-      statusText.addEventListener("click", toggleTime);
-      statusText.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          toggleTime();
-        }
-      });
-    }
     const errors = new Map<string, Set<string>>();
     const addError = (context: string, error: unknown): void => {
       const message = messageOf(error).replace(/^(?:Error:\s*)+/, "").trim() || "未知错误";
@@ -3426,12 +3406,8 @@ class ZoeySyncView extends ItemView {
     }
     if (changesError) statusCopy.createSpan({ text: this.changesSnapshot?.length
       ? "暂时保留上次文件列表，请重新刷新。" : "暂无可显示的文件列表，请重新刷新。", cls: "simple-one-sync-view__refresh-time" });
-    const statusMeta = statusCopy.createDiv({ cls: "simple-one-sync-view__status-meta" });
-    if (this.lastRefreshAt) statusMeta.createSpan({ text: `列表已刷新 · ${formatRelativeTime(this.lastRefreshAt)}`, cls: "simple-one-sync-view__refresh-time" });
-    if (this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github" && this.plugin.settings.lastSyncAt) {
-      statusMeta.createSpan({ text: `上次同步 ${formatRelativeTime(this.plugin.settings.lastSyncAt)}`, cls: "simple-one-sync-view__refresh-time" });
-    }
     if (downloadEngine) {
+      const statusMeta = statusCopy.createDiv({ cls: "simple-one-sync-view__status-meta" });
       statusMeta.createSpan({ cls: "simple-one-sync-view__quota" });
       this.updateQuota();
     }
@@ -3560,24 +3536,18 @@ class ZoeySyncView extends ItemView {
     const blocker = this.plugin.getSyncBlocker?.();
     if (blocker) return blocker;
 
-    const { lastSyncAt, lastPullAt } = this.plugin.settings;
-    const showPull = this.plugin.nativeGitEnabled() && this.showLastPull;
-    const lastSyncText = showPull
-      ? lastPullAt ? `上次获取云端更新 ${formatRelativeTime(lastPullAt)}` : "尚未获取云端更新"
-      : lastSyncAt ? `上次同步 ${formatRelativeTime(lastSyncAt)}` : "尚未同步";
     const activeError = this.plugin.getActiveSyncError();
     if (activeError) {
       return { tone: "error", text: `同步失败 · ${formatRelativeTime(activeError.timestamp)}` };
     }
+    const lastSyncAt = latestSyncTime(this.plugin.settings);
+    const lastSyncText = lastSyncAt ? `上次同步 ${formatRelativeTime(lastSyncAt)}` : "尚未同步";
     if (changes.length > 0) {
-      return { tone: "pending", text: this.plugin.useLightweightSync() && this.plugin.settings.mobile.mode === "github"
-        ? `本机变更 · ${changes.length} 个文件` : `本机变更 · ${changes.length} 个文件 · ${lastSyncText}` };
+      return { tone: "pending", text: `本机变更 · ${changes.length} 个文件 · ${lastSyncText}` };
     }
     return {
       tone: "success",
-      text: this.plugin.useLightweightSync()
-        ? "本机暂无变更"
-        : `本机暂无变更 · ${lastSyncText}`
+      text: `本机暂无变更 · ${lastSyncText}`
     };
   }
 

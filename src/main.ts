@@ -38,6 +38,7 @@ import { registerWindowPositionOptimization } from "./features/windowPositionOpt
 import { registerAutoCollapseRightSidebar } from "./features/autoCollapseRightSidebar";
 import { registerQuickCopyLink } from "./features/quickCopyLink";
 import { registerNotionColumns } from "./features/notionColumns";
+import { calloutEditingExtensions } from "./features/calloutLiveEditing";
 import { applyQuickFormatStyles, repairHeadingFontSizes, registerQuickFormat } from "./features/quickFormat";
 import { registerSearchFolderFilter } from "./features/searchFolderFilter";
 import { registerTemplateFillAction, TEMPLATE_FILL_ICON } from "./features/templateFillAction";
@@ -105,6 +106,7 @@ export default class SimplePlugin extends Plugin {
   refreshAutoCollapseRightSidebar: () => void = () => {};
   refreshTypography: () => void = () => {};
   refreshThemeAppearance: () => void = () => {};
+  refreshCalloutEditing: () => void = () => {};
   refreshAttachmentAutomation: () => void = () => {};
   refreshAttachmentReferenceActions: () => void = () => {};
   private readableLineWidthDocuments = new Set<Document>();
@@ -140,6 +142,15 @@ export default class SimplePlugin extends Plugin {
     this.refreshAttachmentAutomation = registerAttachmentAutomation(this);
     this.refreshAttachmentReferenceActions = registerAttachmentReferenceJump(this);
     applyQuickFormatStyles(this);
+    if (!this.isMobile) {
+      const feature = calloutEditingExtensions(this.app);
+      const extensions = this.settings.enableCalloutLiveEditing ? [...feature] : [];
+      this.registerEditorExtension(extensions);
+      this.refreshCalloutEditing = () => {
+        extensions.splice(0, extensions.length, ...(this.settings.enableCalloutLiveEditing ? feature : []));
+        this.app.workspace.updateOptions();
+      };
+    }
     registerTranslationCards(this);
     this.applyReadableLineWidth();
     const refreshTypography = registerTypography(this);

@@ -6,18 +6,7 @@ Simple One is a configurable Obsidian toolkit for vault sync, web publishing, sc
 
 [Latest release](https://github.com/ZO00OEY/simple-one/releases/latest) · [User guide](USAGE.md) · [Changelog](RELEASE_NOTES.md) · [Report an issue](https://github.com/ZO00OEY/simple-one/issues)
 
-## At a glance
-
-| Area | What it does |
-| --- | --- |
-| Sync | Sync a vault with native Git on desktop, or use GitHub API sync on phones and computers without Git. Includes change previews, conflict handling and download recovery. |
-| Sharing | Publish selected notes and attachments as HTML pages with readable links, using a separate GitHub repository, GitHub Pages and optional EdgeOne hosting. |
-| Schedule | Manage calendars, daily notes, unfinished tasks, recurring reminders, anniversaries and yearly holiday schedules. |
-| AI | Use chat, model management, note tools, skills and model cooperation, with optional working memory and capability assessment. |
-| Extensions | Enable feature tabs and use search-folder filters, webpage capture, quick note creation, attachment naming, storage, reference lookup and cleanup. |
-| Editing | Use a floating toolbar, colored formatting, selection translation, text cleanup, pasted-link handling and side-by-side editing. |
-| Display | Configure desktop and mobile separately, with better HTML previews, image interaction, diagrams and color-code previews. |
-| Theme | Adjust accent colors, body and heading fonts, sizes, colors and spacing, plus quote and Callout appearance. |
+Maintained by [ZO.oEY (@ZO00OEY)](https://github.com/ZO00OEY).
 
 ## Main features
 
@@ -25,7 +14,7 @@ Simple One is a configurable Obsidian toolkit for vault sync, web publishing, sc
 
 - **Native desktop Git:** save commits, check remote changes, merge and push, with automatic sync and conflict handling. Requires Git and authorization through GitHub CLI.
 - **Lightweight sync:** use the GitHub API without local Git on Android, iOS or desktop. Preview file differences, review scope, resolve deletions and conflicts, and resume interrupted downloads.
-- **Sync sidebar:** inspect status and changes in a list or folder tree. Large lists are paginated; long error details show up to ten lines until expanded.
+- **Sync sidebar:** inspect status and changes in a list or folder tree. The status shows the latest sync activity, including a cloud check with no changes. Large lists are paginated and long error details can be expanded.
 
 Choose a sync method for each device. Review scope and changes before the first sync, avoid concurrent sync tools writing to the same vault, and keep an independent backup of important notes.
 
@@ -42,7 +31,8 @@ Published content is public. Review notes and attachments before publishing. Wit
 
 ### Schedule: daily notes, tasks and reminders together
 
-Browse dates, open or create daily notes, configure their folder and template, and carry unfinished tasks forward. Manage recurring items, anniversaries, same-day or advance reminders, and yearly holidays and adjusted working days.
+- **Calendar and daily notes:** browse dates, open or create daily notes, choose their folder and template, and carry unfinished tasks forward.
+- **Reminders and holidays:** manage recurring tasks, anniversaries, same-day or advance reminders, yearly holidays and adjusted working days.
 
 ### AI: chat and work with your notes
 
@@ -58,25 +48,29 @@ Toolbar translation shares the same model catalogue, with its own model, languag
 - **Search:** exclude folders and search the vault or web from selected text.
 - **Quick note creation:** extract titles, authors, body text and other site fields into templates. Supports URL capture, search on supported sites, and rule import, export and testing.
 - **Attachments:** inspect storage settings, organize image and attachment names and folders, extract embedded images, find referring notes, and scan or clean unused files. Some operations can run automatically.
-- **Note utilities:** fill new-note properties, rename tags, and quickly copy note links or paths.
+- **Note utilities:** rename tags and quickly copy note links or paths.
 
 Web capture depends on site structure, access restrictions and rules; some rendered-page capture requires desktop capabilities. Review attachment lists before bulk actions. Automatic cleanup is off by default and checks references and stability before acting.
 
 ### Editing: keep everyday tools close
 
-- **Floating toolbar:** format selected text with multiple styles and colors, search, translate, and customize button visibility and order. It serves as an editing toolbox for daily writing.
+- **Floating toolbar:** format selected text, apply colors, search or translate. Customize button visibility and order.
 - **Headings, quotes and Callouts:** apply or convert formats with custom colors and styles.
 - **Translation preview:** compare source and translation by paragraph, then insert ordinary text or translation cards. Cards support editing, regeneration and conversion to text.
 - **Text and paste cleanup:** apply rules for whitespace, line breaks and numbering; fetch and clean titles for pasted URLs and convert ordinary or Obsidian links.
 - **Columns:** arrange and edit content side by side, with context-menu, gesture and keyboard entry points, and up to four columns.
+- **New-note properties:** when you create a blank note through Obsidian's new-note action, fill missing fields from a Bases (`.base`) file associated with its folder. Startup discovery, sync and import do not trigger this feature.
+- **Note timestamps:** under **Editing → Editing optimization** (编辑 → 编辑优化), use separate switches to fill **Creation time** (创建时间) on manual creation and update **Last edited time** (最后编辑时间) when an actual body or property edit is saved. Both use the device's local time. Existing creation times are preserved.
 
 ### Display: adapt to screens and content
 
 - Save desktop and mobile display settings separately, including note width, image height and popout scale. Mobile also has header-button and compact-bottom-bar options.
-- **On desktop**, optionally collapse the right sidebar when the writing area becomes too narrow; it can still be reopened manually. This option is not duplicated on mobile.
+- **On desktop**, optionally collapse the right sidebar when the writing area becomes too narrow. You can reopen it manually.
 - Preview HTML code blocks without executing embedded scripts. Apply display-only text replacement rules without changing the source.
 - Open and zoom images; preview color codes in the editor.
-- **Flowchart display** (Display → Rendering previews): render naturally with no tool selected, shrinking only oversized diagrams to the available width. Tall diagrams fade and collapse at half the window. Controls include fit width, fit height (70% of the window, also limited by available width), reset and fullscreen. The leftmost reset clears zoom, pan and tool selections. Hold the left mouse button still for 350 ms over a non-text area, then move to pan; release to stop. Moving early or leaving cancels the hold. Text and links retain their normal behavior, and no pan button is needed. Plus/minus applies one small zoom step without changing the wheel zoom toggle. Click the magnifier icon, labeled “滚动缩放”, to enable wheel zoom with a gray highlight; click again to resume page scrolling while retaining the zoom.
+- **Mermaid diagrams:** fit to width or height, zoom in steps, toggle wheel zoom, hold and drag to pan, reset, or enter fullscreen. Tall diagrams collapse until expanded.
+- **Tables in quotes and callouts:** recover tables that would otherwise appear as plain text. Paragraphs with interactive embeds keep their original rendering.
+- **Edit inside Callouts on desktop:** under **Display → Rendering previews** (显示 → 渲染预览), **Keep rendering while editing a Callout** (Callout 内编辑时保留渲染) is on by default. Click a foldable Callout title to expand or collapse it. Click the body to edit in Live Preview with native Markdown formatting. Click a table cell to edit it in the grid, press Enter or click elsewhere to save, or press Esc to cancel. Use the top-right `</>` button to edit the whole block as Markdown.
 
 ### Theme: adjust note appearance in one place
 

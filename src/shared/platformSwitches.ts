@@ -15,6 +15,7 @@ const SHARED_DISPLAY_FEATURES = new Set([
   "enableColorPreview",
   "enableHtmlPreview",
   "enableQuotedTables",
+  "enableCalloutLiveEditing",
   "enableTextDisplayReplacement",
   "enableReadableCustomTags",
   "htmlPreviewRules",

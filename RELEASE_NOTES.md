@@ -1,11 +1,36 @@
+# Simple One 1.0.42
+
+## 简体中文
+
+- **桌面端 Callout 原位编辑**。在实时预览中编辑正文时保留卡片底色和原生 Markdown 样式。可折叠块的标题单击一次切换一次，右上角 `</>` 可进入整块源码。
+- **Callout 表格直接编辑**。点击单元格时保留表格网格和卡片底色。按 Enter 或点到别处保存，按 Esc 取消。整个功能由「显示 → 渲染预览 → Callout 内编辑时保留渲染」控制，默认开启。
+- **时间属性与同步状态**。改善已经打开的笔记在保存时更新“最后编辑时间”的行为。同步侧栏统一显示最近一次同步活动，包括云端检查无变更的情况。
+- 更新中英文 README，补充维护者 GitHub 主页和项目链接。
+
+## English
+
+- **Edit inside Callouts on desktop.** Live Preview keeps the card background and native Markdown styling during editing. Click a foldable title once to toggle it, or use the top-right `</>` button to edit the whole block as Markdown.
+- **Edit Callout table cells in place.** The grid and card background remain visible. Press Enter or click elsewhere to save, or press Esc to cancel. The feature is on by default under Display → Rendering previews (显示 → 渲染预览).
+- **Timestamps and sync status.** Improve Last edited time updates when saving notes that were already open. The sync sidebar now reports the latest sync activity, including cloud checks that find no changes.
+- Update both READMEs and add the maintainer’s GitHub profile and project links.
+
 # Simple One 1.0.41
 
-- 修复启动时误读旧笔记导致工作区恢复缓慢的问题。通过 Obsidian 新建入口创建空白笔记时，可按所在目录的 .base 补全属性。
-- 编辑优化新增“创建时间”和“最后编辑时间”开关。属性使用系统本地时间，已有创建时间会保留。
+## 简体中文
+
+- **修复首次加载慢**：启动扫描时曾把已有笔记当作新建笔记读取，拖慢工作区恢复。现在只在通过 Obsidian 新建入口创建空白笔记时，参考当前目录关联的 `.base` 文件补全属性。
+- **新建时填入创建时间**：在「编辑 → 编辑优化」中单独开启。手动新建笔记时填写“创建时间”，已有值会保留。
+- **保存时更新最后编辑时间**：在同一位置单独开启。正文或属性实际修改并保存后更新“最后编辑时间”。两个时间字段都使用设备的本地时间。
 - 加强插件与 AI 界面启动失败后的清理，避免重试时重复注册视图。
 - 改善流程图缩放、拖动与折叠，以及引用和 Callout 中的表格渲染。带交互嵌入内容的段落保留原样。
 
-English: fix slow workspace startup caused by reading existing notes, add local creation and edit time properties, clean up partial startup registrations, and improve Mermaid controls and quoted table rendering.
+## English
+
+- **Faster first load:** startup discovery used to trigger new-note processing for existing notes, delaying workspace restoration. Property completion now uses the folder's associated `.base` file only when you create a blank note through Obsidian's new-note action.
+- **Fill creation time on new notes:** enable this separately under Editing → Editing optimization. Manual creation fills the Creation time property and preserves any existing value.
+- **Update last edited time on save:** enable this separately in the same settings group. Saving an actual body or property edit updates the Last edited time property. Both timestamps use the device's local time.
+- Clean up partial plugin and AI interface startup so retrying does not register views twice.
+- Improve Mermaid zoom, panning and folding, and recover tables in quotes and callouts while preserving paragraphs with interactive embeds.
 
 # Simple One 1.0.40
 

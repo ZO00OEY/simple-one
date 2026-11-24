@@ -9,7 +9,13 @@ const source = fs.readFileSync(file, "utf8");
 // The imported AI module retains its independently maintained styles; enforce host conventions on host CSS.
 if (!file.endsWith(".html")) postcss.parse(source, { from: file });
 const css = postcss.parse(file.endsWith(".html") ? /<style data-simple-reader-style>([\s\S]*?)<\/style>/.exec(source)[1] : source.replace(/\/\* Built-in AI styles \*\/[\s\S]*?\/\* End built-in AI styles \*\//, ""), { from: file });
-css.walkDecls((decl) => { if (decl.important) issues.push(`Line ${decl.source.start.line}: avoid !important`); });
+css.walkDecls((decl) => {
+  // Obsidian sets these two indentation properties as inline styles on the editor line.
+  const calloutIndent = file === "styles.css"
+    && decl.parent.selector === "body .markdown-source-view.mod-cm6.is-live-preview .cm-content > .simple-callout-line"
+    && (decl.prop === "padding-inline-start" || decl.prop === "text-indent");
+  if (decl.important && !calloutIndent) issues.push(`Line ${decl.source.start.line}: avoid !important`);
+});
 css.walkRules((rule) => {
   if (rule.parent.type === "atrule" && /keyframes$/i.test(rule.parent.name)) return;
   selectorParser((selectors) => {

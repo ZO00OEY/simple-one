@@ -3,10 +3,17 @@ import { build } from "esbuild";
 
 class TFile {}
 class MarkdownView {
-  constructor(file, body = "") { this.file = file; this.data = body; this.body = body; }
+  constructor(file, app, body = "") { this.file = file; this.app = app; this.data = body; this.body = body; }
   getViewData() { return this.body; }
-  async save() { if (this.fail) throw Error("save failed"); this.data = this.body; }
+  async save() {
+    const previous = this.data;
+    if (previous === this.body) return;
+    this.data = this.body;
+    await this.writeData(this.file, this.body, previous);
+  }
+  async writeData() { if (this.fail) throw Error("save failed"); }
 }
+const boundNativeSave = MarkdownView.prototype.save;
 const notices = [];
 const obsidian = { TFile, MarkdownView, Modal: class {}, Notice: class { constructor(message) { notices.push(message); } },
   normalizePath: p => p, parseYaml: JSON.parse };
@@ -37,7 +44,7 @@ function fixture(overrides = {}) {
   const manager = { createNewMarkdownFile: async (_parent, name, content = "") => name === "unavailable" ? null : vault.create(content),
     processFrontMatter: async (file, edit) => { writes++; edit(frontmatters.get(file)); events.get("modify")?.(file); } };
   const originalCreate = manager.createNewMarkdownFile, originalProperties = manager.processFrontMatter;
-  const originalSave = MarkdownView.prototype.save;
+  const originalWrite = MarkdownView.prototype.writeData;
   const host = { settings: { newNoteDefaults: { enabled: true, recordCreationTime: true, updateModifiedTime: true, rules: [], ...overrides } },
     app: { vault, workspace: { layoutReady: true }, fileManager: manager, metadataTypeManager: {
       getAssignedWidget: key => types.get(key) ?? null, setType: async (key, type) => { types.set(key, type); }
@@ -47,7 +54,7 @@ function fixture(overrides = {}) {
     counts: () => ({ reads, writes, saves }),
     unload() { for (const fn of cleanups.reverse()) fn();
       assert.equal(manager.createNewMarkdownFile, originalCreate); assert.equal(manager.processFrontMatter, originalProperties);
-      assert.equal(MarkdownView.prototype.save, originalSave); } };
+      assert.equal(MarkdownView.prototype.writeData, originalWrite); } };
 }
 const validTime = value => {
   assert.match(value, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
@@ -67,9 +74,9 @@ const validTime = value => {
   assert.equal(f.types.get("创建时间"), "datetime"); assert.equal(f.types.get("最后编辑时间"), "datetime");
   const created = properties.创建时间;
   properties.最后编辑时间 = "2000-01-01T00:00:00Z";
-  const view = new MarkdownView(file); const before = f.counts().writes;
+  const view = new MarkdownView(file, f.host.app); const before = f.counts().writes;
   await view.save(); assert.equal(f.counts().writes, before, "opening/no-op save must not write timestamps");
-  view.body = "edited body"; await view.save();
+  view.body = "edited body"; await boundNativeSave.call(view);
   assert.notEqual(properties.最后编辑时间, "2000-01-01T00:00:00Z"); assert.equal(properties.创建时间, created);
   properties.最后编辑时间 = "2000-01-01T00:00:00Z";
   await f.manager.processFrontMatter(file, fm => { fm.status = "done"; });
@@ -89,7 +96,7 @@ for (const [recordCreationTime, updateModifiedTime] of [[true, false], [false, t
   assert.equal(!!properties.创建时间, recordCreationTime); assert.equal(!!properties.最后编辑时间, updateModifiedTime);
   assert.equal(file.content, "template content"); assert.equal(f.counts().reads, 0);
   const before = f.counts().writes;
-  const view = new MarkdownView(file); view.body = "body edit"; await view.save();
+  const view = new MarkdownView(file, f.host.app); view.body = "body edit"; await view.save();
   assert.equal(f.counts().writes - before, Number(updateModifiedTime));
   f.unload();
 }
